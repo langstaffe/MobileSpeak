@@ -1,0 +1,518 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 54;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		13E8F9300ACA15717F4C749C /* Client.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37A3535BB9D060841FB2CEEC /* Client.swift */; };
+		165C073EA77147B1676EE3C0 /* MobileSpeakApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7D2572E637A1C51E30A4519 /* MobileSpeakApp.swift */; };
+		6317AE4C14ECBCC8F0DFBF3D /* SystemConfiguration.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 8C1144A663D967B4FCADADAB /* SystemConfiguration.framework */; };
+		A1B12660C3DA874D9ECF159A /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 1C1AAF64A80E5FFD5457D916 /* Assets.xcassets */; };
+		BEFBB2BF247D1AA39F0269DC /* ClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B1EEC2A6719E82D550E309D /* ClientTests.swift */; };
+		CA5F9F73CDECF9832056DE8C /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 23B2A010392BFAE0468B4830 /* Foundation.framework */; };
+		DC500A2E4FE4F938F49365F6 /* AVFoundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = EBD6B0F41E0754DEC66A1A5D /* AVFoundation.framework */; };
+		EB33D344AD1B81B88669489A /* TeamSpeakCore.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 306CA6145F660C9BE190E8E4 /* TeamSpeakCore.xcframework */; };
+		F0F027B943F2BA8C6AAD170D /* Security.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = D9C5768651749D5AF5081293 /* Security.framework */; };
+		F466C91B6C090487C9883AA8 /* PhoneAudio.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8BD3729E0DF38C8A25D988B4 /* PhoneAudio.swift */; };
+		FD3E56D5F39FC4FD67695DDB /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 23B2A010392BFAE0468B4830 /* Foundation.framework */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		EFB0615C1CBE1DA1B709C664 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 0FD4FEA600EA4DAD40EC21FB /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 52DAA8093F523F85A681ABF9;
+			remoteInfo = MobileSpeak;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		1C1AAF64A80E5FFD5457D916 /* Assets.xcassets */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		23B2A010392BFAE0468B4830 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS18.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
+		306CA6145F660C9BE190E8E4 /* TeamSpeakCore.xcframework */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = wrapper.xcframework; name = TeamSpeakCore.xcframework; path = NativeCore/TeamSpeakCore.xcframework; sourceTree = "<group>"; };
+		37A3535BB9D060841FB2CEEC /* Client.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = Client.swift; sourceTree = "<group>"; };
+		3D9C8FCCE4718DE6FF283742 /* MobileSpeak.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MobileSpeak.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		633D1384CC59F2C8E2C7E9E6 /* MobileSpeakTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MobileSpeakTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		8B1EEC2A6719E82D550E309D /* ClientTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ClientTests.swift; sourceTree = "<group>"; };
+		8BD3729E0DF38C8A25D988B4 /* PhoneAudio.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PhoneAudio.swift; sourceTree = "<group>"; };
+		8C1144A663D967B4FCADADAB /* SystemConfiguration.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SystemConfiguration.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS18.0.sdk/System/Library/Frameworks/SystemConfiguration.framework; sourceTree = DEVELOPER_DIR; };
+		A7D2572E637A1C51E30A4519 /* MobileSpeakApp.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileSpeakApp.swift; sourceTree = "<group>"; };
+		B4E0B8A6E7B94356A4A9531F /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		D9C5768651749D5AF5081293 /* Security.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Security.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS18.0.sdk/System/Library/Frameworks/Security.framework; sourceTree = DEVELOPER_DIR; };
+		EBD6B0F41E0754DEC66A1A5D /* AVFoundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AVFoundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS18.0.sdk/System/Library/Frameworks/AVFoundation.framework; sourceTree = DEVELOPER_DIR; };
+		ED2CB517EC35367D879FD831 /* Core.h */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.h; path = Core.h; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		F583F79BCC50A45917C0D677 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				FD3E56D5F39FC4FD67695DDB /* Foundation.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F7D3E293066E90BE40B40D5B /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				CA5F9F73CDECF9832056DE8C /* Foundation.framework in Frameworks */,
+				EB33D344AD1B81B88669489A /* TeamSpeakCore.xcframework in Frameworks */,
+				DC500A2E4FE4F938F49365F6 /* AVFoundation.framework in Frameworks */,
+				F0F027B943F2BA8C6AAD170D /* Security.framework in Frameworks */,
+				6317AE4C14ECBCC8F0DFBF3D /* SystemConfiguration.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		17A036C748F456FDCA5E10AD /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				7F5080831B60C5EE7A5BD5D8 /* iOS */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		607B1811695CA760B73CC6FB = {
+			isa = PBXGroup;
+			children = (
+				A8223B4AF4B4D335EB810C45 /* Products */,
+				17A036C748F456FDCA5E10AD /* Frameworks */,
+				C3F2CF49A9C0067B9EDE303B /* NativeApp */,
+				306CA6145F660C9BE190E8E4 /* TeamSpeakCore.xcframework */,
+				FF857741AB239954E258F3D6 /* NativeTests */,
+			);
+			sourceTree = "<group>";
+		};
+		7F5080831B60C5EE7A5BD5D8 /* iOS */ = {
+			isa = PBXGroup;
+			children = (
+				23B2A010392BFAE0468B4830 /* Foundation.framework */,
+				EBD6B0F41E0754DEC66A1A5D /* AVFoundation.framework */,
+				D9C5768651749D5AF5081293 /* Security.framework */,
+				8C1144A663D967B4FCADADAB /* SystemConfiguration.framework */,
+			);
+			name = iOS;
+			sourceTree = "<group>";
+		};
+		A8223B4AF4B4D335EB810C45 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				3D9C8FCCE4718DE6FF283742 /* MobileSpeak.app */,
+				633D1384CC59F2C8E2C7E9E6 /* MobileSpeakTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		C3F2CF49A9C0067B9EDE303B /* NativeApp */ = {
+			isa = PBXGroup;
+			children = (
+				37A3535BB9D060841FB2CEEC /* Client.swift */,
+				A7D2572E637A1C51E30A4519 /* MobileSpeakApp.swift */,
+				8BD3729E0DF38C8A25D988B4 /* PhoneAudio.swift */,
+				B4E0B8A6E7B94356A4A9531F /* Info.plist */,
+				ED2CB517EC35367D879FD831 /* Core.h */,
+				1C1AAF64A80E5FFD5457D916 /* Assets.xcassets */,
+			);
+			path = NativeApp;
+			sourceTree = "<group>";
+		};
+		FF857741AB239954E258F3D6 /* NativeTests */ = {
+			isa = PBXGroup;
+			children = (
+				8B1EEC2A6719E82D550E309D /* ClientTests.swift */,
+			);
+			path = NativeTests;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		52DAA8093F523F85A681ABF9 /* MobileSpeak */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = AC5ED93E49CCB694318B6315 /* Build configuration list for PBXNativeTarget "MobileSpeak" */;
+			buildPhases = (
+				27CAD4737276FFAAE33AA99C /* Sources */,
+				F7D3E293066E90BE40B40D5B /* Frameworks */,
+				D874450ECF958A72230D08B8 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = MobileSpeak;
+			productName = MobileSpeak;
+			productReference = 3D9C8FCCE4718DE6FF283742 /* MobileSpeak.app */;
+			productType = "com.apple.product-type.application";
+		};
+		990F7DAD2A55807CCF75AE10 /* MobileSpeakTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 72C3BAC91177D3C5AB360801 /* Build configuration list for PBXNativeTarget "MobileSpeakTests" */;
+			buildPhases = (
+				1F6C19D55F6773C8C4295915 /* Sources */,
+				F583F79BCC50A45917C0D677 /* Frameworks */,
+				9819108D8AF2929965AA3E91 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				99D4E1BD9A860C899AA8C661 /* PBXTargetDependency */,
+			);
+			name = MobileSpeakTests;
+			productName = MobileSpeakTests;
+			productReference = 633D1384CC59F2C8E2C7E9E6 /* MobileSpeakTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		0FD4FEA600EA4DAD40EC21FB /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				LastSwiftUpdateCheck = 1600;
+				LastUpgradeCheck = 1600;
+				TargetAttributes = {
+					52DAA8093F523F85A681ABF9 = {
+						SystemCapabilities = {
+							com.apple.BackgroundModes = {
+								enabled = 1;
+							};
+						};
+					};
+				};
+			};
+			buildConfigurationList = 8C9286BB1FBDC3122F791FD1 /* Build configuration list for PBXProject "MobileSpeak" */;
+			compatibilityVersion = "Xcode 3.2";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 607B1811695CA760B73CC6FB;
+			productRefGroup = A8223B4AF4B4D335EB810C45 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				52DAA8093F523F85A681ABF9 /* MobileSpeak */,
+				990F7DAD2A55807CCF75AE10 /* MobileSpeakTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		9819108D8AF2929965AA3E91 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D874450ECF958A72230D08B8 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A1B12660C3DA874D9ECF159A /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		1F6C19D55F6773C8C4295915 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				BEFBB2BF247D1AA39F0269DC /* ClientTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		27CAD4737276FFAAE33AA99C /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				13E8F9300ACA15717F4C749C /* Client.swift in Sources */,
+				165C073EA77147B1676EE3C0 /* MobileSpeakApp.swift in Sources */,
+				F466C91B6C090487C9883AA8 /* PhoneAudio.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		99D4E1BD9A860C899AA8C661 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			name = MobileSpeak;
+			target = 52DAA8093F523F85A681ABF9 /* MobileSpeak */;
+			targetProxy = EFB0615C1CBE1DA1B709C664 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		0D52CC3FF0A66DE96DE16B04 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ARCHS = arm64;
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.mobilespeak.mobilespeak.tests;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/MobileSpeak.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/MobileSpeak";
+			};
+			name = Debug;
+		};
+		298E89A91B87C897B6C5C884 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		4BE860083ABB03BCDA8B90CF /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ARCHS = arm64;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				CODE_SIGN_ENTITLEMENTS = NativeApp/MobileSpeak.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 2;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = NativeApp/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = MobileSpeak;
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "连接你选择的局域网 TeamSpeak 服务器。";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "在你开启麦克风后，将语音发送给 TeamSpeak 频道中的成员。";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.2.0;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-lc++",
+					"-lresolv",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = dev.mobilespeak.mobilespeak;
+				SDKROOT = iphoneos;
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_OBJC_BRIDGING_HEADER = NativeApp/Core.h;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		945B9815005653C8028D2C96 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		982E20CABBCF536D85A73DC3 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ARCHS = arm64;
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.mobilespeak.mobilespeak.tests;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/MobileSpeak.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/MobileSpeak";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		E16723224FCB3A10010436D4 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ARCHS = arm64;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				CODE_SIGN_ENTITLEMENTS = NativeApp/MobileSpeak.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 2;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = NativeApp/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = MobileSpeak;
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "连接你选择的局域网 TeamSpeak 服务器。";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "在你开启麦克风后，将语音发送给 TeamSpeak 频道中的成员。";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.2.0;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-lc++",
+					"-lresolv",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = dev.mobilespeak.mobilespeak;
+				SDKROOT = iphoneos;
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_OBJC_BRIDGING_HEADER = NativeApp/Core.h;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		72C3BAC91177D3C5AB360801 /* Build configuration list for PBXNativeTarget "MobileSpeakTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				982E20CABBCF536D85A73DC3 /* Release */,
+				0D52CC3FF0A66DE96DE16B04 /* Debug */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		8C9286BB1FBDC3122F791FD1 /* Build configuration list for PBXProject "MobileSpeak" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				945B9815005653C8028D2C96 /* Debug */,
+				298E89A91B87C897B6C5C884 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		AC5ED93E49CCB694318B6315 /* Build configuration list for PBXNativeTarget "MobileSpeak" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				E16723224FCB3A10010436D4 /* Release */,
+				4BE860083ABB03BCDA8B90CF /* Debug */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 0FD4FEA600EA4DAD40EC21FB /* Project object */;
+}
