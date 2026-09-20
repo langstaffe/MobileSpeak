@@ -1,6 +1,11 @@
 package dev.mobilespeak.mobilespeak
 
+import android.media.AudioDeviceInfo
+import android.media.AudioManager
+import android.os.ParcelFileDescriptor
+import android.os.SystemClock
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -11,6 +16,55 @@ import java.util.concurrent.TimeUnit
 
 @RunWith(AndroidJUnit4::class)
 class NativeCoreTest {
+    @Suppress("DEPRECATION")
+    @Test
+    fun legacyEngineRestoresSpeakerAndReleasesItsRoute() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val manager = context.getSystemService(AudioManager::class.java)
+        val speakerBefore = manager.isSpeakerphoneOn
+        val engine = AudioEngine(context)
+        val connected = SessionUiState(
+            snapshot = Snapshot(status = "connected"),
+            microphoneMuted = true,
+            deafened = true,
+        )
+        try {
+            engine.start()
+            engine.start()
+            engine.update(connected, allowCapture = false, reapplyRoute = true)
+            assertTrue(waitUntil { manager.mode == AudioManager.MODE_IN_COMMUNICATION && manager.isSpeakerphoneOn })
+            assertTrue(phoneStrategyUsesSpeaker())
+            assertEquals(1, workerCount("MobileSpeakPlayback"))
+            assertEquals(1, workerCount("MobileSpeakCapture"))
+
+            manager.isSpeakerphoneOn = false
+            engine.update(connected, allowCapture = false, reapplyRoute = true)
+            assertTrue(waitUntil { manager.isSpeakerphoneOn })
+            assertTrue(phoneStrategyUsesSpeaker())
+            assertTrue(connected.microphoneMuted)
+            assertTrue(connected.deafened)
+
+            engine.update(SessionUiState(), allowCapture = false)
+            assertTrue(waitUntil { manager.mode == AudioManager.MODE_NORMAL && manager.isSpeakerphoneOn == speakerBefore })
+        } finally {
+            engine.stop()
+        }
+        assertTrue(waitUntil { workerCount("MobileSpeakPlayback") == 0 && workerCount("MobileSpeakCapture") == 0 })
+    }
+
+    @Test
+    fun physicalDeviceExposesBuiltInSpeakerForCommunicationPolicy() {
+        val manager = InstrumentationRegistry.getInstrumentation().targetContext
+            .getSystemService(AudioManager::class.java)
+        val builtInTypes = manager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+            .map { it.type }
+            .filterTo(mutableSetOf()) {
+                it == AudioDeviceInfo.TYPE_BUILTIN_EARPIECE || it == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER
+            }
+        assertTrue(AudioDeviceInfo.TYPE_BUILTIN_SPEAKER in builtInTypes)
+        assertEquals(CommunicationRouteTarget.SPEAKER, communicationRouteTarget(true, builtInTypes))
+    }
+
     @Test
     fun jniStartsAndMovesUtf8AndExactAudioFrames() {
         val handle = NativeCore.create()
@@ -35,5 +89,23 @@ class NativeCoreTest {
         } finally {
             NativeCore.destroy(handle)
         }
+    }
+
+    private fun waitUntil(condition: () -> Boolean): Boolean {
+        repeat(100) {
+            if (condition()) return true
+            SystemClock.sleep(20)
+        }
+        return false
+    }
+
+    private fun workerCount(name: String) = Thread.getAllStackTraces().keys.count { it.name == name && it.isAlive }
+
+    private fun phoneStrategyUsesSpeaker(): Boolean {
+        val output = ParcelFileDescriptor.AutoCloseInputStream(
+            InstrumentationRegistry.getInstrumentation().uiAutomation
+                .executeShellCommand("dumpsys media.audio_policy"),
+        ).bufferedReader().use { it.readText() }
+        return Regex("STRATEGY_PHONE[\\s\\S]{0,400}AUDIO_DEVICE_OUT_SPEAKER").containsMatchIn(output)
     }
 }

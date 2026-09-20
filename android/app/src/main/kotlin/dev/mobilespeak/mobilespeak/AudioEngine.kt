@@ -2,6 +2,7 @@ package dev.mobilespeak.mobilespeak
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.annotation.TargetApi
 import android.content.Context
 import android.content.pm.PackageManager
 import android.media.AudioAttributes
@@ -41,6 +42,11 @@ internal class AudioEngine(private val context: Context) {
     private var playbackThread: Thread? = null
     private var captureThread: Thread? = null
     private var communicationMode = false
+    private var modernRouteRequested = false
+    private var legacySpeakerOwned = false
+    private var legacySpeakerBefore: Boolean? = null
+    private var lastCommunicationDeviceId: Int? = null
+    private var communicationDeviceListener: AudioManager.OnCommunicationDeviceChangedListener? = null
     private var captureOffset = 0
     private var echoCanceler: AcousticEchoCanceler? = null
     private var noiseSuppressor: NoiseSuppressor? = null
@@ -53,20 +59,28 @@ internal class AudioEngine(private val context: Context) {
     fun start() {
         if (!running.compareAndSet(false, true)) return
         manager.registerAudioDeviceCallback(deviceCallback, null)
+        if (Build.VERSION.SDK_INT >= 31) {
+            communicationDeviceListener = AudioManager.OnCommunicationDeviceChangedListener(::communicationDeviceChanged)
+                .also { manager.addOnCommunicationDeviceChangedListener(context.mainExecutor, it) }
+        }
         playbackThread = Thread(::playbackLoop, "MobileSpeakPlayback").also { it.start() }
         captureThread = Thread(::captureLoop, "MobileSpeakCapture").also { it.start() }
     }
 
-    fun update(ui: SessionUiState, allowCapture: Boolean) {
+    fun update(ui: SessionUiState, allowCapture: Boolean, reapplyRoute: Boolean = false) {
         val nextConnected = ui.snapshot.status == "connected"
         val nextDeafened = ui.deafened
         val nextCaptureRequested = allowCapture && ClientSession.microphonePermission && !ui.microphoneMuted
+        val connectionChanged = connected != nextConnected
         if (connected != nextConnected || deafened != nextDeafened || captureRequested != nextCaptureRequested) {
             Log.i(TAG, "Audio policy connected=$nextConnected listening=${!nextDeafened} capture=$nextCaptureRequested")
         }
         connected = nextConnected
         deafened = nextDeafened
         captureRequested = nextCaptureRequested
+        if (shouldReapplyCommunicationRoute(nextConnected, connectionChanged, reapplyRoute)) {
+            refreshCommunicationRoute(if (connectionChanged) "connected" else "app foreground")
+        }
         wakeWorkers()
     }
 
@@ -81,6 +95,10 @@ internal class AudioEngine(private val context: Context) {
         captureThread?.takeIf { it !== Thread.currentThread() }?.join(STOP_TIMEOUT_MS)
         playbackThread = null
         captureThread = null
+        if (Build.VERSION.SDK_INT >= 31) {
+            communicationDeviceListener?.let(manager::removeOnCommunicationDeviceChangedListener)
+            communicationDeviceListener = null
+        }
         releaseCapture()
         releaseOutputSession()
         manager.unregisterAudioDeviceCallback(deviceCallback)
@@ -256,11 +274,14 @@ internal class AudioEngine(private val context: Context) {
         if (communicationMode) return
         manager.mode = AudioManager.MODE_IN_COMMUNICATION
         communicationMode = true
-        Log.i(TAG, "Audio mode entered MODE_IN_COMMUNICATION")
+        Log.i(TAG, "Audio mode entered MODE_IN_COMMUNICATION sdk=${Build.VERSION.SDK_INT}")
+        if (applyCommunicationRoute("mode entered")) markRouteChanged("mode entered")
     }
 
     @Synchronized
     private fun restoreNormalMode() {
+        if (!communicationMode && !modernRouteRequested && !legacySpeakerOwned && legacySpeakerBefore == null) return
+        releaseCommunicationRoute("session ended")
         if (communicationMode) {
             manager.mode = AudioManager.MODE_NORMAL
             Log.i(TAG, "Audio mode restored MODE_NORMAL")
@@ -352,7 +373,134 @@ internal class AudioEngine(private val context: Context) {
     }
 
     private fun routeChanged(change: String, devices: Array<out AudioDeviceInfo>) {
-        Log.i(TAG, "Audio route $change: ${devices.joinToString { "${it.type}:${it.productName}" }}")
+        if (!running.get()) return
+        Log.i(TAG, "Audio devices $change types=${devices.joinToString { deviceTypeName(it.type) }}")
+        if (!connected) return
+        val policyChanged = if (communicationMode) applyCommunicationRoute("devices $change") else false
+        if (policyChanged || devices.isNotEmpty()) markRouteChanged("devices $change")
+    }
+
+    private fun communicationDeviceChanged(device: AudioDeviceInfo?) {
+        if (!running.get()) return
+        val observedChanged = lastCommunicationDeviceId != device?.id
+        lastCommunicationDeviceId = device?.id
+        Log.i(TAG, "Communication device changed actual=${deviceTypeName(device?.type)}")
+        val policyChanged = if (connected && communicationMode) applyCommunicationRoute("communication device callback") else false
+        if (observedChanged || policyChanged) markRouteChanged("communication device callback")
+    }
+
+    @Synchronized
+    private fun refreshCommunicationRoute(reason: String) {
+        if (!communicationMode || !connected) return
+        if (applyCommunicationRoute(reason)) markRouteChanged(reason)
+    }
+
+    @Synchronized
+    private fun applyCommunicationRoute(reason: String): Boolean {
+        val devices = if (Build.VERSION.SDK_INT >= 31) manager.availableCommunicationDevices else
+            manager.getDevices(AudioManager.GET_DEVICES_OUTPUTS).toList()
+        val target = communicationRouteTarget(connected, devices.mapTo(mutableSetOf()) { it.type })
+        val hasExternal = devices.any { isExternalCommunicationDeviceType(it.type) }
+        return if (Build.VERSION.SDK_INT >= 31) {
+            applyModernCommunicationRoute(reason, target, devices, hasExternal)
+        } else {
+            applyLegacyCommunicationRoute(reason, target, devices, hasExternal)
+        }
+    }
+
+    @TargetApi(31)
+    private fun applyModernCommunicationRoute(
+        reason: String,
+        target: CommunicationRouteTarget,
+        devices: List<AudioDeviceInfo>,
+        hasExternal: Boolean,
+    ): Boolean {
+        val before = manager.communicationDevice
+        val requested = when (target) {
+            CommunicationRouteTarget.SPEAKER -> devices.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
+            CommunicationRouteTarget.EARPIECE -> devices.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_EARPIECE }
+            else -> null
+        }
+        var accepted: Boolean? = null
+        when {
+            target == CommunicationRouteTarget.EXTERNAL && modernRouteRequested -> {
+                manager.clearCommunicationDevice()
+                modernRouteRequested = false
+            }
+            requested != null && before?.id != requested.id -> {
+                accepted = manager.setCommunicationDevice(requested)
+                modernRouteRequested = accepted
+            }
+        }
+        val after = manager.communicationDevice
+        lastCommunicationDeviceId = after?.id
+        Log.i(
+            TAG,
+            "Communication route reason=$reason available=${devices.joinToString { deviceTypeName(it.type) }} " +
+                "before=${deviceTypeName(before?.type)} target=$target requested=${deviceTypeName(requested?.type)} " +
+                "accepted=$accepted after=${deviceTypeName(after?.type)} external=$hasExternal",
+        )
+        return before?.id != after?.id
+    }
+
+    @Suppress("DEPRECATION")
+    private fun applyLegacyCommunicationRoute(
+        reason: String,
+        target: CommunicationRouteTarget,
+        devices: List<AudioDeviceInfo>,
+        hasExternal: Boolean,
+    ): Boolean {
+        val before = manager.isSpeakerphoneOn
+        if (legacySpeakerBefore == null) legacySpeakerBefore = before
+        when (target) {
+            CommunicationRouteTarget.SPEAKER -> if (!before) {
+                manager.isSpeakerphoneOn = true
+                legacySpeakerOwned = manager.isSpeakerphoneOn
+            }
+            CommunicationRouteTarget.EXTERNAL,
+            CommunicationRouteTarget.EARPIECE,
+            CommunicationRouteTarget.UNAVAILABLE,
+            CommunicationRouteTarget.RELEASE,
+            -> if (legacySpeakerOwned && before) {
+                manager.isSpeakerphoneOn = legacySpeakerBefore == true
+                legacySpeakerOwned = false
+            }
+        }
+        val after = manager.isSpeakerphoneOn
+        Log.i(
+            TAG,
+            "Communication route reason=$reason available=${devices.joinToString { deviceTypeName(it.type) }} " +
+                "before=${legacyRouteName(before)} target=$target requested=${legacyRouteName(target == CommunicationRouteTarget.SPEAKER)} " +
+                "after=${legacyRouteName(after)} external=$hasExternal " +
+                "${if (hasExternal) "speaker skipped for external device" else "built-in route selected"}",
+        )
+        return before != after
+    }
+
+    @Suppress("DEPRECATION")
+    @Synchronized
+    private fun releaseCommunicationRoute(reason: String) {
+        if (Build.VERSION.SDK_INT >= 31) {
+            val before = manager.communicationDevice
+            manager.clearCommunicationDevice()
+            modernRouteRequested = false
+            val after = manager.communicationDevice
+            lastCommunicationDeviceId = after?.id
+            Log.i(TAG, "Communication route released reason=$reason before=${deviceTypeName(before?.type)} after=${deviceTypeName(after?.type)}")
+        } else {
+            val before = manager.isSpeakerphoneOn
+            if (legacySpeakerOwned && before) {
+                manager.isSpeakerphoneOn = legacySpeakerBefore == true
+            }
+            val after = manager.isSpeakerphoneOn
+            legacySpeakerOwned = false
+            legacySpeakerBefore = null
+            Log.i(TAG, "Communication route restored reason=$reason before=${legacyRouteName(before)} after=${legacyRouteName(after)}")
+        }
+    }
+
+    private fun markRouteChanged(reason: String) {
+        Log.i(TAG, "Communication route changed; rebuilding AudioTrack/AudioRecord reason=$reason")
         routeVersion.incrementAndGet()
         wakeWorkers()
     }
@@ -368,6 +516,56 @@ internal class AudioEngine(private val context: Context) {
         const val CAPTURE_LOG_INTERVAL_FRAMES = 500L
     }
 }
+
+internal enum class CommunicationRouteTarget { RELEASE, EXTERNAL, SPEAKER, EARPIECE, UNAVAILABLE }
+
+internal fun communicationRouteTarget(connected: Boolean, availableTypes: Set<Int>): CommunicationRouteTarget {
+    if (!connected) return CommunicationRouteTarget.RELEASE
+    if (availableTypes.any(::isExternalCommunicationDeviceType)) return CommunicationRouteTarget.EXTERNAL
+    if (AudioDeviceInfo.TYPE_BUILTIN_SPEAKER in availableTypes) return CommunicationRouteTarget.SPEAKER
+    if (AudioDeviceInfo.TYPE_BUILTIN_EARPIECE in availableTypes) return CommunicationRouteTarget.EARPIECE
+    return CommunicationRouteTarget.UNAVAILABLE
+}
+
+internal fun shouldReapplyCommunicationRoute(
+    connected: Boolean,
+    connectionChanged: Boolean,
+    returnedToForeground: Boolean,
+) = connected && (connectionChanged || returnedToForeground)
+
+private fun isExternalCommunicationDeviceType(type: Int) = when (type) {
+    AudioDeviceInfo.TYPE_WIRED_HEADSET,
+    AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
+    AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
+    AudioDeviceInfo.TYPE_BLUETOOTH_A2DP,
+    AudioDeviceInfo.TYPE_USB_DEVICE,
+    AudioDeviceInfo.TYPE_USB_ACCESSORY,
+    AudioDeviceInfo.TYPE_USB_HEADSET,
+    AudioDeviceInfo.TYPE_HEARING_AID,
+    AudioDeviceInfo.TYPE_BLE_HEADSET,
+    AudioDeviceInfo.TYPE_BLE_SPEAKER,
+    -> true
+    else -> false
+}
+
+private fun deviceTypeName(type: Int?) = when (type) {
+    null -> "none"
+    AudioDeviceInfo.TYPE_BUILTIN_EARPIECE -> "earpiece"
+    AudioDeviceInfo.TYPE_BUILTIN_SPEAKER -> "speaker"
+    AudioDeviceInfo.TYPE_WIRED_HEADSET -> "wired-headset"
+    AudioDeviceInfo.TYPE_WIRED_HEADPHONES -> "wired-headphones"
+    AudioDeviceInfo.TYPE_BLUETOOTH_SCO -> "bluetooth-sco"
+    AudioDeviceInfo.TYPE_BLUETOOTH_A2DP -> "bluetooth-a2dp"
+    AudioDeviceInfo.TYPE_USB_DEVICE -> "usb-device"
+    AudioDeviceInfo.TYPE_USB_ACCESSORY -> "usb-accessory"
+    AudioDeviceInfo.TYPE_USB_HEADSET -> "usb-headset"
+    AudioDeviceInfo.TYPE_HEARING_AID -> "hearing-aid"
+    AudioDeviceInfo.TYPE_BLE_HEADSET -> "ble-headset"
+    AudioDeviceInfo.TYPE_BLE_SPEAKER -> "ble-speaker"
+    else -> "type-$type"
+}
+
+private fun legacyRouteName(speaker: Boolean) = if (speaker) "speaker" else "system/default"
 
 internal fun shouldPlayAudio(connected: Boolean, deafened: Boolean) = connected && !deafened
 

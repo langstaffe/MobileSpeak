@@ -65,7 +65,8 @@ internal class VoiceService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     private fun updateAudio(ui: SessionUiState, appActive: Boolean, userInitiated: Boolean) {
-        if (appActive && !lastAppActive) {
+        val returnedToForeground = appActive && !lastAppActive
+        if (returnedToForeground) {
             microphoneUpgradeFailed = false
             microphoneRecoveryReported = false
         }
@@ -103,7 +104,12 @@ internal class VoiceService : Service() {
             microphoneRecoveryReported = true
             ClientSession.reportError("后台麦克风暂不可用，请打开 MobileSpeak 自动恢复")
         }
-        audio.update(ui, allowCapture)
+        val reapplyAudio = returnedToForeground || userInitiated
+        audio.update(ui, allowCapture, reapplyRoute = reapplyAudio)
+        if (shouldReassertAudioState(ui.snapshot.status == "connected", reapplyAudio)) {
+            Log.i(TAG, "Reasserting current microphone and listening state after foreground recovery")
+            ClientSession.setAudio(inputMuted = ui.microphoneMuted, deafened = ui.deafened)
+        }
         if (!ClientSession.shouldRunService()) stopSelf()
     }
 
@@ -168,3 +174,5 @@ internal fun allowsMicrophoneCapture(
     deafened: Boolean,
     foregroundHasMicrophone: Boolean,
 ) = connected && permissionGranted && !microphoneMuted && !deafened && foregroundHasMicrophone
+
+internal fun shouldReassertAudioState(connected: Boolean, reapplyRequested: Boolean) = connected && reapplyRequested
