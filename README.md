@@ -24,15 +24,14 @@
     <tr><td style="vertical-align: middle; text-align: center;">加入频道</td><td style="vertical-align: middle; text-align: center;">✅</td><td style="vertical-align: middle; text-align: center;">✅</td></tr>
     <tr><td style="vertical-align: middle; text-align: center;">加入密码频道</td><td style="vertical-align: middle; text-align: center;">✅</td><td style="vertical-align: middle; text-align: center;">✅</td></tr>
     <tr><td style="vertical-align: middle; text-align: center;">语音通信</td><td style="vertical-align: middle; text-align: center;">✅</td><td style="vertical-align: middle; text-align: center;">✅</td></tr>
-    <tr><td style="vertical-align: middle; text-align: center;">低延迟语音</td><td style="vertical-align: middle; text-align: center;">✅</td><td style="vertical-align: middle; text-align: center;">✅</td></tr>
     <tr><td style="vertical-align: middle; text-align: center;">协议加密与安全身份</td><td style="vertical-align: middle; text-align: center;">✅</td><td style="vertical-align: middle; text-align: center;">✅</td></tr>
     <tr><td style="vertical-align: middle; text-align: center;">音频编解码器选择</td><td style="vertical-align: middle; text-align: center;">✅</td><td style="vertical-align: middle; text-align: center;">❌</td></tr>
     <tr><td style="vertical-align: middle; text-align: center;">自动麦克风音量调整</td><td style="vertical-align: middle; text-align: center;">✅</td><td style="vertical-align: middle; text-align: center;">❌</td></tr>
     <tr><td style="vertical-align: middle; text-align: center;">背景噪声抑制</td><td style="vertical-align: middle; text-align: center;">✅</td><td style="vertical-align: middle; text-align: center;">✅</td></tr>
     <tr><td style="vertical-align: middle; text-align: center;">回声消除</td><td style="vertical-align: middle; text-align: center;">✅</td><td style="vertical-align: middle; text-align: center;">✅</td></tr>
     <tr><td style="vertical-align: middle; text-align: center;">麦克风静音</td><td style="vertical-align: middle; text-align: center;">✅</td><td style="vertical-align: middle; text-align: center;">✅</td></tr>
-    <tr><td style="vertical-align: middle; text-align: center;">关闭收听 / 听筒静音</td><td style="vertical-align: middle; text-align: center;">✅</td><td style="vertical-align: middle; text-align: center;">✅</td></tr>
-    <tr><td style="vertical-align: middle; text-align: center;">位置音频</td><td style="vertical-align: middle; text-align: center;">✅</td><td style="vertical-align: middle; text-align: center;">❌</td></tr>
+    <tr><td style="vertical-align: middle; text-align: center;">关闭收听</td><td style="vertical-align: middle; text-align: center;">✅</td><td style="vertical-align: middle; text-align: center;">✅</td></tr>
+    <tr><td style="vertical-align: middle; text-align: center;">位置音频（仅 TeamSpeak 3）</td><td style="vertical-align: middle; text-align: center;">✅</td><td style="vertical-align: middle; text-align: center;">❌</td></tr>
     <tr><td style="vertical-align: middle; text-align: center;">频道文字聊天</td><td style="vertical-align: middle; text-align: center;">✅</td><td style="vertical-align: middle; text-align: center;">✅</td></tr>
     <tr><td style="vertical-align: middle; text-align: center;">一对一私聊</td><td style="vertical-align: middle; text-align: center;">✅</td><td style="vertical-align: middle; text-align: center;">✅</td></tr>
     <tr><td style="vertical-align: middle; text-align: center;">群组聊天（仅 TeamSpeak 6）</td><td style="vertical-align: middle; text-align: center;">✅</td><td style="vertical-align: middle; text-align: center;">❌</td></tr>
