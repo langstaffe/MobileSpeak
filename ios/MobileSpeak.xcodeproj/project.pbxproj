@@ -36,6 +36,7 @@
 		306CA6145F660C9BE190E8E4 /* TeamSpeakCore.xcframework */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = wrapper.xcframework; name = TeamSpeakCore.xcframework; path = NativeCore/TeamSpeakCore.xcframework; sourceTree = "<group>"; };
 		37A3535BB9D060841FB2CEEC /* Client.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = Client.swift; sourceTree = "<group>"; };
 		3D9C8FCCE4718DE6FF283742 /* MobileSpeak.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MobileSpeak.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		51A7C0F10000000000000001 /* Signing.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Signing.xcconfig; sourceTree = "<group>"; };
 		633D1384CC59F2C8E2C7E9E6 /* MobileSpeakTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MobileSpeakTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		8B1EEC2A6719E82D550E309D /* ClientTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ClientTests.swift; sourceTree = "<group>"; };
 		8BD3729E0DF38C8A25D988B4 /* PhoneAudio.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PhoneAudio.swift; sourceTree = "<group>"; };
@@ -82,6 +83,7 @@
 		607B1811695CA760B73CC6FB = {
 			isa = PBXGroup;
 			children = (
+				51A7C0F10000000000000001 /* Signing.xcconfig */,
 				A8223B4AF4B4D335EB810C45 /* Products */,
 				17A036C748F456FDCA5E10AD /* Frameworks */,
 				C3F2CF49A9C0067B9EDE303B /* NativeApp */,
@@ -326,6 +328,7 @@
 		};
 		4BE860083ABB03BCDA8B90CF /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 51A7C0F10000000000000001 /* Signing.xcconfig */;
 			buildSettings = {
 				ARCHS = arm64;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
@@ -443,6 +446,7 @@
 		};
 		E16723224FCB3A10010436D4 /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 51A7C0F10000000000000001 /* Signing.xcconfig */;
 			buildSettings = {
 				ARCHS = arm64;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;

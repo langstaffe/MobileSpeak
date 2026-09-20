@@ -1,0 +1,2 @@
+// Keep per-developer Team IDs in the ignored local file.
+#include? "Signing.local.xcconfig"

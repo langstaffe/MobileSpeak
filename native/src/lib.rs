@@ -25,9 +25,7 @@ use tsclientlib::{
     audio::AudioHandler, events::Event, ChannelId, ChannelType, Connection, DisconnectOptions,
     FiletransferHandle, Identity, MessageHandle, MessageTarget, OutCommandExt, StreamItem,
 };
-use tsproto_packets::packets::{
-    AudioData, CodecType, Direction, Flags, OutAudio, OutCommand, PacketType,
-};
+use tsproto_packets::packets::{AudioData, CodecType, OutAudio};
 
 const MAX_IMAGE_BYTES: u64 = 5 * 1024 * 1024;
 const MAX_MEDIA_TRANSFERS: usize = 4;
@@ -411,13 +409,6 @@ pub struct Bridge {
     output: Arc<Mutex<Output>>,
 }
 
-fn command(name: &str, args: &[(&str, String)]) -> OutCommand {
-    let mut out = OutCommand::new(Direction::C2S, Flags::empty(), PacketType::Command, name);
-    for (key, value) in args {
-        out.write_arg(key, value);
-    }
-    out
-}
 fn report(out: &Arc<Mutex<Output>>, error: impl std::fmt::Display) {
     out.lock()
         .unwrap()
@@ -1323,10 +1314,10 @@ async fn session(
                     while pcm.try_recv().is_ok() {}
                     denoiser = new_denoiser(*noise_suppression);
                     if subscribed {
-                        match command("clientupdate", &[
-                            ("client_input_muted",u8::from(input).to_string()),
-                            ("client_output_muted",u8::from(output).to_string())
-                        ]).send_with_result(&mut con) {
+                        let update = con.get_state()?.client_update()
+                            .set_input_muted(input)
+                            .set_output_muted(output);
+                        match update.send_with_result(&mut con) {
                             Ok(handle) => { operations.insert(handle, PendingOperation::Other("更新音频状态失败")); },
                             Err(error) => report(out, format!("更新音频状态失败：{error}")),
                         }
@@ -1738,7 +1729,7 @@ mod tests {
         assert_eq!(count.load(Ordering::SeqCst), 2);
     }
     #[test]
-    fn invalid_commands_are_rejected_and_arguments_are_escaped() {
+    fn invalid_commands_are_rejected() {
         let bridge = Bridge::new();
         assert!(bridge
             .send(r#"{"type":"connect","address":"","name":"x"}"#)
@@ -1760,9 +1751,32 @@ mod tests {
         assert!(bridge
             .send(r#"{"type":"set_noise_suppression","mode":"bad"}"#)
             .is_err());
+        assert!(bridge
+            .send(
+                r#"{"type":"send_channel_message","request_id":"uuid","channel":123,"message":"你好"}"#
+            )
+            .is_ok());
         assert_eq!(bridge.poll()["snapshot"]["status"], "disconnected");
-        let escaped = command("clientmove", &[("cpw", "a b|c".to_string())]).into_packet();
-        assert!(String::from_utf8_lossy(escaped.data()).contains("a\\sb\\pc"));
+    }
+    #[test]
+    fn poll_keeps_state_and_consumes_events_and_chat_updates_once() {
+        let bridge = Bridge::new();
+        {
+            let mut output = bridge.output.lock().unwrap();
+            output.event(json!({"type":"error","message":"test"}));
+            output.set_chats(json!([]));
+        }
+        let first = bridge.poll();
+        assert_eq!(first["snapshot"]["status"], "disconnected");
+        assert_eq!(first["events"].as_array().unwrap().len(), 1);
+        assert_eq!(first["chats"], json!([]));
+        assert!(first["unread"].is_object());
+
+        let second = bridge.poll();
+        assert_eq!(second["snapshot"], first["snapshot"]);
+        assert_eq!(second["unread"], first["unread"]);
+        assert_eq!(second["events"], json!([]));
+        assert!(second["chats"].is_null());
     }
     #[test]
     fn cache_keys_isolate_server_resource_type_and_revision() {

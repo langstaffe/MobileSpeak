@@ -1,12 +1,44 @@
 //! Small Android adapter for the same C ABI used by iOS.
-use crate::{ts_capture, ts_command, ts_create, ts_destroy, ts_free, ts_playback, ts_poll, Bridge};
+use crate::{
+    ts_capture, ts_command, ts_create, ts_destroy, ts_free, ts_playback, ts_poll, ts_set_notifier,
+    Bridge,
+};
 use jni::{
     errors::{Error, JniError, ThrowRuntimeExAndDefault},
-    objects::{JByteArray, JFloatArray, JObject, JShortArray},
+    jni_sig, jni_str,
+    objects::{Global, JByteArray, JFloatArray, JObject, JShortArray},
     sys::{jbyteArray, jint, jlong},
-    EnvUnowned,
+    EnvUnowned, JavaVM,
 };
 use std::ffi::{CStr, CString};
+use std::{
+    collections::HashMap,
+    sync::{Mutex, OnceLock},
+};
+
+struct AndroidNotifier {
+    callback: Global<JObject<'static>>,
+}
+
+static NOTIFIERS: OnceLock<Mutex<HashMap<usize, Box<AndroidNotifier>>>> = OnceLock::new();
+
+fn notifiers() -> &'static Mutex<HashMap<usize, Box<AndroidNotifier>>> {
+    NOTIFIERS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+extern "C" fn android_notified(context: usize) {
+    let notifier = unsafe { &*(context as *const AndroidNotifier) };
+    let Ok(vm) = JavaVM::singleton() else { return };
+    let _ = vm.attach_current_thread(|env| -> jni::errors::Result<()> {
+        env.call_method(&notifier.callback, jni_str!("run"), jni_sig!("()V"), &[])?;
+        Ok(())
+    });
+}
+
+unsafe fn clear_notifier(handle: *mut Bridge) {
+    ts_set_notifier(handle, None, 0);
+    notifiers().lock().unwrap().remove(&(handle as usize));
+}
 
 fn invalid() -> Error {
     Error::JniCall(JniError::InvalidArguments)
@@ -28,7 +60,40 @@ pub extern "system" fn Java_dev_mobilespeak_mobilespeak_NativeCore_destroy<'a>(
     handle: jlong,
 ) {
     env.with_env(|_| -> jni::errors::Result<_> {
-        unsafe { ts_destroy(handle as *mut Bridge) };
+        let handle = handle as *mut Bridge;
+        if !handle.is_null() {
+            unsafe {
+                clear_notifier(handle);
+                ts_destroy(handle);
+            }
+        }
+        Ok(())
+    })
+    .resolve::<ThrowRuntimeExAndDefault>()
+}
+
+#[no_mangle]
+pub extern "system" fn Java_dev_mobilespeak_mobilespeak_NativeCore_setNotifier<'a>(
+    mut env: EnvUnowned<'a>,
+    _object: JObject<'a>,
+    handle: jlong,
+    callback: JObject<'a>,
+) {
+    env.with_env(|env| -> jni::errors::Result<_> {
+        let handle = handle as *mut Bridge;
+        if handle.is_null() || callback.is_null() {
+            return Err(invalid());
+        }
+        unsafe { clear_notifier(handle) };
+        let mut notifier = Box::new(AndroidNotifier {
+            callback: env.new_global_ref(&callback)?,
+        });
+        let context = notifier.as_mut() as *mut AndroidNotifier as usize;
+        notifiers()
+            .lock()
+            .unwrap()
+            .insert(handle as usize, notifier);
+        unsafe { ts_set_notifier(handle, Some(android_notified), context) };
         Ok(())
     })
     .resolve::<ThrowRuntimeExAndDefault>()

@@ -13,20 +13,26 @@ import kotlinx.coroutines.flow.update
 import org.json.JSONObject
 import java.io.File
 import java.util.UUID
+import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 
 @SuppressLint("StaticFieldLeak") // The stored context is applicationContext and owns the process session.
 internal object ClientSession {
-    private val nativeLock = Any()
     private val handle by lazy { NativeCore.create().also { check(it != 0L) } }
     private val mutableState = MutableStateFlow(SessionUiState())
+    private val mutableAppActive = MutableStateFlow(false)
+    private val coreExecutor = Executors.newSingleThreadExecutor { task ->
+        Thread(task, "MobileSpeakCore")
+    }
+    private val coreDirty = AtomicBoolean()
+    private val coreScheduled = AtomicBoolean()
     val state = mutableState.asStateFlow()
     private lateinit var context: Context
     private lateinit var store: SecureStore
     private var initialized = false
     private var activeBookmarkId: String? = null
     @Volatile private var acceptingConnection = false
-    @Volatile var appActive = false
-        private set
+    val appActive = mutableAppActive.asStateFlow()
     @Volatile var microphonePermission = false
         private set
 
@@ -38,15 +44,18 @@ internal object ClientSession {
             store = SecureStore(context)
             val noise = context.getSharedPreferences("mobilespeak.settings", Context.MODE_PRIVATE)
                 .getString("noise", "rnnoise") ?: "rnnoise"
+            microphonePermission = context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
             mutableState.value = mutableState.value.copy(
                 bookmarks = runCatching { store.bookmarks() }.getOrDefault(emptyList()),
                 noiseSuppression = noise,
+                microphoneMuted = !microphonePermission,
                 error = store.readError,
             )
+            NativeCore.setNotifier(handle, Runnable(::scheduleCorePoll))
+            scheduleCorePoll()
             val root = File(context.filesDir, "core").apply { mkdirs() }
             send(JSONObject().put("type", "configure").put("storage", root.absolutePath))
             send(JSONObject().put("type", "set_noise_suppression").put("mode", noise))
-            microphonePermission = context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
             initialized = true
         }
     }
@@ -73,7 +82,7 @@ internal object ClientSession {
                 error = null,
             )
         }
-        val intent = Intent(context, VoiceService::class.java)
+        val intent = Intent(context, VoiceService::class.java).setAction(VoiceService.ACTION_START_CALL)
         if (Build.VERSION.SDK_INT >= 26) context.startForegroundService(intent) else context.startService(intent)
     }
 
@@ -86,14 +95,15 @@ internal object ClientSession {
     }
 
     fun setAppActive(active: Boolean) {
-        appActive = active
+        mutableAppActive.value = active
         if (initialized) send(JSONObject().put("type", "set_app_active").put("active", active))
     }
 
     fun setMicrophonePermission(granted: Boolean) {
+        val wasGranted = microphonePermission
         microphonePermission = granted
         if (!granted) setAudio(inputMuted = true)
-        else setAudio(inputMuted = false)
+        else if (!wasGranted) setAudio(inputMuted = false)
     }
 
     fun setAudio(inputMuted: Boolean? = null, deafened: Boolean? = null) {
@@ -107,15 +117,6 @@ internal object ClientSession {
         mutableState.update { it.copy(microphoneMuted = nextInput, deafened = nextOutput) }
         if (old.snapshot.status == "connected") {
             send(JSONObject().put("type", "mute").put("input", nextInput || nextOutput).put("output", nextOutput))
-        }
-    }
-
-    fun setAudioInterrupted(interrupted: Boolean) {
-        val current = state.value
-        if (current.snapshot.status == "connected") {
-            send(JSONObject().put("type", "mute")
-                .put("input", interrupted || current.microphoneMuted || current.deafened)
-                .put("output", current.deafened))
         }
     }
 
@@ -191,55 +192,73 @@ internal object ClientSession {
 
     fun reportError(message: String) = fail(message)
 
-    fun pollCore() {
-        val wasConnected = state.value.snapshot.status == "connected"
+    private fun scheduleCorePoll() {
+        coreDirty.set(true)
+        if (coreScheduled.compareAndSet(false, true)) coreExecutor.execute(::drainCore)
+    }
+
+    private fun drainCore() {
+        do {
+            coreDirty.set(false)
+            pollCore()
+        } while (coreDirty.get())
+        coreScheduled.set(false)
+        if (coreDirty.get() && coreScheduled.compareAndSet(false, true)) coreExecutor.execute(::drainCore)
+    }
+
+    private fun pollCore() {
         val envelope = runCatching {
-            val bytes = synchronized(nativeLock) { NativeCore.poll(handle) }
+            val bytes = NativeCore.poll(handle)
             JSONObject(String(bytes, Charsets.UTF_8))
         }.getOrElse {
             fail("核心状态读取失败：${it.message}")
             return
         }
+        runCatching { applyEnvelope(envelope) }.onFailure { fail("核心状态解析失败：${it.message}") }
+    }
+
+    private fun applyEnvelope(envelope: JSONObject) {
+        val wasConnected = state.value.snapshot.status == "connected"
         var eventError: String? = null
         var audioMuted = false
-        val events = envelope.optJSONArray("events")
-        if (events != null) for (index in 0 until events.length()) {
+        val events = envelope.getJSONArray("events")
+        for (index in 0 until events.length()) {
             val event = events.getJSONObject(index)
-            when (event.optString("type")) {
+            when (event.getString("type")) {
                 "identity" -> {
-                    val identity = event.optJSONObject("value") ?: continue
+                    val identity = event.getJSONObject("value")
                     runCatching { store.saveIdentity(identity) }.onFailure {
                         fail("无法安全保存 TS 身份：${it.message}")
                         disconnect()
                         return
                     }
                 }
-                "error" -> eventError = event.optString("message", "连接错误")
+                "error" -> eventError = event.getString("message")
                 "audio_muted" -> {
                     audioMuted = true
-                    eventError = event.optString("message", "服务器已关闭麦克风")
+                    eventError = event.getString("message")
                 }
             }
         }
         val nextSnapshot = envelope.getJSONObject("snapshot").snapshot()
         if (!acceptingConnection && nextSnapshot.status != "disconnected") return
-        val chats = envelope.optJSONArray("chats")?.objects()?.map {
+        val chats = if (envelope.get("chats") == JSONObject.NULL) null else envelope.getJSONArray("chats").objects().map {
             ChatMessage(
                 it.getString("id"), it.getString("conversation"), it.getString("senderName"),
-                it.stringOrNull("avatarPath"), it.optBoolean("own"), it.getString("text"),
+                it.stringOrNull("avatarPath"), it.getBoolean("own"), it.getString("text"),
                 it.getLong("timestamp"), it.getString("status"), it.stringOrNull("error"),
             )
         }
-        val unreadJson = envelope.optJSONObject("unread")
-        val unread = if (unreadJson == null) null else Unread(
+        val unreadJson = envelope.getJSONObject("unread")
+        val unread = Unread(
             unreadJson.stringOrNull("serverId"), unreadJson.stringOrNull("channel"),
-            unreadJson.optInt("channelCount"), unreadJson.optJSONObject("privateCounts").toIntMap(),
+            unreadJson.getInt("channelCount"), unreadJson.getJSONObject("privateCounts").toIntMap(),
         )
         mutableState.update { latest ->
             latest.copy(
                 snapshot = nextSnapshot,
                 messages = chats ?: latest.messages,
-                unread = unread ?: latest.unread,
+                unread = unread,
                 error = eventError ?: latest.error,
                 microphoneMuted = if (audioMuted) true else latest.microphoneMuted,
             )
@@ -255,13 +274,13 @@ internal object ClientSession {
         }
     }
 
-    fun capture(samples: ShortArray): Int = synchronized(nativeLock) { NativeCore.capture(handle, samples) }
-    fun playback(samples: FloatArray): Int = synchronized(nativeLock) { NativeCore.playback(handle, samples) }
+    fun capture(samples: ShortArray): Int = NativeCore.capture(handle, samples)
+    fun playback(samples: FloatArray): Int = NativeCore.playback(handle, samples)
     fun shouldRunService() = acceptingConnection || state.value.snapshot.status in setOf("connected", "connecting", "reconnecting")
 
     private fun send(command: JSONObject): Boolean {
         val result = runCatching {
-            synchronized(nativeLock) { NativeCore.command(handle, command.toString().toByteArray(Charsets.UTF_8)) }
+            NativeCore.command(handle, command.toString().toByteArray(Charsets.UTF_8))
         }.getOrElse {
             fail("操作未能提交：${it.message}")
             return false

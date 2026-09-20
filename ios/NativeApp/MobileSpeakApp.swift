@@ -329,7 +329,10 @@ struct HomeView: View {
                         let members = client.state.clients.filter { $0.channel == channel.id }
                         let selected = client.currentChannel == channel.id
                         HStack(spacing: 8) {
-                            Button { showChannel(channel) } label: {
+                            Button {
+                                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                                showChannel(channel)
+                            } label: {
                                 VStack(alignment: .leading, spacing: 8) {
                                     HStack(spacing: 11) {
                                         ChannelIcon(channel: channel)
@@ -427,7 +430,11 @@ struct HomeView: View {
                             if mode != NoiseSuppressionMode.allCases.first {
                                 Rectangle().fill(Palette.border).frame(height: 1).padding(.leading, 16)
                             }
-                            Button { client.setNoiseSuppression(mode) } label: {
+                            Button {
+                                guard mode != client.noiseSuppression else { return }
+                                UISelectionFeedbackGenerator().selectionChanged()
+                                client.setNoiseSuppression(mode)
+                            } label: {
                                 HStack {
                                     Text(mode.title)
                                     Spacer()
@@ -455,10 +462,16 @@ struct HomeView: View {
             Image(systemName: "waveform").foregroundStyle(client.connected ? Palette.green : Palette.muted)
             Text(client.connected ? "已连接到 #\(client.state.channels.first { $0.id == client.currentChannel }?.name ?? "")" : client.busy ? "正在连接…" : "未连接").font(.system(size: 12, weight: .semibold)).lineLimit(1)
             Spacer(minLength: 0)
-            Button { Task { await client.setAudio(input: !client.microphoneMuted) } } label: {
+            Button {
+                UISelectionFeedbackGenerator().selectionChanged()
+                Task { await client.setAudio(input: !client.microphoneMuted) }
+            } label: {
                 Image(systemName: client.muted ? "mic.slash.fill" : "mic.fill").foregroundStyle(client.muted ? Palette.muted : Palette.green).frame(width: 44, height: 48)
             }.accessibilityLabel(client.microphoneMuted ? "开启麦克风" : "静音").disabled(client.audioBusy || client.deafened)
-            Button { Task { await client.setAudio(output: !client.deafened) } } label: {
+            Button {
+                UISelectionFeedbackGenerator().selectionChanged()
+                Task { await client.setAudio(output: !client.deafened) }
+            } label: {
                 Image(systemName: client.deafened ? "speaker.slash.fill" : "speaker.wave.2.fill").frame(width: 44, height: 48)
             }.accessibilityLabel(client.deafened ? "开启收听" : "关闭收听").disabled(client.audioBusy)
         }.padding(.leading, 12).padding(.trailing, 8).background(Palette.bottom)

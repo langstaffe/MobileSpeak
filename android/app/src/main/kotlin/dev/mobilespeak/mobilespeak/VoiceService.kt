@@ -11,11 +11,22 @@ import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
+import android.util.Log
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.launch
 
 internal class VoiceService : Service() {
-    private var running = false
-    private var worker: Thread? = null
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var foregroundHasMicrophone = false
+    private var microphoneUpgradeFailed = false
+    private var microphoneRecoveryReported = false
+    private var lastAppActive = false
+    private var lastAudioPolicy: String? = null
     private lateinit var audio: AudioEngine
     private lateinit var wakeLock: PowerManager.WakeLock
 
@@ -29,19 +40,23 @@ internal class VoiceService : Service() {
             .apply { acquire() }
         createChannel()
         showForeground(false)
-        running = true
-        worker = Thread(::runLoop, "MobileSpeakAudio").also { it.start() }
+        audio.start()
+        serviceScope.launch {
+            ClientSession.state.combine(ClientSession.appActive) { ui, active -> ui to active }
+                .collect { (ui, active) -> updateAudio(ui, active, userInitiated = false) }
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == ACTION_DISCONNECT) ClientSession.disconnect()
+        when (intent?.action) {
+            ACTION_DISCONNECT -> ClientSession.disconnect()
+            ACTION_START_CALL -> updateAudio(ClientSession.state.value, ClientSession.appActive.value, userInitiated = true)
+        }
         return START_STICKY
     }
 
     override fun onDestroy() {
-        running = false
-        worker?.interrupt()
-        worker?.takeIf { it !== Thread.currentThread() }?.join(1_000)
+        serviceScope.cancel()
         audio.stop()
         if (wakeLock.isHeld) wakeLock.release()
         super.onDestroy()
@@ -49,29 +64,47 @@ internal class VoiceService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
-    private fun runLoop() {
-        while (running) {
-            ClientSession.pollCore()
-            val ui = ClientSession.state.value
-            val wantsMicrophone = ClientSession.appActive && ClientSession.microphonePermission &&
-                !ui.microphoneMuted && !ui.deafened && ui.snapshot.status == "connected"
-            if (wantsMicrophone && !foregroundHasMicrophone) {
-                runCatching { showForeground(true) }.onFailure {
-                    ClientSession.reportError("无法启动后台麦克风：${it.message}")
-                    ClientSession.setAudio(inputMuted = true)
-                }
-            }
-            runCatching { audio.tick(ui, foregroundHasMicrophone) }.onFailure {
-                ClientSession.reportError("音频设备错误：${it.message}")
-                ClientSession.setAudio(inputMuted = true)
-                audio.stop()
-                Thread.sleep(100)
-            }
-            if (!ClientSession.shouldRunService()) break
+    private fun updateAudio(ui: SessionUiState, appActive: Boolean, userInitiated: Boolean) {
+        if (appActive && !lastAppActive) {
+            microphoneUpgradeFailed = false
+            microphoneRecoveryReported = false
         }
-        running = false
-        audio.stop()
-        stopSelf()
+        lastAppActive = appActive
+        val microphoneWanted = wantsForegroundMicrophone(
+            ClientSession.shouldRunService(), ClientSession.microphonePermission,
+            ui.microphoneMuted, ui.deafened,
+        )
+        if (!microphoneWanted) {
+            microphoneUpgradeFailed = false
+            microphoneRecoveryReported = false
+        }
+        if (microphoneWanted && !foregroundHasMicrophone &&
+            (appActive || userInitiated) && !microphoneUpgradeFailed
+        ) {
+            runCatching { showForeground(true) }.onFailure {
+                microphoneUpgradeFailed = true
+                ClientSession.reportError("无法启用后台麦克风，请重新打开 MobileSpeak 后重试：${it.message}")
+            }
+        }
+        val allowCapture = allowsMicrophoneCapture(
+            ui.snapshot.status == "connected", ClientSession.microphonePermission,
+            ui.microphoneMuted, ui.deafened, foregroundHasMicrophone,
+        )
+        val audioPolicy = "connected=${ui.snapshot.status == "connected"} permission=${ClientSession.microphonePermission} " +
+            "micOn=${!ui.microphoneMuted} listening=${!ui.deafened} foregroundMic=$foregroundHasMicrophone " +
+            "appActive=$appActive capture=$allowCapture"
+        if (lastAudioPolicy != audioPolicy) {
+            Log.i(TAG, "Audio policy $audioPolicy")
+            lastAudioPolicy = audioPolicy
+        }
+        if (ui.snapshot.status == "connected" && microphoneWanted &&
+            !foregroundHasMicrophone && !appActive && !microphoneRecoveryReported
+        ) {
+            microphoneRecoveryReported = true
+            ClientSession.reportError("后台麦克风暂不可用，请打开 MobileSpeak 自动恢复")
+        }
+        audio.update(ui, allowCapture)
+        if (!ClientSession.shouldRunService()) stopSelf()
     }
 
     @Suppress("DEPRECATION")
@@ -101,6 +134,7 @@ internal class VoiceService : Service() {
             startForeground(NOTIFICATION_ID, notification)
         }
         foregroundHasMicrophone = microphone
+        Log.i(TAG, "Foreground service microphone=$microphone")
     }
 
     private fun createChannel() {
@@ -111,9 +145,26 @@ internal class VoiceService : Service() {
         }
     }
 
-    private companion object {
-        const val CHANNEL = "mobilespeak.voice"
-        const val NOTIFICATION_ID = 7
-        const val ACTION_DISCONNECT = "dev.mobilespeak.mobilespeak.DISCONNECT"
+    companion object {
+        internal const val ACTION_START_CALL = "dev.mobilespeak.mobilespeak.START_CALL"
+        private const val CHANNEL = "mobilespeak.voice"
+        private const val NOTIFICATION_ID = 7
+        private const val ACTION_DISCONNECT = "dev.mobilespeak.mobilespeak.DISCONNECT"
+        private const val TAG = "MobileSpeakVoice"
     }
 }
+
+internal fun wantsForegroundMicrophone(
+    sessionRunning: Boolean,
+    permissionGranted: Boolean,
+    microphoneMuted: Boolean,
+    deafened: Boolean,
+) = sessionRunning && permissionGranted && !microphoneMuted && !deafened
+
+internal fun allowsMicrophoneCapture(
+    connected: Boolean,
+    permissionGranted: Boolean,
+    microphoneMuted: Boolean,
+    deafened: Boolean,
+    foregroundHasMicrophone: Boolean,
+) = connected && permissionGranted && !microphoneMuted && !deafened && foregroundHasMicrophone

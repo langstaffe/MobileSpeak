@@ -111,9 +111,34 @@ struct Bookmark: Codable, Identifiable {
     var host: String
     var port: UInt16
     var nickname: String
-    var password: String? = nil // nil identifies pre-migration bookmarks.
+    var password: String? = nil // Legacy plaintext only; new writes keep secrets in Keychain.
     var automaticallyNamed: Bool? = nil // Optional keeps existing bookmarks decodable.
     var address: String { "\(host.contains(":") ? "[\(host)]" : host):\(port)" }
+
+    private enum CodingKeys: String, CodingKey { case id, title, host, port, nickname, password, automaticallyNamed }
+    init(id: UUID, title: String, host: String, port: UInt16, nickname: String, password: String? = nil, automaticallyNamed: Bool? = nil) {
+        self.id = id; self.title = title; self.host = host; self.port = port; self.nickname = nickname
+        self.password = password; self.automaticallyNamed = automaticallyNamed
+    }
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(UUID.self, forKey: .id)
+        title = try values.decode(String.self, forKey: .title)
+        host = try values.decode(String.self, forKey: .host)
+        port = try values.decode(UInt16.self, forKey: .port)
+        nickname = try values.decode(String.self, forKey: .nickname)
+        password = try values.decodeIfPresent(String.self, forKey: .password)
+        automaticallyNamed = try values.decodeIfPresent(Bool.self, forKey: .automaticallyNamed)
+    }
+    func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(id, forKey: .id)
+        try values.encode(title, forKey: .title)
+        try values.encode(host, forKey: .host)
+        try values.encode(port, forKey: .port)
+        try values.encode(nickname, forKey: .nickname)
+        try values.encodeIfPresent(automaticallyNamed, forKey: .automaticallyNamed)
+    }
 }
 
 // The Rust callback runs under its output lock; only enqueue work here.
@@ -143,6 +168,17 @@ private func coreChanged(_ context: Int) {
     private func passwordQuery(_ id: UUID) -> [String: Any] {
         [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: "MobileSpeak.Bookmarks", kSecAttrAccount as String: id.uuidString]
     }
+    private func saveBookmarkPassword(_ password: String, id: UUID) throws {
+        let data = Data(password.utf8)
+        let status = SecItemUpdate(passwordQuery(id) as CFDictionary, [kSecValueData as String: data] as CFDictionary)
+        if status == errSecItemNotFound {
+            var query = passwordQuery(id)
+            query[kSecValueData as String] = data
+            query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+            let added = SecItemAdd(query as CFDictionary, nil)
+            guard added == errSecSuccess else { throw bookmarkError("无法安全保存书签密码（\(added)）") }
+        } else if status != errSecSuccess { throw bookmarkError("无法安全保存书签密码（\(status)）") }
+    }
     func bookmarkPassword(_ bookmark: Bookmark) throws -> String {
         guard let current = bookmarks.first(where: { $0.id == bookmark.id }) else { return "" }
         if let password = current.password { return password }
@@ -166,9 +202,10 @@ private func coreChanged(_ context: Int) {
         let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
         let existing = id.flatMap { id in bookmarks.first { $0.id == id } }
         let automaticallyNamed = title.isEmpty || (existing?.automaticallyNamed == true && title == existing?.title)
-        let bookmark = Bookmark(id: id ?? duplicate?.id ?? UUID(), title: title.isEmpty ? host : title, host: host, port: port, nickname: nickname, password: password, automaticallyNamed: automaticallyNamed)
+        let bookmark = Bookmark(id: id ?? duplicate?.id ?? UUID(), title: title.isEmpty ? host : title, host: host, port: port, nickname: nickname, password: nil, automaticallyNamed: automaticallyNamed)
         var next = bookmarks
         if let index = next.firstIndex(where: { $0.id == bookmark.id }) { next[index] = bookmark } else { next.append(bookmark) }
+        try saveBookmarkPassword(password, id: bookmark.id)
         let encoded = try JSONEncoder().encode(next)
         UserDefaults.standard.set(encoded, forKey: "mobilespeak.server.bookmarks")
         bookmarks = next
@@ -192,6 +229,8 @@ private func coreChanged(_ context: Int) {
             let next = bookmarks.filter { $0.id != bookmark.id }
             let data = try JSONEncoder().encode(next)
             UserDefaults.standard.set(data, forKey: "mobilespeak.server.bookmarks"); bookmarks = next
+            let status = SecItemDelete(passwordQuery(bookmark.id) as CFDictionary)
+            if status != errSecSuccess && status != errSecItemNotFound { throw bookmarkError("书签已删除，但密码清理失败（\(status)）") }
         } catch { self.error = error.localizedDescription }
     }
     func connectBookmark(_ bookmark: Bookmark) {
@@ -243,24 +282,19 @@ private func coreChanged(_ context: Int) {
         if let data = UserDefaults.standard.data(forKey: "mobilespeak.server.bookmarks") {
             do {
                 bookmarks = try JSONDecoder().decode([Bookmark].self, from: data)
-                var migrated = bookmarks
-                for index in migrated.indices where migrated[index].password == nil {
-                    migrated[index].password = try bookmarkPassword(migrated[index])
-                }
-                let encoded = try JSONEncoder().encode(migrated)
-                UserDefaults.standard.set(encoded, forKey: "mobilespeak.server.bookmarks")
-                // Remove old secrets only after the migrated local data is flushed.
-                if UserDefaults.standard.synchronize() {
-                    for bookmark in migrated {
-                        let status = SecItemDelete(passwordQuery(bookmark.id) as CFDictionary)
-                        if status != errSecSuccess && status != errSecItemNotFound {
-                            self.error = "密码已保存在应用内，但旧钥匙串副本清理失败（\(status)）"
+                if bookmarks.contains(where: { $0.password != nil }) {
+                    var migrated = bookmarks
+                    for index in migrated.indices {
+                        if let password = migrated[index].password {
+                            try saveBookmarkPassword(password, id: migrated[index].id)
+                            migrated[index].password = nil
                         }
                     }
+                    UserDefaults.standard.set(try JSONEncoder().encode(migrated), forKey: "mobilespeak.server.bookmarks")
+                    bookmarks = migrated
                 }
-                bookmarks = migrated
             }
-            catch { bookmarkLoadFailed = true; self.error = "无法读取已有书签" }
+            catch { bookmarkLoadFailed = true; self.error = "无法读取或安全迁移已有书签" }
         }
         ts_set_notifier(handle, coreChanged, Int(bitPattern: Unmanaged.passUnretained(self).toOpaque()))
         do {

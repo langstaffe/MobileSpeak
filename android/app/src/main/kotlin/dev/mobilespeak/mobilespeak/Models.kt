@@ -149,25 +149,25 @@ internal fun orderedChannels(channels: List<Channel>): List<Pair<Channel, Int>> 
 }
 
 internal fun JSONObject.snapshot() = Snapshot(
-    status = optString("status", "disconnected"),
+    status = getString("status"),
     server = stringOrNull("server"),
     serverId = stringOrNull("serverId"),
     ownClient = if (has("ownClient") && !isNull("ownClient")) getLong("ownClient") else null,
     canSend = optBoolean("canSend"),
-    channels = optJSONArray("channels").objects().map {
+    channels = getJSONArray("channels").objects().map {
         Channel(it.getLong("id"), it.getLong("parent"), it.getLong("order"), it.getString("name"),
-            it.optBoolean("password"), it.optBoolean("permanent"), it.getString("key"), it.stringOrNull("iconPath"))
+            it.getBoolean("password"), it.getBoolean("permanent"), it.getString("key"), it.stringOrNull("iconPath"))
     },
-    clients = optJSONArray("clients").objects().map { client ->
+    clients = getJSONArray("clients").objects().map { client ->
         Member(
             client.getLong("id"), client.getLong("channel"), client.stringOrNull("uid"),
             client.getString("name"), client.stringOrNull("avatarPath"),
-            client.optJSONArray("badges").objects().map {
-                Badge(it.getString("id"), it.getString("name"), it.optString("description"), it.stringOrNull("iconPath"))
+            client.getJSONArray("badges").objects().map {
+                Badge(it.getString("id"), it.getString("name"), it.getString("description"), it.stringOrNull("iconPath"))
             },
-            client.optJSONArray("serverGroupIcons").objects().map(JSONObject::groupIcon),
+            client.getJSONArray("serverGroupIcons").objects().map(JSONObject::groupIcon),
             client.optJSONObject("channelGroupIcon")?.groupIcon(),
-            client.optBoolean("muted"), client.optBoolean("deafened"), client.optBoolean("speaking"),
+            client.getBoolean("muted"), client.getBoolean("deafened"), client.getBoolean("speaking"),
         )
     },
 )

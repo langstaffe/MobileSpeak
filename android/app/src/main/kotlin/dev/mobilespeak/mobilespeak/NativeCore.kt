@@ -7,6 +7,7 @@ internal object NativeCore {
 
     external fun create(): Long
     external fun destroy(handle: Long)
+    external fun setNotifier(handle: Long, callback: Runnable)
     external fun command(handle: Long, json: ByteArray): Int
     external fun poll(handle: Long): ByteArray
     external fun capture(handle: Long, samples: ShortArray): Int

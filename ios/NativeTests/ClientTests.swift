@@ -36,7 +36,9 @@ final class ClientTests: XCTestCase {
         let saved = try XCTUnwrap(UserDefaults.standard.data(forKey: "mobilespeak.server.bookmarks"))
         let restored = try JSONDecoder().decode([Bookmark].self, from: saved)
         XCTAssertEqual(restored.first { $0.id == first.id }?.title, "Updated")
-        XCTAssertEqual(restored.first { $0.id == first.id }?.password, "new")
+        XCTAssertNil(restored.first { $0.id == first.id }?.password)
+        XCTAssertFalse(String(decoding: saved, as: UTF8.self).contains("new"))
+        XCTAssertFalse(String(decoding: saved, as: UTF8.self).contains("\"password\""))
         let automaticHost = "automatic-" + UUID().uuidString.lowercased() + ".invalid"
         let automatic = try client.saveBookmark(id: nil, title: " ", host: automaticHost, port: "9987", nickname: "Auto", password: "")
         defer { if let existing = client.bookmarks.first(where: { $0.id == automatic.id }) { client.deleteBookmark(existing) } }
