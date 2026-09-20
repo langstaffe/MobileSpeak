@@ -1,8 +1,5 @@
 # Sources and attribution
 
-- The small-screen theme, avatar, channel card and shell design were adapted from
-  the user-provided `OpenSpeak-origin/clients/openspeak_flutter` project. Its
-  networking and large-screen shell are not included.
 - ReSpeak tsclientlib / tsproto and associated crates:
   https://github.com/ReSpeak/tsclientlib at
   `ee3bc6f45a7137db7793ba5593a321df400d53e5`.
