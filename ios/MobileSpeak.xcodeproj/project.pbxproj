@@ -8,6 +8,9 @@
 
 /* Begin PBXBuildFile section */
 		13E8F9300ACA15717F4C749C /* Client.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37A3535BB9D060841FB2CEEC /* Client.swift */; };
+		111111111111111111111111 /* Localization.swift in Sources */ = {isa = PBXBuildFile; fileRef = 211111111111111111111111 /* Localization.swift */; };
+		111111111111111111111112 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = 211111111111111111111112 /* Localizable.xcstrings */; };
+		111111111111111111111113 /* InfoPlist.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = 211111111111111111111113 /* InfoPlist.xcstrings */; };
 		165C073EA77147B1676EE3C0 /* MobileSpeakApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7D2572E637A1C51E30A4519 /* MobileSpeakApp.swift */; };
 		6317AE4C14ECBCC8F0DFBF3D /* SystemConfiguration.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 8C1144A663D967B4FCADADAB /* SystemConfiguration.framework */; };
 		A1B12660C3DA874D9ECF159A /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 1C1AAF64A80E5FFD5457D916 /* Assets.xcassets */; };
@@ -35,6 +38,9 @@
 		23B2A010392BFAE0468B4830 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS18.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
 		306CA6145F660C9BE190E8E4 /* TeamSpeakCore.xcframework */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = wrapper.xcframework; name = TeamSpeakCore.xcframework; path = NativeCore/TeamSpeakCore.xcframework; sourceTree = "<group>"; };
 		37A3535BB9D060841FB2CEEC /* Client.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = Client.swift; sourceTree = "<group>"; };
+		211111111111111111111111 /* Localization.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = Localization.swift; sourceTree = "<group>"; };
+		211111111111111111111112 /* Localizable.xcstrings */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
+		211111111111111111111113 /* InfoPlist.xcstrings */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.json.xcstrings; path = InfoPlist.xcstrings; sourceTree = "<group>"; };
 		3D9C8FCCE4718DE6FF283742 /* MobileSpeak.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MobileSpeak.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		51A7C0F10000000000000001 /* Signing.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Signing.xcconfig; sourceTree = "<group>"; };
 		633D1384CC59F2C8E2C7E9E6 /* MobileSpeakTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MobileSpeakTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -116,8 +122,11 @@
 			isa = PBXGroup;
 			children = (
 				37A3535BB9D060841FB2CEEC /* Client.swift */,
+				211111111111111111111111 /* Localization.swift */,
 				A7D2572E637A1C51E30A4519 /* MobileSpeakApp.swift */,
 				8BD3729E0DF38C8A25D988B4 /* PhoneAudio.swift */,
+				211111111111111111111112 /* Localizable.xcstrings */,
+				211111111111111111111113 /* InfoPlist.xcstrings */,
 				B4E0B8A6E7B94356A4A9531F /* Info.plist */,
 				ED2CB517EC35367D879FD831 /* Core.h */,
 				1C1AAF64A80E5FFD5457D916 /* Assets.xcassets */,
@@ -195,6 +204,7 @@
 			hasScannedForEncodings = 0;
 			knownRegions = (
 				en,
+				"zh-Hans",
 				Base,
 			);
 			mainGroup = 607B1811695CA760B73CC6FB;
@@ -221,6 +231,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				A1B12660C3DA874D9ECF159A /* Assets.xcassets in Resources */,
+				111111111111111111111112 /* Localizable.xcstrings in Resources */,
+				111111111111111111111113 /* InfoPlist.xcstrings in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -240,6 +252,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				13E8F9300ACA15717F4C749C /* Client.swift in Sources */,
+				111111111111111111111111 /* Localization.swift in Sources */,
 				165C073EA77147B1676EE3C0 /* MobileSpeakApp.swift in Sources */,
 				F466C91B6C090487C9883AA8 /* PhoneAudio.swift in Sources */,
 			);
@@ -341,8 +354,6 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = NativeApp/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = MobileSpeak;
-				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "连接你选择的局域网 TeamSpeak 服务器。";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "在你开启麦克风后，将语音发送给 TeamSpeak 频道中的成员。";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
@@ -459,8 +470,6 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = NativeApp/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = MobileSpeak;
-				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "连接你选择的局域网 TeamSpeak 服务器。";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "在你开启麦克风后，将语音发送给 TeamSpeak 频道中的成员。";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";

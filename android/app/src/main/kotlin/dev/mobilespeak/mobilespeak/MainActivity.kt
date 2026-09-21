@@ -5,10 +5,10 @@ import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
 import android.os.Build
 import android.os.Bundle
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
@@ -20,6 +20,7 @@ import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Canvas
@@ -65,6 +66,11 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -79,7 +85,7 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.UUID
 
-class MainActivity : ComponentActivity() {
+class MainActivity : AppCompatActivity() {
     private val permissionRequest = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
     ) { result ->
@@ -235,9 +241,9 @@ private fun MobileSpeakApp(requestPermissions: () -> Unit) {
                         Column(Modifier.background(Palette.bottom).navigationBarsPadding()) {
                             VoiceBar(ui, requestPermissions)
                             Row(Modifier.padding(top = 10.dp, bottom = 8.dp)) {
-                                NavigationItem("频道", UiIcons.Number, tab == 0, ui.unread.channelCount) { tab = 0 }
-                                NavigationItem("成员", UiIcons.People, tab == 1, ui.unread.privateCounts.values.sum()) { tab = 1 }
-                                NavigationItem("设置", UiIcons.Gear, tab == 2, 0) { tab = 2 }
+                                NavigationItem(stringResource(R.string.tab_channels), UiIcons.Number, tab == 0, ui.unread.channelCount) { tab = 0 }
+                                NavigationItem(stringResource(R.string.tab_members), UiIcons.People, tab == 1, ui.unread.privateCounts.values.sum()) { tab = 1 }
+                                NavigationItem(stringResource(R.string.tab_settings), UiIcons.Gear, tab == 2, 0) { tab = 2 }
                             }
                         }
                     },
@@ -249,7 +255,7 @@ private fun MobileSpeakApp(requestPermissions: () -> Unit) {
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 Text(it, Modifier.weight(1f), fontSize = 13.sp, lineHeight = 16.sp)
-                                TextButton(onClick = ClientSession::clearError) { Text("关闭") }
+                                TextButton(onClick = ClientSession::clearError) { Text(stringResource(R.string.action_close)) }
                             }
                         }
                         when {
@@ -293,15 +299,15 @@ private fun MobileSpeakApp(requestPermissions: () -> Unit) {
     deletingBookmark?.let { bookmark ->
         AlertDialog(
             onDismissRequest = { deletingBookmark = null },
-            title = { Text("删除书签") },
-            text = { Text("确定删除“${bookmark.title}”吗？") },
+            title = { Text(stringResource(R.string.bookmark_delete_title)) },
+            text = { Text(stringResource(R.string.bookmark_delete_message, bookmark.title)) },
             confirmButton = {
                 Button(onClick = {
                     ClientSession.deleteBookmark(bookmark)
                     deletingBookmark = null
-                }) { Text("删除") }
+                }) { Text(stringResource(R.string.action_delete)) }
             },
-            dismissButton = { TextButton(onClick = { deletingBookmark = null }) { Text("取消") } },
+            dismissButton = { TextButton(onClick = { deletingBookmark = null }) { Text(stringResource(R.string.action_cancel)) } },
         )
     }
     selectedChannel?.let { channel ->
@@ -316,6 +322,7 @@ private fun MobileSpeakApp(requestPermissions: () -> Unit) {
 
 @Composable
 private fun Header(ui: SessionUiState) {
+    val disconnectLabel = stringResource(R.string.action_disconnect)
     Column {
     Row(
         Modifier.fillMaxWidth().height(64.dp).padding(horizontal = 14.dp),
@@ -335,11 +342,11 @@ private fun Header(ui: SessionUiState) {
         Text(server ?: "MobileSpeak", Modifier.weight(1f), fontSize = 16.sp, lineHeight = 19.sp, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.ExtraBold, maxLines = 1)
         if (ui.snapshot.status != "disconnected") {
             Box(
-                Modifier.size(44.dp).clickable { ClientSession.disconnect() },
+                Modifier.size(44.dp).semantics { contentDescription = disconnectLabel }.clickable { ClientSession.disconnect() },
                 contentAlignment = Alignment.Center,
             ) {
                 Box(Modifier.size(34.dp).clip(CircleShape).background(Palette.disconnect), contentAlignment = Alignment.Center) {
-                    Text("OFF", fontSize = 10.sp, lineHeight = 12.sp, fontWeight = FontWeight.Black)
+                    Text(stringResource(R.string.disconnect_badge), fontSize = 10.sp, lineHeight = 12.sp, fontWeight = FontWeight.Black)
                 }
             }
         }
@@ -357,7 +364,7 @@ private fun BusyScreen(status: String) {
     ) {
         CircularProgressIndicator()
         Spacer(Modifier.height(18.dp))
-        Text(if (status == "reconnecting") "正在重新连接…" else "正在连接服务器…")
+        Text(stringResource(if (status == "reconnecting") R.string.status_reconnecting else R.string.status_connecting_server))
     }
 }
 
@@ -373,20 +380,20 @@ private fun BookmarkScreen(
         Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
             Icon(UiIcons.Headphones, null, Modifier.size(52.dp), tint = Palette.muted)
             Spacer(Modifier.height(16.dp))
-            Text("随时加入对话", fontSize = 20.sp, lineHeight = 24.sp, fontWeight = FontWeight.ExtraBold)
+            Text(stringResource(R.string.empty_title), fontSize = 20.sp, lineHeight = 24.sp, fontWeight = FontWeight.ExtraBold)
             Spacer(Modifier.height(16.dp))
-            Text("连接你的 TeamSpeak 服务器，和朋友一起聊天", color = Palette.muted, textAlign = TextAlign.Center, fontSize = 15.sp, lineHeight = 18.sp)
+            Text(stringResource(R.string.empty_message), color = Palette.muted, textAlign = TextAlign.Center, fontSize = 15.sp, lineHeight = 18.sp)
             Button(onClick = onAdd, modifier = Modifier.padding(top = 8.dp), shape = CircleShape,
                 colors = ButtonDefaults.buttonColors(containerColor = Palette.accent, contentColor = Palette.text)) {
                 Icon(UiIcons.Plus, null, Modifier.size(18.dp))
                 Spacer(Modifier.width(8.dp))
-                Text("连接服务器")
+                Text(stringResource(R.string.action_connect_server))
             }
         }
         return
     }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        item { Text("服务器书签", fontSize = 20.sp, lineHeight = 24.sp, fontWeight = FontWeight.Bold) }
+        item { Text(stringResource(R.string.bookmarks_title), fontSize = 20.sp, lineHeight = 24.sp, fontWeight = FontWeight.Bold) }
         items(ui.bookmarks, key = { it.id }) { bookmark ->
             var menu by remember { mutableStateOf(false) }
             Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Palette.card).padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -399,10 +406,10 @@ private fun BookmarkScreen(
                     }
                 }
                 Box {
-                    IconButton(onClick = { menu = true }, modifier = Modifier.size(44.dp)) { Icon(UiIcons.More, "管理${bookmark.title}", tint = Palette.text) }
+                    IconButton(onClick = { menu = true }, modifier = Modifier.size(44.dp)) { Icon(UiIcons.More, stringResource(R.string.bookmark_manage, bookmark.title), tint = Palette.text) }
                     DropdownMenu(expanded = menu, onDismissRequest = { menu = false }, containerColor = Palette.card) {
-                        DropdownMenuItem(text = { Text("编辑") }, onClick = { menu = false; onEdit(bookmark) })
-                        DropdownMenuItem(text = { Text("删除", color = Palette.disconnect) }, onClick = { menu = false; onDelete(bookmark) })
+                        DropdownMenuItem(text = { Text(stringResource(R.string.action_edit)) }, onClick = { menu = false; onEdit(bookmark) })
+                        DropdownMenuItem(text = { Text(stringResource(R.string.action_delete), color = Palette.disconnect) }, onClick = { menu = false; onDelete(bookmark) })
                     }
                 }
             }
@@ -410,7 +417,7 @@ private fun BookmarkScreen(
         item {
             Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(onClick = onAdd).padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Icon(UiIcons.Plus, null, Modifier.size(18.dp))
-                Text("添加服务器", fontSize = 17.sp, lineHeight = 20.sp)
+                Text(stringResource(R.string.bookmark_add_server), fontSize = 17.sp, lineHeight = 20.sp)
             }
         }
     }
@@ -441,29 +448,29 @@ private fun BookmarkDialog(existing: Bookmark?, onDismiss: () -> Unit, onSaved: 
         ) {
             Box(Modifier.fillMaxWidth().heightIn(min = 56.dp)) {
                 TextButton(onClick = onDismiss, modifier = Modifier.align(Alignment.CenterStart)) {
-                    Text("取消", fontSize = 17.sp, lineHeight = 20.sp)
+                    Text(stringResource(R.string.action_cancel), fontSize = 17.sp, lineHeight = 20.sp)
                 }
                 Text(
-                    if (existing == null) "添加服务器" else "编辑服务器",
+                    stringResource(if (existing == null) R.string.bookmark_add_server else R.string.bookmark_edit_server),
                     Modifier.align(Alignment.Center),
                     fontSize = 20.sp,
                     lineHeight = 24.sp,
                     fontWeight = FontWeight.Bold,
                 )
             }
-            Text("服务器", Modifier.padding(start = 16.dp, top = 16.dp, bottom = 10.dp), color = Palette.muted, fontWeight = FontWeight.SemiBold)
+            Text(stringResource(R.string.server_section), Modifier.padding(start = 16.dp, top = 16.dp, bottom = 10.dp), color = Palette.muted, fontWeight = FontWeight.SemiBold)
             Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Palette.card)) {
-                BookmarkField(title, { title = it }, "书签名称（可选）")
+                BookmarkField(title, { title = it }, stringResource(R.string.bookmark_name_optional))
                 HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = Palette.border)
-                BookmarkField(host, { host = it }, "地址 / 域名", KeyboardType.Uri)
+                BookmarkField(host, { host = it }, stringResource(R.string.server_address), KeyboardType.Uri)
                 HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = Palette.border)
-                BookmarkField(port, { port = it }, "端口", KeyboardType.Number)
+                BookmarkField(port, { port = it }, stringResource(R.string.server_port), KeyboardType.Number)
                 HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = Palette.border)
-                BookmarkField(password, { password = it }, "服务器密码（可选）", KeyboardType.Password, PasswordVisualTransformation())
+                BookmarkField(password, { password = it }, stringResource(R.string.server_password_optional), KeyboardType.Password, PasswordVisualTransformation())
             }
-            Text("昵称", Modifier.padding(start = 16.dp, top = 28.dp, bottom = 10.dp), color = Palette.muted, fontWeight = FontWeight.SemiBold)
+            Text(stringResource(R.string.nickname), Modifier.padding(start = 16.dp, top = 28.dp, bottom = 10.dp), color = Palette.muted, fontWeight = FontWeight.SemiBold)
             Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Palette.card)) {
-                BookmarkField(nickname, { nickname = it }, "昵称")
+                BookmarkField(nickname, { nickname = it }, stringResource(R.string.nickname))
             }
             Spacer(Modifier.height(28.dp))
             Surface(
@@ -476,7 +483,7 @@ private fun BookmarkDialog(existing: Bookmark?, onDismiss: () -> Unit, onSaved: 
                 contentColor = Palette.accent,
             ) {
                 Box(Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = 16.dp), contentAlignment = Alignment.CenterStart) {
-                    Text(if (existing == null) "保存并连接" else "保存", fontSize = 17.sp, lineHeight = 20.sp)
+                    Text(stringResource(if (existing == null) R.string.action_save_and_connect else R.string.action_save), fontSize = 17.sp, lineHeight = 20.sp)
                 }
             }
         }
@@ -515,7 +522,7 @@ private fun ChannelScreen(ui: SessionUiState, onSelect: (Channel) -> Unit, onCha
     val haptic = LocalHapticFeedback.current
     val ownChannel = ui.snapshot.clients.firstOrNull { it.id == ui.snapshot.ownClient }?.channel
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(14.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
-        item { Text("频道", Modifier.padding(bottom = 8.dp), fontSize = 20.sp, lineHeight = 24.sp, fontWeight = FontWeight.ExtraBold) }
+        item { Text(stringResource(R.string.tab_channels), Modifier.padding(bottom = 8.dp), fontSize = 20.sp, lineHeight = 24.sp, fontWeight = FontWeight.ExtraBold) }
         items(orderedChannels(ui.snapshot.channels), key = { it.first.id }) { (channel, depth) ->
             val spacer = channelSpacer(channel)
             val selected = channel.id == ownChannel
@@ -540,12 +547,13 @@ private fun ChannelScreen(ui: SessionUiState, onSelect: (Channel) -> Unit, onCha
                         }
                         if (members.isNotEmpty()) Row(Modifier.padding(start = 30.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                             members.take(2).forEach { Avatar(it.name, it.avatarPath, it.speaking, 24) }
-                            Text(members.take(2).joinToString("、") { it.name } + " · ${members.size} 人在线", fontSize = 11.sp, lineHeight = 13.sp, color = Palette.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            val names = members.take(2).joinToString(stringResource(R.string.member_name_separator)) { it.name }
+                            Text(pluralStringResource(R.plurals.channel_members_summary, members.size, names, members.size), fontSize = 11.sp, lineHeight = 13.sp, color = Palette.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                     }
                     Box {
                         Box(Modifier.size(48.dp).clip(RoundedCornerShape(10.dp)).background(Palette.bottom).clickable(enabled = selected) { onChat(channel) }, contentAlignment = Alignment.Center) {
-                            Icon(UiIcons.Chat, "频道聊天", Modifier.size(28.dp), tint = if (selected) Color.White else Palette.muted.copy(alpha = .45f))
+                            Icon(UiIcons.Chat, stringResource(R.string.channel_chat_open, channel.name), Modifier.size(28.dp), tint = if (selected) Color.White else Palette.muted.copy(alpha = .45f))
                         }
                         if (selected) UnreadBadge(ui.unread.channelCount, Modifier.align(Alignment.TopEnd).offset(x = 5.dp, y = (-5).dp))
                     }
@@ -574,10 +582,10 @@ private fun ChannelDialog(channel: Channel, ui: SessionUiState, onDismiss: () ->
                     ChannelIcon(current, 28)
                     Spacer(Modifier.width(8.dp))
                     Text(current.name, Modifier.weight(1f), fontSize = 20.sp, lineHeight = 24.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    TextButton(onClick = onDismiss) { Text("关闭", fontSize = 17.sp, lineHeight = 20.sp) }
+                    TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_close), fontSize = 17.sp, lineHeight = 20.sp) }
                 }
                 Column(Modifier.fillMaxWidth().heightIn(min = 52.dp, max = listMaximum).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                    if (members.isEmpty()) Text("暂时没有成员", Modifier.padding(vertical = 16.dp), color = Palette.muted)
+                    if (members.isEmpty()) Text(stringResource(R.string.channel_no_members), Modifier.padding(vertical = 16.dp), color = Palette.muted)
                     members.forEach { MemberRow(it) }
                 }
                 Button(onClick = {
@@ -586,21 +594,21 @@ private fun ChannelDialog(channel: Channel, ui: SessionUiState, onDismiss: () ->
                 }, enabled = ui.snapshot.status == "connected" && ownChannel != current.id,
                     modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp), shape = RoundedCornerShape(14.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = Palette.accent, contentColor = Palette.text, disabledContainerColor = Color(0xFF050608), disabledContentColor = Palette.card)) {
-                    Text("加入频道", fontSize = 17.sp, lineHeight = 20.sp, fontWeight = FontWeight.SemiBold)
+                    Text(stringResource(R.string.channel_join), fontSize = 17.sp, lineHeight = 20.sp, fontWeight = FontWeight.SemiBold)
                 }
             }
         }
     }
-    if (passwordPrompt) AlertDialog(onDismissRequest = { passwordPrompt = false }, title = { Text("频道密码") }, text = {
-        OutlinedTextField(password, { password = it }, singleLine = true, visualTransformation = PasswordVisualTransformation(), label = { Text("密码") })
-    }, confirmButton = { TextButton(onClick = { ClientSession.join(current, password); onDismiss() }) { Text("加入") } },
-        dismissButton = { TextButton(onClick = { passwordPrompt = false }) { Text("取消") } })
+    if (passwordPrompt) AlertDialog(onDismissRequest = { passwordPrompt = false }, title = { Text(stringResource(R.string.channel_password)) }, text = {
+        OutlinedTextField(password, { password = it }, singleLine = true, visualTransformation = PasswordVisualTransformation(), label = { Text(stringResource(R.string.password)) })
+    }, confirmButton = { TextButton(onClick = { ClientSession.join(current, password); onDismiss() }) { Text(stringResource(R.string.action_join)) } },
+        dismissButton = { TextButton(onClick = { passwordPrompt = false }) { Text(stringResource(R.string.action_cancel)) } })
 }
 
 @Composable
 private fun MemberScreen(ui: SessionUiState, onChat: (Member) -> Unit) {
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        item { Text("成员", fontSize = 20.sp, lineHeight = 24.sp, fontWeight = FontWeight.Bold) }
+        item { Text(stringResource(R.string.tab_members), fontSize = 20.sp, lineHeight = 24.sp, fontWeight = FontWeight.Bold) }
         items(ui.snapshot.clients.filter { it.id != ui.snapshot.ownClient }, key = { it.id }) { member ->
             MemberRow(member, Modifier.clickable(enabled = member.uid != null) { onChat(member) }, ui.unread.privateCounts[member.uid] ?: 0)
         }
@@ -624,7 +632,7 @@ private fun MemberRow(member: Member, modifier: Modifier = Modifier, unread: Int
             group?.let { GroupIconView(it) }
         }
         Icon(if (member.deafened) UiIcons.SpeakerOff else if (member.muted) UiIcons.MicOff else UiIcons.Mic,
-            if (member.deafened) "关闭收听" else if (member.muted) "已静音" else if (member.speaking) "正在说话" else "麦克风开启",
+            stringResource(if (member.deafened) R.string.member_listening_off else if (member.muted) R.string.member_muted else if (member.speaking) R.string.member_speaking else R.string.member_microphone_on),
             Modifier.size(20.dp), tint = if (member.speaking) Palette.green else Palette.muted)
     }
 }
@@ -632,36 +640,66 @@ private fun MemberRow(member: Member, modifier: Modifier = Modifier, unread: Int
 @Composable
 private fun SettingsScreen(ui: SessionUiState, requestPermissions: () -> Unit) {
     val haptic = LocalHapticFeedback.current
+    val selectedLanguage = AppLanguage.selected()
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
-        Text("设置", fontSize = 20.sp, lineHeight = 24.sp, fontWeight = FontWeight.Bold)
-        SettingSwitch("麦克风", !ui.microphoneMuted, !ui.deafened) { enabled ->
+        Text(stringResource(R.string.tab_settings), fontSize = 20.sp, lineHeight = 24.sp, fontWeight = FontWeight.Bold)
+        SettingSwitch(stringResource(R.string.settings_microphone), !ui.microphoneMuted, !ui.deafened) { enabled ->
             if (enabled && !ClientSession.microphonePermission) requestPermissions()
             else ClientSession.setAudio(inputMuted = !enabled)
         }
-        Text("默认开启，关闭扬声器时麦克风也会静音", fontSize = 13.sp, lineHeight = 16.sp, color = Palette.muted)
-        SettingSwitch("收听", !ui.deafened) { ClientSession.setAudio(deafened = !it) }
+        Text(stringResource(R.string.settings_microphone_help), fontSize = 13.sp, lineHeight = 16.sp, color = Palette.muted)
+        SettingSwitch(stringResource(R.string.settings_listening), !ui.deafened) { ClientSession.setAudio(deafened = !it) }
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("噪音抑制", fontSize = 17.sp, lineHeight = 20.sp)
+            Text(stringResource(R.string.settings_noise_suppression), fontSize = 17.sp, lineHeight = 20.sp)
             Column(Modifier.clip(RoundedCornerShape(14.dp)).background(Palette.card)) {
-                listOf("rnnoise" to "RNNoise", "none" to "无").forEachIndexed { index, (mode, label) ->
+                listOf("rnnoise" to "RNNoise", "none" to stringResource(R.string.settings_noise_none)).forEachIndexed { index, (mode, label) ->
                     if (index > 0) HorizontalDivider(Modifier.padding(start = 16.dp), color = Palette.border)
                     val selected = ui.noiseSuppression == mode
-                    Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).selectable(selected, role = Role.RadioButton) {
+                    val selectionState = stringResource(if (selected) R.string.selection_selected else R.string.selection_not_selected)
+                    Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).semantics { stateDescription = selectionState }.selectable(selected, role = Role.RadioButton) {
                         if (!selected) {
                             haptic.performHapticFeedback(HapticFeedbackType.SegmentTick)
                             ClientSession.setNoiseSuppression(mode)
                         }
                     }.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text(label, Modifier.weight(1f), fontSize = 17.sp, lineHeight = 20.sp)
-                        Canvas(Modifier.size(22.dp)) {
-                            val color = if (selected) Palette.accent else Palette.muted
-                            drawCircle(color, radius = size.minDimension / 2 - 1.dp.toPx(), style = Stroke(1.8.dp.toPx()))
-                            if (selected) drawCircle(color, radius = size.minDimension / 2 - 4.dp.toPx())
-                        }
+                        SelectionCircle(selected)
                     }
                 }
             }
         }
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(stringResource(R.string.settings_language), fontSize = 17.sp, lineHeight = 20.sp)
+            Column(Modifier.clip(RoundedCornerShape(14.dp)).background(Palette.card)) {
+                AppLanguage.entries.forEachIndexed { index, language ->
+                    if (index > 0) HorizontalDivider(Modifier.padding(start = 16.dp), color = Palette.border)
+                    val selected = selectedLanguage == language
+                    val label = stringResource(when (language) {
+                        AppLanguage.SYSTEM -> R.string.language_system
+                        AppLanguage.SIMPLIFIED_CHINESE -> R.string.language_simplified_chinese
+                        AppLanguage.ENGLISH -> R.string.language_english
+                    })
+                    val selectionState = stringResource(if (selected) R.string.selection_selected else R.string.selection_not_selected)
+                    Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).semantics { stateDescription = selectionState }.selectable(selected, role = Role.RadioButton) {
+                        if (AppLanguage.select(language)) {
+                            haptic.performHapticFeedback(HapticFeedbackType.SegmentTick)
+                        }
+                    }.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(label, Modifier.weight(1f), fontSize = 17.sp, lineHeight = 20.sp)
+                        SelectionCircle(selected)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SelectionCircle(selected: Boolean) {
+    Canvas(Modifier.size(22.dp)) {
+        val color = if (selected) Palette.accent else Palette.muted
+        drawCircle(color, radius = size.minDimension / 2 - 1.dp.toPx(), style = Stroke(1.8.dp.toPx()))
+        if (selected) drawCircle(color, radius = size.minDimension / 2 - 4.dp.toPx())
     }
 }
 
@@ -698,25 +736,26 @@ private fun VoiceBar(ui: SessionUiState, requestPermissions: () -> Unit) {
     val muted = ui.microphoneMuted || ui.deafened
     Row(Modifier.fillMaxWidth().background(Palette.bottom).padding(start = 12.dp, end = 8.dp).heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Icon(UiIcons.Wave, null, Modifier.size(18.dp), tint = if (connected) Palette.green else Palette.muted)
-        Text(if (connected) "已连接到 #${ui.snapshot.channels.firstOrNull { it.id == channel }?.name.orEmpty()}" else if (ui.snapshot.status in listOf("connecting", "reconnecting")) "正在连接…" else "未连接", Modifier.weight(1f), fontSize = 12.sp, lineHeight = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(if (connected) stringResource(R.string.status_connected_to_channel, ui.snapshot.channels.firstOrNull { it.id == channel }?.name.orEmpty()) else if (ui.snapshot.status in listOf("connecting", "reconnecting")) stringResource(R.string.status_connecting) else stringResource(R.string.status_disconnected), Modifier.weight(1f), fontSize = 12.sp, lineHeight = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
         IconButton(onClick = {
             haptic.performHapticFeedback(toggleHapticType(ui.microphoneMuted))
             if (ui.microphoneMuted && !ClientSession.microphonePermission) requestPermissions()
             else ClientSession.setAudio(inputMuted = !ui.microphoneMuted)
         }, enabled = !ui.deafened, modifier = Modifier.size(44.dp, 48.dp)) {
-            Icon(if (muted) UiIcons.MicOff else UiIcons.Mic, if (muted) "开启麦克风" else "静音", Modifier.size(20.dp), tint = if (muted) Palette.muted else Palette.green)
+            Icon(if (muted) UiIcons.MicOff else UiIcons.Mic, stringResource(if (muted) R.string.voice_enable_microphone else R.string.voice_mute), Modifier.size(20.dp), tint = if (muted) Palette.muted else Palette.green)
         }
         IconButton(onClick = {
             haptic.performHapticFeedback(toggleHapticType(ui.deafened))
             ClientSession.setAudio(deafened = !ui.deafened)
         }, modifier = Modifier.size(44.dp, 48.dp)) {
-            Icon(if (ui.deafened) UiIcons.SpeakerOff else UiIcons.Speaker, if (ui.deafened) "开启收听" else "关闭收听", Modifier.size(22.dp), tint = Palette.text)
+            Icon(if (ui.deafened) UiIcons.SpeakerOff else UiIcons.Speaker, stringResource(if (ui.deafened) R.string.voice_enable_listening else R.string.voice_disable_listening), Modifier.size(22.dp), tint = Palette.text)
         }
     }
 }
 
 @Composable
 private fun ChatScreen(target: ChatTarget, ui: SessionUiState, active: Boolean, onBack: () -> Unit) {
+    val context = LocalContext.current
     val messages = ui.messages.filter { it.conversation == target.conversation }
     val token = remember(target.conversation) { UUID.randomUUID().toString() }
     var input by androidx.compose.runtime.saveable.rememberSaveable(target.conversation) { mutableStateOf("") }
@@ -739,7 +778,7 @@ private fun ChatScreen(target: ChatTarget, ui: SessionUiState, active: Boolean, 
     Column(Modifier.fillMaxSize().background(Palette.background).windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)).navigationBarsPadding().imePadding()) {
         Box(Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = 14.dp)) {
             IconButton(onClick = onBack, modifier = Modifier.align(Alignment.CenterStart).size(44.dp)) {
-                Icon(UiIcons.Back, "返回", Modifier.size(24.dp), tint = Palette.text)
+                Icon(UiIcons.Back, stringResource(R.string.action_back), Modifier.size(24.dp), tint = Palette.text)
             }
             Row(Modifier.align(Alignment.Center).padding(horizontal = 52.dp).heightIn(min = 56.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 peer?.let { Avatar(it.name, it.avatarPath, false, 30) }
@@ -762,8 +801,8 @@ private fun ChatScreen(target: ChatTarget, ui: SessionUiState, active: Boolean, 
                             }
                             if (message.own && message.status == "pending") CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 1.dp, color = Palette.muted)
                             if (message.own && message.status == "failed") Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Icon(UiIcons.Error, "发送失败", Modifier.size(12.dp), tint = Palette.disconnect)
-                                Text(message.error ?: "发送失败", fontSize = 11.sp, lineHeight = 13.sp, color = Palette.disconnect)
+                                Icon(UiIcons.Error, stringResource(R.string.chat_send_failed), Modifier.size(12.dp), tint = Palette.disconnect)
+                                Text(message.error?.let { context.localizedCoreError(it, "") } ?: stringResource(R.string.chat_send_failed), fontSize = 11.sp, lineHeight = 13.sp, color = Palette.disconnect)
                             }
                         }
                         if (message.own) {
@@ -779,13 +818,13 @@ private fun ChatScreen(target: ChatTarget, ui: SessionUiState, active: Boolean, 
             BasicTextField(input, { input = it }, Modifier.weight(1f).heightIn(min = 34.dp).clip(RoundedCornerShape(5.dp)).background(Color.Black)
                 .then(if (input.toByteArray().size > 8192) Modifier.border(1.dp, Palette.disconnect, RoundedCornerShape(5.dp)) else Modifier).padding(horizontal = 7.dp, vertical = 6.dp),
                 textStyle = androidx.compose.ui.text.TextStyle(color = Palette.text, fontSize = 17.sp, lineHeight = 20.sp), cursorBrush = SolidColor(Palette.accent), maxLines = 4,
-                decorationBox = { field -> Box { if (input.isEmpty()) Text("输入消息", color = Color(0xFF646468), fontSize = 17.sp, lineHeight = 20.sp); field() } })
+                decorationBox = { field -> Box { if (input.isEmpty()) Text(stringResource(R.string.chat_input_placeholder), color = Color(0xFF646468), fontSize = 17.sp, lineHeight = 20.sp); field() } })
             IconButton(enabled = valid, onClick = {
                 val sent = target.channel?.let { ClientSession.sendChannelMessage(it, input) }
                     ?: target.member?.let { ClientSession.sendPrivateMessage(it, input) } ?: false
                 if (sent) input = ""
             }, modifier = Modifier.size(38.dp)) {
-                Icon(UiIcons.Send, "发送", Modifier.size(22.dp), tint = if (valid) Palette.text else Palette.muted)
+                Icon(UiIcons.Send, stringResource(R.string.action_send), Modifier.size(22.dp), tint = if (valid) Palette.text else Palette.muted)
             }
         }
     }

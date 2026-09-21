@@ -51,6 +51,10 @@ internal class VoiceService : Service() {
         when (intent?.action) {
             ACTION_DISCONNECT -> ClientSession.disconnect()
             ACTION_START_CALL -> updateAudio(ClientSession.state.value, ClientSession.appActive.value, userInitiated = true)
+            ACTION_REFRESH_LANGUAGE -> {
+                createChannel()
+                showForeground(foregroundHasMicrophone)
+            }
         }
         return START_STICKY
     }
@@ -84,7 +88,7 @@ internal class VoiceService : Service() {
         ) {
             runCatching { showForeground(true) }.onFailure {
                 microphoneUpgradeFailed = true
-                ClientSession.reportError("无法启用后台麦克风，请重新打开 MobileSpeak 后重试：${it.message}")
+                ClientSession.reportError(localized(R.string.error_with_detail, localized(R.string.error_background_microphone_enable), it.message.orEmpty()))
             }
         }
         val allowCapture = allowsMicrophoneCapture(
@@ -102,7 +106,7 @@ internal class VoiceService : Service() {
             !foregroundHasMicrophone && !appActive && !microphoneRecoveryReported
         ) {
             microphoneRecoveryReported = true
-            ClientSession.reportError("后台麦克风暂不可用，请打开 MobileSpeak 自动恢复")
+            ClientSession.reportError(localized(R.string.error_background_microphone_recovery))
         }
         val reapplyAudio = returnedToForeground || userInitiated
         audio.update(ui, allowCapture, reapplyRoute = reapplyAudio)
@@ -126,11 +130,11 @@ internal class VoiceService : Service() {
         val builder = if (Build.VERSION.SDK_INT >= 26) Notification.Builder(this, CHANNEL) else Notification.Builder(this)
         val notification = builder
             .setSmallIcon(android.R.drawable.stat_sys_headset)
-            .setContentTitle("MobileSpeak 通话中")
-            .setContentText("TeamSpeak 连接保持在后台")
+            .setContentTitle(localized(R.string.notification_call_title))
+            .setContentText(localized(R.string.notification_call_text))
             .setContentIntent(open)
             .setOngoing(true)
-            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "断开", disconnect)
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, localized(R.string.action_disconnect), disconnect)
             .build()
         if (Build.VERSION.SDK_INT >= 29) {
             var type = ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
@@ -146,13 +150,14 @@ internal class VoiceService : Service() {
     private fun createChannel() {
         if (Build.VERSION.SDK_INT >= 26) {
             getSystemService(NotificationManager::class.java).createNotificationChannel(
-                NotificationChannel(CHANNEL, "语音连接", NotificationManager.IMPORTANCE_LOW),
+                NotificationChannel(CHANNEL, localized(R.string.notification_channel_voice), NotificationManager.IMPORTANCE_LOW),
             )
         }
     }
 
     companion object {
         internal const val ACTION_START_CALL = "dev.mobilespeak.mobilespeak.START_CALL"
+        internal const val ACTION_REFRESH_LANGUAGE = "dev.mobilespeak.mobilespeak.REFRESH_LANGUAGE"
         private const val CHANNEL = "mobilespeak.voice"
         private const val NOTIFICATION_ID = 7
         private const val ACTION_DISCONNECT = "dev.mobilespeak.mobilespeak.DISCONNECT"

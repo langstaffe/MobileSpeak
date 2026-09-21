@@ -90,7 +90,7 @@ data class Bookmark(
                 cleanHost.none(Char::isWhitespace) && '/' !in cleanHost &&
                 parsedPort != null && parsedPort in 1..65535 &&
                 cleanName.isNotEmpty() && cleanName.toByteArray().size <= 128 &&
-                password.toByteArray().size <= 1024) { "请填写有效的地址、端口、昵称和密码" }
+                password.toByteArray().size <= 1024) { "invalid_bookmark" }
             val cleanTitle = title.trim()
             return Bookmark(
                 id ?: UUID.randomUUID().toString(),

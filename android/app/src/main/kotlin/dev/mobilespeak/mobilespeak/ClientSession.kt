@@ -63,7 +63,7 @@ internal object ClientSession {
     fun connect(bookmark: Bookmark) {
         if (state.value.snapshot.status != "disconnected") return
         val identity = runCatching { store.identity() }.getOrElse {
-            fail("无法安全读取 TS 身份：${it.message}")
+            fail(context.localized(R.string.error_with_detail, context.localized(R.string.error_identity_read), it.message.orEmpty()))
             return
         }
         val command = JSONObject()
@@ -111,7 +111,7 @@ internal object ClientSession {
         val nextInput = inputMuted ?: old.microphoneMuted
         val nextOutput = deafened ?: old.deafened
         if (!nextInput && !microphonePermission) {
-            fail("请在系统设置中允许麦克风权限")
+            fail(context.localized(R.string.error_microphone_permission))
             return
         }
         mutableState.update { it.copy(microphoneMuted = nextInput, deafened = nextOutput) }
@@ -130,7 +130,7 @@ internal object ClientSession {
 
     fun saveBookmark(id: String?, title: String, host: String, port: String, nickname: String, password: String): Bookmark? {
         val bookmark = runCatching { Bookmark.create(id, title, host, port, nickname, password) }.getOrElse {
-            fail(it.message ?: "书签无效")
+            fail(context.localized(R.string.error_bookmark_invalid))
             return null
         }
         val existing = state.value.bookmarks
@@ -142,7 +142,7 @@ internal object ClientSession {
             it.id != id && it.host == normalized.host && it.port == normalized.port && it.nickname == normalized.nickname
         }
         if (id != null && duplicate != null) {
-            fail("已有相同地址、端口和昵称的书签")
+            fail(context.localized(R.string.error_bookmark_duplicate))
             return null
         }
         val resolved = if (id == null && duplicate != null) normalized.copy(id = duplicate.id) else normalized
@@ -155,7 +155,7 @@ internal object ClientSession {
             mutableState.update { it.copy(bookmarks = next, error = null) }
             resolved
         }.getOrElse {
-            fail("无法安全保存书签：${it.message}")
+            fail(context.localized(R.string.error_with_detail, context.localized(R.string.error_bookmark_save), it.message.orEmpty()))
             null
         }
     }
@@ -164,7 +164,7 @@ internal object ClientSession {
         val next = state.value.bookmarks.filterNot { it.id == bookmark.id }
         runCatching { store.saveBookmarks(next) }
             .onSuccess { mutableState.update { current -> current.copy(bookmarks = next) } }
-            .onFailure { fail("无法安全删除书签：${it.message}") }
+            .onFailure { fail(context.localized(R.string.error_with_detail, context.localized(R.string.error_bookmark_delete), it.message.orEmpty())) }
     }
 
     fun join(channel: Channel, password: String) =
@@ -175,7 +175,7 @@ internal object ClientSession {
             .put("channel", channel.id).put("message", text))
 
     fun sendPrivateMessage(member: Member, text: String): Boolean {
-        val uid = member.uid ?: return false.also { fail("该用户没有可用的 TeamSpeak UID") }
+        val uid = member.uid ?: return false.also { fail(context.localized(R.string.error_user_identity_unavailable)) }
         return send(JSONObject().put("type", "send_private_message").put("request_id", UUID.randomUUID().toString())
             .put("client", member.id).put("uid", uid).put("message", text))
     }
@@ -211,10 +211,12 @@ internal object ClientSession {
             val bytes = NativeCore.poll(handle)
             JSONObject(String(bytes, Charsets.UTF_8))
         }.getOrElse {
-            fail("核心状态读取失败：${it.message}")
+            fail(context.localized(R.string.error_with_detail, context.localized(R.string.error_core_read), it.message.orEmpty()))
             return
         }
-        runCatching { applyEnvelope(envelope) }.onFailure { fail("核心状态解析失败：${it.message}") }
+        runCatching { applyEnvelope(envelope) }.onFailure {
+            fail(context.localized(R.string.error_with_detail, context.localized(R.string.error_core_parse), it.message.orEmpty()))
+        }
     }
 
     private fun applyEnvelope(envelope: JSONObject) {
@@ -228,15 +230,21 @@ internal object ClientSession {
                 "identity" -> {
                     val identity = event.getJSONObject("value")
                     runCatching { store.saveIdentity(identity) }.onFailure {
-                        fail("无法安全保存 TS 身份：${it.message}")
+                        fail(context.localized(R.string.error_with_detail, context.localized(R.string.error_identity_save), it.message.orEmpty()))
                         disconnect()
                         return
                     }
                 }
-                "error" -> eventError = event.getString("message")
+                "error" -> eventError = context.localizedCoreError(
+                    event.stringOrNull("code"),
+                    event.stringOrNull("detail") ?: event.stringOrNull("message"),
+                )
                 "audio_muted" -> {
                     audioMuted = true
-                    eventError = event.getString("message")
+                    eventError = context.localizedCoreError(
+                        event.stringOrNull("code"),
+                        event.stringOrNull("detail") ?: event.stringOrNull("message"),
+                    )
                 }
             }
         }
@@ -282,10 +290,10 @@ internal object ClientSession {
         val result = runCatching {
             NativeCore.command(handle, command.toString().toByteArray(Charsets.UTF_8))
         }.getOrElse {
-            fail("操作未能提交：${it.message}")
+            fail(context.localized(R.string.error_with_detail, context.localized(R.string.error_operation_submit), it.message.orEmpty()))
             return false
         }
-        if (result != 0) fail("操作未能提交")
+        if (result != 0) fail(context.localized(R.string.error_operation_submit))
         return result == 0
     }
 
@@ -299,7 +307,12 @@ internal object ClientSession {
         if (next == state.value.bookmarks) return
         runCatching { store.saveBookmarks(next) }
             .onSuccess { mutableState.update { current -> current.copy(bookmarks = next) } }
-            .onFailure { fail("无法更新书签名称：${it.message}") }
+            .onFailure { fail(context.localized(R.string.error_with_detail, context.localized(R.string.error_bookmark_title_update), it.message.orEmpty())) }
+    }
+
+    fun refreshLanguage() {
+        if (!initialized || !shouldRunService()) return
+        context.startService(Intent(context, VoiceService::class.java).setAction(VoiceService.ACTION_REFRESH_LANGUAGE))
     }
 
     private fun fail(message: String) {

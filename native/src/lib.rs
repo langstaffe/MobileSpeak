@@ -410,13 +410,16 @@ pub struct Bridge {
 }
 
 fn report(out: &Arc<Mutex<Output>>, error: impl std::fmt::Display) {
+    report_code(out, "core_error", Some(error.to_string()));
+}
+fn report_code(out: &Arc<Mutex<Output>>, code: &str, detail: Option<String>) {
     out.lock()
         .unwrap()
-        .event(json!({"type":"error","message":error.to_string()}));
+        .event(json!({"type":"error","code":code,"detail":detail}));
 }
-fn report_audio_muted(out: &Arc<Mutex<Output>>, error: impl std::fmt::Display) {
+fn report_audio_muted(out: &Arc<Mutex<Output>>, code: &str, detail: Option<String>) {
     out.lock().unwrap().event(json!({
-        "type":"audio_muted","message":error.to_string()
+        "type":"audio_muted","code":code,"detail":detail
     }));
 }
 fn hex(value: &str) -> String {
@@ -626,9 +629,9 @@ fn load_chat(root: &Path, server: &str) -> Result<ChatStore, String> {
     let path = chat_path(root, server);
     match fs::read(&path) {
         Ok(data) => serde_json::from_slice(&data)
-            .map_err(|error| format!("无法读取本地聊天记录 {}：{error}", path.to_string_lossy())),
+            .map_err(|error| format!("{}: {error}", path.to_string_lossy())),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(ChatStore::default()),
-        Err(error) => Err(format!("无法读取本地聊天记录：{error}")),
+        Err(error) => Err(error.to_string()),
     }
 }
 struct PersistJob {
@@ -868,12 +871,12 @@ fn outgoing_message(
     expected_channel: Option<u64>,
     expected_uid: Option<&str>,
     text: String,
-) -> Result<ChatMessage, String> {
-    let state = con.get_state().map_err(|error| error.to_string())?;
+) -> Result<ChatMessage, &'static str> {
+    let state = con.get_state().map_err(|_| "client_state_unavailable")?;
     let own = state
         .clients
         .get(&state.own_client)
-        .ok_or("Client state is not ready")?;
+        .ok_or("client_state_unavailable")?;
     let sender_uid = own
         .uid
         .as_ref()
@@ -881,14 +884,14 @@ fn outgoing_message(
         .unwrap_or_default();
     let (kind, target_id, target_name, conversation) = match target {
         MessageTarget::Channel => {
-            let expected = expected_channel.ok_or("Missing channel")?;
+            let expected = expected_channel.ok_or("channel_unavailable")?;
             if own.channel.0 != expected {
-                return Err("You are no longer in this channel".into());
+                return Err("message_wrong_channel");
             }
             let channel = state
                 .channels
                 .get(&own.channel)
-                .ok_or("Channel is not available")?;
+                .ok_or("channel_unavailable")?;
             let key = channel_key(channel);
             (
                 ChatKind::Channel,
@@ -898,17 +901,14 @@ fn outgoing_message(
             )
         }
         MessageTarget::Client(client_id) => {
-            let client = state
-                .clients
-                .get(&client_id)
-                .ok_or("User is no longer online")?;
+            let client = state.clients.get(&client_id).ok_or("user_offline")?;
             let uid = client
                 .uid
                 .as_ref()
                 .map(|uid| format!("{}", uid.as_ref()))
-                .ok_or("User identity is unavailable")?;
+                .ok_or("user_identity_unavailable")?;
             if expected_uid != Some(uid.as_str()) {
-                return Err("User connection changed; reopen the conversation".into());
+                return Err("user_connection_changed");
             }
             (
                 ChatKind::Private,
@@ -917,7 +917,7 @@ fn outgoing_message(
                 format!("client:{uid}"),
             )
         }
-        _ => return Err("Unsupported message target".into()),
+        _ => return Err("unsupported_message_target"),
     };
     Ok(ChatMessage {
         id: request_id,
@@ -962,7 +962,7 @@ fn rejected_message(
                 key.clone(),
                 channel
                     .map(|channel| channel.name.clone())
-                    .unwrap_or_else(|| format!("频道 {id}")),
+                    .unwrap_or_else(|| format!("#{id}")),
                 format!("channel:{key}"),
             )
         }
@@ -1157,7 +1157,7 @@ async fn session(
                             .server
                             .set_subscribed(true)
                             .send_with_result(&mut con)?;
-                        operations.insert(handle, PendingOperation::Other("无法订阅频道"));
+                        operations.insert(handle, PendingOperation::Other("channel_subscribe_failed"));
                         subscribed = true;
                         first_connection = false;
                     }
@@ -1169,12 +1169,15 @@ async fn session(
                         if let (Some(root), Some(server)) = (storage.as_deref(), current_server.as_deref()) {
                             match load_chat(root, server) {
                                 Ok(mut loaded) => {
-                                    if loaded.fail_pending("应用上次退出前未收到服务器发送结果") {
+                                    if loaded.fail_pending("message_unconfirmed_after_restart") {
                                         persist_chat(persist_tx, Some(root), Some(server), &loaded);
                                     }
                                     chats = loaded;
                                 }
-                                Err(error) => { chat_writable = false; report(out, error); }
+                                Err(error) => {
+                                    chat_writable = false;
+                                    report_code(out, "chat_history_read_failed", Some(error));
+                                }
                             }
                         }
                         publish_chat(out, &chats, storage.as_deref(), current_server.as_deref());
@@ -1211,12 +1214,14 @@ async fn session(
                     Some(PendingOperation::Chat(id)) => {
                         match result {
                             Ok(()) => chats.finish(&id, ChatStatus::Sent, None),
-                            Err(error) => chats.finish(&id, ChatStatus::Failed, Some(error.to_string())),
+                            Err(_) => chats.finish(&id, ChatStatus::Failed, Some("message_send_failed".into())),
                         }
                         if chat_writable { persist_chat(persist_tx, storage.as_deref(), current_server.as_deref(), &chats); }
                         publish_chat(out, &chats, storage.as_deref(), current_server.as_deref());
                     }
-                    Some(PendingOperation::Other(context)) => if let Err(error) = result { report(out, format!("{context}：{error}")); },
+                    Some(PendingOperation::Other(code)) => if let Err(error) = result {
+                        report_code(out, code, Some(error.to_string()));
+                    },
                     None => {},
                 },
                 Some(Ok(StreamItem::FileDownload(handle, download))) => {
@@ -1250,7 +1255,7 @@ async fn session(
                     schedule_media(&mut con, storage.as_deref(), &mut media_active, &mut media_failed, &mut transfers);
                 },
                 Some(Ok(StreamItem::DisconnectedTemporarily(_))) => {
-                    if chats.fail_pending("连接暂时中断，服务器未确认消息") {
+                    if chats.fail_pending("message_unconfirmed_after_reconnect") {
                         if chat_writable { persist_chat(persist_tx, storage.as_deref(), current_server.as_deref(), &chats); }
                         publish_chat(out, &chats, storage.as_deref(), current_server.as_deref());
                     }
@@ -1287,8 +1292,8 @@ async fn session(
                     return Ok(false);
                 },
                 Some(Command::Shutdown) => { let _ = con.disconnect(DisconnectOptions::new()); return Ok(true); },
-                Some(Command::Connect { .. }) => report(out, "Disconnect before connecting to another server"),
-                Some(Command::Configure { .. }) => report(out, "Storage cannot change while connected"),
+                Some(Command::Connect { .. }) => report_code(out, "disconnect_before_connect", None),
+                Some(Command::Configure { .. }) => report_code(out, "storage_change_while_connected", None),
                 Some(Command::SetChatVisible { server, conversation, token, visible }) => {
                     unread.set_visible(&server, &conversation, &token, visible);
                     out.lock().unwrap().set_unread(unread.snapshot());
@@ -1299,13 +1304,13 @@ async fn session(
                     out.lock().unwrap().set_unread(unread.snapshot());
                 },
                 Some(Command::Join { channel, password }) => {
-                    if !subscribed { report(out, "连接恢复中，暂时无法加入频道"); continue; }
+                    if !subscribed { report_code(out, "connection_recovering", None); continue; }
                     let state = con.get_state()?;
                     if state.clients.get(&state.own_client).is_some_and(|client| client.channel.0 == channel) { continue; }
-                    let Some(me) = state.clients.get(&state.own_client) else { report(out, "Client state is not ready"); continue; };
+                    let Some(me) = state.clients.get(&state.own_client) else { report_code(out, "client_state_unavailable", None); continue; };
                     let request = me.client_move(ChannelId(channel)).set_password(&password).to_packet();
                     let handle = request.send_with_result(&mut con)?;
-                    operations.insert(handle, PendingOperation::Other("加入频道失败"));
+                    operations.insert(handle, PendingOperation::Other("join_channel_failed"));
                     audio.reset(); out.lock().unwrap().audio.clear();
                 },
                 Some(Command::Mute { input, output }) => {
@@ -1318,8 +1323,8 @@ async fn session(
                             .set_input_muted(input)
                             .set_output_muted(output);
                         match update.send_with_result(&mut con) {
-                            Ok(handle) => { operations.insert(handle, PendingOperation::Other("更新音频状态失败")); },
-                            Err(error) => report(out, format!("更新音频状态失败：{error}")),
+                            Ok(handle) => { operations.insert(handle, PendingOperation::Other("update_audio_state_failed")); },
+                            Err(error) => report_code(out, "update_audio_state_failed", Some(error.to_string())),
                         }
                     }
                 },
@@ -1338,7 +1343,7 @@ async fn session(
                             let send = con.get_state()?.send_message(target, &message).send_with_result(&mut con);
                             match send {
                                 Ok(handle) => { operations.insert(handle, PendingOperation::Chat(id)); },
-                                Err(error) => chats.finish(&id, ChatStatus::Failed, Some(error.to_string())),
+                                Err(_) => chats.finish(&id, ChatStatus::Failed, Some("message_send_failed".into())),
                             }
                             if chat_writable { persist_chat(persist_tx, storage.as_deref(), current_server.as_deref(), &chats); }
                             publish_chat(out, &chats, storage.as_deref(), current_server.as_deref());
@@ -1351,11 +1356,11 @@ async fn session(
                                 Some(channel),
                                 None,
                                 message,
-                                error.clone(),
+                                error.to_owned(),
                             ));
                             if chat_writable { persist_chat(persist_tx, storage.as_deref(), current_server.as_deref(), &chats); }
                             publish_chat(out, &chats, storage.as_deref(), current_server.as_deref());
-                            report(out, error);
+                            report_code(out, error, None);
                         }
                     }
                 },
@@ -1368,7 +1373,7 @@ async fn session(
                             let send = con.get_state()?.send_message(target, &message).send_with_result(&mut con);
                             match send {
                                 Ok(handle) => { operations.insert(handle, PendingOperation::Chat(id)); },
-                                Err(error) => chats.finish(&id, ChatStatus::Failed, Some(error.to_string())),
+                                Err(_) => chats.finish(&id, ChatStatus::Failed, Some("message_send_failed".into())),
                             }
                             if chat_writable { persist_chat(persist_tx, storage.as_deref(), current_server.as_deref(), &chats); }
                             publish_chat(out, &chats, storage.as_deref(), current_server.as_deref());
@@ -1381,11 +1386,11 @@ async fn session(
                                 None,
                                 Some(&uid),
                                 message,
-                                error.clone(),
+                                error.to_owned(),
                             ));
                             if chat_writable { persist_chat(persist_tx, storage.as_deref(), current_server.as_deref(), &chats); }
                             publish_chat(out, &chats, storage.as_deref(), current_server.as_deref());
-                            report(out, error);
+                            report_code(out, error, None);
                         }
                     }
                 },
@@ -1399,7 +1404,7 @@ async fn session(
                     let codec = match codec {
                         Some(tsclientlib::Codec::OpusVoice) => CodecType::OpusVoice,
                         Some(tsclientlib::Codec::OpusMusic) => CodecType::OpusMusic,
-                        _ => { input_muted = true; report_audio_muted(out, "This channel uses a legacy codec; only Opus is supported"); continue; }
+                        _ => { input_muted = true; report_audio_muted(out, "legacy_codec", None); continue; }
                     };
                     let denoised = denoiser.as_mut().and_then(|state| {
                         catch_unwind(AssertUnwindSafe(|| denoise_packet(&samples, state)))
@@ -1455,7 +1460,11 @@ impl Bridge {
                 }
                 for (path, data) in latest {
                     if let Err(error) = atomic_write(&path, &data) {
-                        report(&persistence_output, format!("保存聊天记录失败：{error}"));
+                        report_code(
+                            &persistence_output,
+                            "chat_history_save_failed",
+                            Some(error.to_string()),
+                        );
                     }
                 }
             }
@@ -1725,7 +1734,7 @@ mod tests {
         out.status("disconnected");
         out.status("disconnected");
         assert_eq!(count.load(Ordering::SeqCst), 1);
-        out.event(json!({"type":"error","message":"test"}));
+        out.event(json!({"type":"error","code":"core_error","detail":"test"}));
         assert_eq!(count.load(Ordering::SeqCst), 2);
     }
     #[test]
@@ -1761,14 +1770,17 @@ mod tests {
     #[test]
     fn poll_keeps_state_and_consumes_events_and_chat_updates_once() {
         let bridge = Bridge::new();
+        report_code(&bridge.output, "join_channel_failed", Some("test".into()));
         {
             let mut output = bridge.output.lock().unwrap();
-            output.event(json!({"type":"error","message":"test"}));
             output.set_chats(json!([]));
         }
         let first = bridge.poll();
         assert_eq!(first["snapshot"]["status"], "disconnected");
         assert_eq!(first["events"].as_array().unwrap().len(), 1);
+        assert_eq!(first["events"][0]["code"], "join_channel_failed");
+        assert_eq!(first["events"][0]["detail"], "test");
+        assert!(first["events"][0].get("message").is_none());
         assert_eq!(first["chats"], json!([]));
         assert!(first["unread"].is_object());
 

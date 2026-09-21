@@ -28,11 +28,14 @@ private extension View {
 }
 @main struct MobileSpeakApp: App {
     @StateObject private var client = Client.shared
+    @StateObject private var language = LanguageSettings()
     @Environment(\.scenePhase) private var phase
     var body: some Scene {
         WindowGroup {
             NavigationView { HomeView(client: client) }
                 .navigationViewStyle(.stack)
+                .environmentObject(language)
+                .environment(\.locale, language.locale)
                 .preferredColorScheme(.dark)
                 .tint(Palette.accent)
                 .onAppear { client.setAppActive(phase == .active) }
@@ -164,6 +167,7 @@ struct ChannelSheetState {
 }
 struct HomeView: View {
     @ObservedObject var client: Client
+    @EnvironmentObject private var language: LanguageSettings
     @State private var tab = 0
     @State private var showConnect = false
     @State private var editingBookmark: Bookmark?
@@ -185,31 +189,31 @@ struct HomeView: View {
                 Spacer(minLength: 0)
                 if client.connected || client.busy {
                     Button { client.disconnect() } label: {
-                        Text("OFF").font(.system(size: 10, weight: .heavy))
+                        Text(L10n.string("disconnect_badge")).font(.system(size: 10, weight: .heavy))
                             .frame(width: 34, height: 34).background(Palette.disconnect).clipShape(Circle())
                             .frame(width: 44, height: 44)
-                    }.buttonStyle(.plain).accessibilityLabel("断开连接")
+                    }.buttonStyle(.plain).accessibilityLabel(L10n.string("action_disconnect"))
                 }
             }.padding(.horizontal, 14).frame(height: 64)
             Divider()
             if let error = client.error {
                 HStack {
                     Text(error).font(.footnote).frame(maxWidth: .infinity, alignment: .leading)
-                    Button { client.error = nil } label: { Image(systemName: "xmark").frame(width: 44, height: 44) }.accessibilityLabel("关闭错误提示")
+                    Button { client.error = nil } label: { Image(systemName: "xmark").frame(width: 44, height: 44) }.accessibilityLabel(L10n.string("accessibility_close_error"))
                 }.padding(.leading, 16).background(Color(hex: 0x542A30))
             }
             Group {
                 if tab == 2 { settings }
-                else if client.busy { VStack(spacing: 20) { ProgressView(); Text("正在连接服务器…") }.frame(maxWidth: .infinity, maxHeight: .infinity) }
+                else if client.busy { VStack(spacing: 20) { ProgressView(); Text(L10n.string(client.reconnecting ? "status_reconnecting" : "status_connecting_server")) }.frame(maxWidth: .infinity, maxHeight: .infinity) }
                 else if !client.connected { if client.bookmarks.isEmpty { empty } else { bookmarkList } }
                 else if tab == 0 { channels }
                 else { members }
             }.frame(maxWidth: .infinity, maxHeight: .infinity)
             voiceBar
             HStack {
-                navigation("频道", "number", 0)
-                navigation("成员", "person.2", 1)
-                navigation("设置", "gearshape", 2)
+                navigation(L10n.string("tab_channels"), "number", 0)
+                navigation(L10n.string("tab_members"), "person.2", 1)
+                navigation(L10n.string("tab_settings"), "gearshape", 2)
             }.padding(.top, 10).padding(.bottom, 8).background(Palette.bottom)
         }
         .foregroundStyle(Color(hex: 0xF2F3F5))
@@ -222,8 +226,8 @@ struct HomeView: View {
         .navigationBarHidden(true)
         .sheet(isPresented: $showConnect) { ConnectView(client: client) }
         .sheet(item: $editingBookmark) { bookmark in ConnectView(client: client, bookmark: bookmark) }
-        .confirmationDialog("删除这个书签及其保存的密码？", isPresented: Binding(get: { deletingBookmark != nil }, set: { if !$0 { deletingBookmark = nil } }), titleVisibility: .visible) {
-            Button("删除书签", role: .destructive) { if let bookmark = deletingBookmark { client.deleteBookmark(bookmark) }; deletingBookmark = nil }
+        .confirmationDialog(deletingBookmark.map { L10n.format("bookmark_delete_message", $0.title) } ?? L10n.string("bookmark_delete_title"), isPresented: Binding(get: { deletingBookmark != nil }, set: { if !$0 { deletingBookmark = nil } }), titleVisibility: .visible) {
+            Button(L10n.string("bookmark_delete_title"), role: .destructive) { if let bookmark = deletingBookmark { client.deleteBookmark(bookmark) }; deletingBookmark = nil }
         }
         .sheet(item: $channelSheet.selected, onDismiss: {
             if let next = channelSheet.didDismiss(), client.connected, tab == 0 { showChannel(next) }
@@ -232,12 +236,12 @@ struct HomeView: View {
             let members = client.state.clients.filter { $0.channel == channel.id }
             let layout = Self.channelSheetLayout(memberHeight: channelMemberListHeight, viewportHeight: viewportHeight)
             VStack(spacing: 16) {
-                HStack { ChannelIcon(channel: current, size: 28); Text(current.name).font(.title3.bold()).lineLimit(1); Spacer(); Button("关闭") { channelSheet.selected = nil } }
+                HStack { ChannelIcon(channel: current, size: 28); Text(current.name).font(.title3.bold()).lineLimit(1); Spacer(); Button(L10n.string("action_close")) { channelSheet.selected = nil } }
                     .frame(height: 44)
                 ScrollView {
                     VStack(spacing: 16) {
                         if members.isEmpty {
-                            Text("暂时没有成员").foregroundStyle(Palette.muted).frame(maxWidth: .infinity, minHeight: 52)
+                            Text(L10n.string("channel_no_members")).foregroundStyle(Palette.muted).frame(maxWidth: .infinity, minHeight: 52)
                         } else {
                             ForEach(members) { memberRow($0) }
                         }
@@ -248,7 +252,7 @@ struct HomeView: View {
                 }
                 .frame(height: layout.list)
                 Button { channelSheet.selected = nil; join(current) } label: {
-                    Text("加入频道").font(.headline).frame(maxWidth: .infinity, minHeight: 56)
+                    Text(L10n.string("channel_join")).font(.headline).frame(maxWidth: .infinity, minHeight: 56)
                 }
                     .buttonStyle(.borderedProminent)
                     .buttonBorderShape(.roundedRectangle(radius: 14))
@@ -263,16 +267,16 @@ struct HomeView: View {
             }
             .adaptiveSheetHeight(layout.sheet)
         }
-        .alert("频道密码", isPresented: Binding(get: { lockedChannel != nil }, set: { if !$0 { lockedChannel = nil } })) {
-            SecureField("密码", text: $channelPassword)
-            Button("加入") { if let channel = lockedChannel { client.join(channel, password: channelPassword) }; channelPassword = ""; lockedChannel = nil }
-            Button("取消", role: .cancel) { channelPassword = ""; lockedChannel = nil }
+        .alert(L10n.string("channel_password"), isPresented: Binding(get: { lockedChannel != nil }, set: { if !$0 { lockedChannel = nil } })) {
+            SecureField(L10n.string("password"), text: $channelPassword)
+            Button(L10n.string("action_join")) { if let channel = lockedChannel { client.join(channel, password: channelPassword) }; channelPassword = ""; lockedChannel = nil }
+            Button(L10n.string("action_cancel"), role: .cancel) { channelPassword = ""; lockedChannel = nil }
         }
     }
     private var bookmarkList: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 12) {
-                Text("服务器书签").font(.title3.bold())
+                Text(L10n.string("bookmarks_title")).font(.title3.bold())
                 ForEach(client.bookmarks) { bookmark in
                     HStack {
                         Button {
@@ -289,29 +293,29 @@ struct HomeView: View {
                             }.frame(minHeight: 64).contentShape(Rectangle())
                         }.buttonStyle(.plain).disabled(client.connected || client.busy)
                         Menu {
-                            Button("编辑", systemImage: "pencil") { editingBookmark = bookmark }
-                            Button("删除", systemImage: "trash", role: .destructive) { deletingBookmark = bookmark }
-                        } label: { Image(systemName: "ellipsis").frame(width: 44, height: 44) }.accessibilityLabel("管理\(bookmark.title)")
+                            Button(L10n.string("action_edit"), systemImage: "pencil") { editingBookmark = bookmark }
+                            Button(L10n.string("action_delete"), systemImage: "trash", role: .destructive) { deletingBookmark = bookmark }
+                        } label: { Image(systemName: "ellipsis").frame(width: 44, height: 44) }.accessibilityLabel(L10n.format("bookmark_manage", bookmark.title))
                     }.padding(12).background(Palette.card).clipShape(RoundedRectangle(cornerRadius: 14))
                 }
-                Button { showConnect = true } label: { Label("添加服务器", systemImage: "plus") }.padding(.vertical, 12)
-                if client.connected { Text("断开当前连接后，可选择其他服务器连接。").font(.footnote).foregroundStyle(Palette.muted) }
+                Button { showConnect = true } label: { Label(L10n.string("bookmark_add_server"), systemImage: "plus") }.padding(.vertical, 12)
+                if client.connected { Text(L10n.string("bookmark_disconnect_first")).font(.footnote).foregroundStyle(Palette.muted) }
             }.padding(16)
         }.background(Palette.background)
     }
     private var empty: some View {
         VStack(spacing: 16) {
             Image(systemName: "headphones").font(.system(size: 52)).foregroundStyle(Palette.muted)
-            Text("随时加入对话").font(.system(size: 20, weight: .heavy))
-            Text("连接你的 TeamSpeak 服务器，和朋友一起聊天").font(.subheadline).foregroundStyle(Palette.muted).multilineTextAlignment(.center)
-            Button { showConnect = true } label: { Label("连接服务器", systemImage: "plus").padding(.vertical, 5) }
+            Text(L10n.string("empty_title")).font(.system(size: 20, weight: .heavy))
+            Text(L10n.string("empty_message")).font(.subheadline).foregroundStyle(Palette.muted).multilineTextAlignment(.center)
+            Button { showConnect = true } label: { Label(L10n.string("action_connect_server"), systemImage: "plus").padding(.vertical, 5) }
                 .buttonStyle(.borderedProminent).clipShape(Capsule()).padding(.top, 8)
         }.padding(24).frame(maxWidth: .infinity, maxHeight: .infinity)
     }
     private var channels: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 9) {
-                Text("频道").font(.system(size: 20, weight: .heavy)).padding(.bottom, 8)
+                Text(L10n.string("tab_channels")).font(.system(size: 20, weight: .heavy)).padding(.bottom, 8)
                 ForEach(client.orderedChannels, id: \.channel.id) { entry in
                     let channel = entry.channel
                     if let spacer = channel.spacer {
@@ -342,7 +346,7 @@ struct HomeView: View {
                                     if !members.isEmpty {
                                         HStack(spacing: 5) {
                                             ForEach(Array(members.prefix(2))) { m in Avatar(name: m.name, path: m.avatarPath, speaking: m.speaking, size: 24) }
-                                            Text(members.prefix(2).map(\.name).joined(separator: "、") + " · \(members.count) 人在线").font(.system(size: 11)).foregroundStyle(Palette.muted).lineLimit(1)
+                                            Text(L10n.channelMembers(members.prefix(2).map(\.name).joined(separator: L10n.string("member_name_separator")), count: members.count)).font(.system(size: 11)).foregroundStyle(Palette.muted).lineLimit(1)
                                         }.padding(.leading, 30)
                                     }
                                 }.contentShape(Rectangle())
@@ -357,7 +361,7 @@ struct HomeView: View {
                                     .overlay(alignment: .topTrailing) {
                                         if selected { UnreadBadge(count: client.currentChannelUnread).offset(x: 5, y: -5) }
                                     }
-                            }.disabled(!selected).accessibilityLabel("打开\(channel.name)聊天")
+                            }.disabled(!selected).accessibilityLabel(L10n.format("channel_chat_open", channel.name))
                         }.padding(10).padding(.leading, 4)
                             .background(selected ? Palette.selected : Palette.card)
                             .clipShape(RoundedRectangle(cornerRadius: 14))
@@ -371,7 +375,7 @@ struct HomeView: View {
     private var members: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 16) {
-                Text("成员").font(.title3.bold())
+                Text(L10n.string("tab_members")).font(.title3.bold())
                 ForEach(client.state.clients.filter { $0.id != client.state.ownClient }) { member in
                     if member.uid != nil {
                         NavigationLink(destination: PrivateChatView(client: client, member: member)) { memberRow(member, showUnread: true) }.buttonStyle(.plain)
@@ -412,6 +416,7 @@ struct HomeView: View {
             Image(systemName: m.deafened ? "speaker.slash.fill" : m.muted ? "mic.slash.fill" : "mic.fill")
                 .foregroundStyle(m.speaking ? Palette.green : Palette.muted)
                 .frame(width: 20)
+                .accessibilityLabel(L10n.string(m.deafened ? "member_listening_off" : m.muted ? "member_muted" : m.speaking ? "member_speaking" : "member_microphone_on"))
         }
         .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
         .contentShape(Rectangle())
@@ -419,12 +424,12 @@ struct HomeView: View {
     private var settings: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                Text("设置").font(.title3.bold())
-                Toggle("麦克风", isOn: Binding(get: { !client.microphoneMuted }, set: { value in Task { await client.setAudio(input: !value) } })).disabled(client.audioBusy || client.deafened)
-                Text("默认开启，关闭扬声器时麦克风也会静音").font(.footnote).foregroundStyle(Palette.muted)
-                Toggle("收听", isOn: Binding(get: { !client.deafened }, set: { value in Task { await client.setAudio(output: !value) } })).disabled(client.audioBusy)
+                Text(L10n.string("tab_settings")).font(.title3.bold())
+                Toggle(L10n.string("settings_microphone"), isOn: Binding(get: { !client.microphoneMuted }, set: { value in Task { await client.setAudio(input: !value) } })).disabled(client.audioBusy || client.deafened)
+                Text(L10n.string("settings_microphone_help")).font(.footnote).foregroundStyle(Palette.muted)
+                Toggle(L10n.string("settings_listening"), isOn: Binding(get: { !client.deafened }, set: { value in Task { await client.setAudio(output: !value) } })).disabled(client.audioBusy)
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("噪音抑制")
+                    Text(L10n.string("settings_noise_suppression"))
                     VStack(spacing: 0) {
                         ForEach(NoiseSuppressionMode.allCases, id: \.self) { mode in
                             if mode != NoiseSuppressionMode.allCases.first {
@@ -448,7 +453,37 @@ struct HomeView: View {
                                 .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
-                            .accessibilityValue(client.noiseSuppression == mode ? "已选择" : "未选择")
+                            .accessibilityValue(L10n.string(client.noiseSuppression == mode ? "selection_selected" : "selection_not_selected"))
+                        }
+                    }
+                    .background(Palette.card)
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                }
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(L10n.string("settings_language"))
+                    VStack(spacing: 0) {
+                        ForEach(AppLanguage.allCases) { option in
+                            if option != AppLanguage.allCases.first {
+                                Rectangle().fill(Palette.border).frame(height: 1).padding(.leading, 16)
+                            }
+                            Button {
+                                guard language.select(option) else { return }
+                                UISelectionFeedbackGenerator().selectionChanged()
+                            } label: {
+                                HStack {
+                                    Text(L10n.string(option.titleKey))
+                                    Spacer()
+                                    Image(systemName: language.selection == option ? "largecircle.fill.circle" : "circle")
+                                        .font(.system(size: 22))
+                                        .foregroundStyle(language.selection == option ? Palette.accent : Palette.muted)
+                                        .accessibilityHidden(true)
+                                }
+                                .frame(maxWidth: .infinity, minHeight: 56)
+                                .padding(.horizontal, 16)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityValue(L10n.string(language.selection == option ? "selection_selected" : "selection_not_selected"))
                         }
                     }
                     .background(Palette.card)
@@ -460,20 +495,20 @@ struct HomeView: View {
     private var voiceBar: some View {
         HStack(spacing: 8) {
             Image(systemName: "waveform").foregroundStyle(client.connected ? Palette.green : Palette.muted)
-            Text(client.connected ? "已连接到 #\(client.state.channels.first { $0.id == client.currentChannel }?.name ?? "")" : client.busy ? "正在连接…" : "未连接").font(.system(size: 12, weight: .semibold)).lineLimit(1)
+            Text(client.connected ? L10n.format("status_connected_to_channel", client.state.channels.first { $0.id == client.currentChannel }?.name ?? "") : client.busy ? L10n.string("status_connecting") : L10n.string("status_disconnected")).font(.system(size: 12, weight: .semibold)).lineLimit(1)
             Spacer(minLength: 0)
             Button {
                 UISelectionFeedbackGenerator().selectionChanged()
                 Task { await client.setAudio(input: !client.microphoneMuted) }
             } label: {
                 Image(systemName: client.muted ? "mic.slash.fill" : "mic.fill").foregroundStyle(client.muted ? Palette.muted : Palette.green).frame(width: 44, height: 48)
-            }.accessibilityLabel(client.microphoneMuted ? "开启麦克风" : "静音").disabled(client.audioBusy || client.deafened)
+            }.accessibilityLabel(L10n.string(client.microphoneMuted ? "voice_enable_microphone" : "voice_mute")).disabled(client.audioBusy || client.deafened)
             Button {
                 UISelectionFeedbackGenerator().selectionChanged()
                 Task { await client.setAudio(output: !client.deafened) }
             } label: {
                 Image(systemName: client.deafened ? "speaker.slash.fill" : "speaker.wave.2.fill").frame(width: 44, height: 48)
-            }.accessibilityLabel(client.deafened ? "开启收听" : "关闭收听").disabled(client.audioBusy)
+            }.accessibilityLabel(L10n.string(client.deafened ? "voice_enable_listening" : "voice_disable_listening")).disabled(client.audioBusy)
         }.padding(.leading, 12).padding(.trailing, 8).background(Palette.bottom)
     }
     private func navigation(_ title: String, _ icon: String, _ index: Int) -> some View {
@@ -555,12 +590,12 @@ struct ChatView: View {
             }
             Divider()
             HStack(alignment: .bottom, spacing: 10) {
-                TextField("输入消息", text: $text)
+                TextField(L10n.string("chat_input_placeholder"), text: $text)
                     .textFieldStyle(.roundedBorder)
                     .onSubmit(send)
                 Button(action: send) { Image(systemName: "paperplane.fill").frame(width: 38, height: 38) }
                     .disabled(!available || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    .accessibilityLabel("发送")
+                    .accessibilityLabel(L10n.string("action_send"))
             }.padding(10).background(Palette.bottom)
         }
         .background(Palette.background.ignoresSafeArea())
@@ -603,7 +638,7 @@ struct ChatView: View {
     private func send() {
         let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard available, !value.isEmpty else { return }
-        guard value.utf8.count <= 8192 else { client.error = "消息过长"; return }
+        guard value.utf8.count <= 8192 else { client.error = L10n.string("chat_message_too_long"); return }
         if let channel, client.sendChannelMessage(value, channel: channel) { text = "" }
         else if let member = currentMember, client.sendPrivateMessage(value, member: member) { text = "" }
     }
@@ -625,7 +660,7 @@ struct ChatView: View {
                         if message.status == .pending { ProgressView().scaleEffect(0.65) }
                         if message.status == .failed {
                             Image(systemName: "exclamationmark.circle.fill").foregroundStyle(.red)
-                            Text(message.error ?? "发送失败").foregroundStyle(.red)
+                            Text(message.error.map { L10n.coreError($0, detail: "") } ?? L10n.string("chat_send_failed")).foregroundStyle(.red)
                         }
                     }.font(.caption2)
                 }
@@ -653,17 +688,17 @@ struct ConnectView: View {
     var body: some View {
         NavigationView {
             Form {
-                Section("服务器") {
-                    TextField("书签名称（可选）", text: $title)
-                    TextField("地址 / 域名", text: $host).textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
-                    TextField("端口", text: $port).keyboardType(.numberPad)
-                    SecureField("服务器密码（可选）", text: $password)
+                Section(L10n.string("server_section")) {
+                    TextField(L10n.string("bookmark_name_optional"), text: $title)
+                    TextField(L10n.string("server_address"), text: $host).textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
+                    TextField(L10n.string("server_port"), text: $port).keyboardType(.numberPad)
+                    SecureField(L10n.string("server_password_optional"), text: $password)
                         .textContentType(.oneTimeCode)
                         .autocorrectionDisabled()
                 }
-                Section("昵称") { TextField("昵称", text: $name).autocorrectionDisabled() }
+                Section(L10n.string("nickname")) { TextField(L10n.string("nickname"), text: $name).autocorrectionDisabled() }
                 Section {
-                    Button(bookmark != nil || client.connected || client.busy ? "保存书签" : "保存并连接") {
+                    Button(L10n.string(bookmark != nil || client.connected || client.busy ? "bookmark_save" : "action_save_and_connect")) {
                         do {
                             let saved = try client.saveBookmark(id: bookmark?.id, title: title, host: host, port: port, nickname: name, password: password)
                             if bookmark == nil && !client.connected && !client.busy { client.connectBookmark(saved) }
@@ -672,8 +707,8 @@ struct ConnectView: View {
                     }.disabled(!passwordLoaded)
                     if let error = formError { Text(error).foregroundStyle(.red) }
                 }
-            }.navigationTitle(bookmark == nil ? "添加服务器" : "编辑书签").navigationBarTitleDisplayMode(.inline)
-                .toolbar { ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } } }
+            }.navigationTitle(L10n.string(bookmark == nil ? "bookmark_add_server" : "bookmark_edit_server")).navigationBarTitleDisplayMode(.inline)
+                .toolbar { ToolbarItem(placement: .cancellationAction) { Button(L10n.string("action_cancel")) { dismiss() } } }
         }.onAppear {
             let url = URLComponents(string: "ts://" + client.address)
             host = bookmark?.host ?? url?.host ?? ""; port = String(bookmark?.port ?? UInt16(url?.port ?? 9987)); name = bookmark?.nickname ?? client.name

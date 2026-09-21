@@ -2,6 +2,53 @@ import XCTest
 @testable import MobileSpeak
 
 final class ClientTests: XCTestCase {
+    func testLanguageResolutionUsesSupportedLocalesAndEnglishFallback() {
+        XCTAssertEqual(AppLanguage.stored(in: UserDefaults(suiteName: "missing-\(UUID())")!), .system)
+        XCTAssertEqual(AppLanguage.resolve(.system, systemLanguageTags: ["zh-Hans-CN"]), .simplifiedChinese)
+        XCTAssertEqual(AppLanguage.resolve(.system, systemLanguageTags: ["zh-CN"]), .simplifiedChinese)
+        XCTAssertEqual(AppLanguage.resolve(.system, systemLanguageTags: ["en-US"]), .english)
+        XCTAssertEqual(AppLanguage.resolve(.system, systemLanguageTags: ["fr-FR"]), .english)
+        XCTAssertEqual(AppLanguage.resolve(.simplifiedChinese, systemLanguageTags: ["en-US"]), .simplifiedChinese)
+        XCTAssertEqual(AppLanguage.resolve(.english, systemLanguageTags: ["zh-CN"]), .english)
+    }
+    @MainActor func testLanguageSelectionPersistsAndSameSelectionDoesNothing() throws {
+        let suite = "MobileSpeakLanguageTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set("old-value", forKey: AppLanguage.preferenceKey)
+        let settings = LanguageSettings(defaults: defaults)
+        XCTAssertEqual(settings.selection, .system)
+        XCTAssertTrue(settings.select(.english))
+        XCTAssertEqual(defaults.string(forKey: AppLanguage.preferenceKey), "en")
+        XCTAssertFalse(settings.select(.english))
+        XCTAssertEqual(LanguageSettings(defaults: defaults).selection, .english)
+    }
+    @MainActor func testLanguageChangeDoesNotRecreateClientCoreAudioOrState() throws {
+        let suite = "MobileSpeakLanguageStateTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = LanguageSettings(defaults: defaults)
+        let client = Client.shared
+        let handle = client.handle
+        let audio = client.audio
+        let state = client.state
+        XCTAssertTrue(settings.select(.simplifiedChinese))
+        XCTAssertEqual(client.handle, handle)
+        XCTAssertTrue(client.audio === audio)
+        XCTAssertEqual(client.state, state)
+    }
+    @MainActor func testLocalizedPluralAndCoreErrorFallbacks() {
+        let stored = UserDefaults.standard.object(forKey: AppLanguage.preferenceKey)
+        defer {
+            if let stored { UserDefaults.standard.set(stored, forKey: AppLanguage.preferenceKey) }
+            else { UserDefaults.standard.removeObject(forKey: AppLanguage.preferenceKey) }
+        }
+        UserDefaults.standard.set("en", forKey: AppLanguage.preferenceKey)
+        XCTAssertEqual(L10n.channelMembers("Alice", count: 1), "Alice · 1 member online")
+        XCTAssertEqual(L10n.channelMembers("Alice, Bob", count: 2), "Alice, Bob · 2 members online")
+        XCTAssertEqual(L10n.coreError("join_channel_failed"), "Couldn’t join the channel.")
+        XCTAssertEqual(L10n.coreError("future_code", detail: "safe detail"), "Something went wrong. safe detail")
+    }
     @MainActor func testNoiseSuppressionDefaultsPersistsAndSwitches() throws {
         let suite = "MobileSpeakTests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))

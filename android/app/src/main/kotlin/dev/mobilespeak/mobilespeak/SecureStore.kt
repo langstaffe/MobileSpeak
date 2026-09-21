@@ -13,7 +13,7 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
-internal class SecureStore(context: Context) {
+internal class SecureStore(private val context: Context) {
     private val preferences = context.getSharedPreferences("mobilespeak.secure", Context.MODE_PRIVATE)
     private var blocked = false
     private var data = JSONObject()
@@ -30,17 +30,17 @@ internal class SecureStore(context: Context) {
     }
 
     val readError: String?
-        get() = if (blocked) "无法读取加密书签和身份，已停止写入以保护原有数据" else null
+        get() = if (blocked) context.localized(R.string.error_secure_store_read) else null
 
     @Synchronized
     fun bookmarks(): List<Bookmark> {
-        check(!blocked) { "加密数据读取失败" }
+        check(!blocked) { context.localized(R.string.error_secure_data_read) }
         return data.optJSONArray("bookmarks").objects().map(Bookmark::from)
     }
 
     @Synchronized
     fun identity(): JSONObject? {
-        check(!blocked) { "加密数据读取失败" }
+        check(!blocked) { context.localized(R.string.error_secure_data_read) }
         return data.optJSONObject("identity")
     }
 
@@ -54,9 +54,9 @@ internal class SecureStore(context: Context) {
 
     @SuppressLint("UseKtx") // The platform commit() result is required to avoid reporting a failed write as saved.
     private fun save(next: JSONObject) {
-        check(!blocked) { "加密数据读取失败，禁止覆盖" }
+        check(!blocked) { context.localized(R.string.error_secure_data_overwrite) }
         val encoded = Base64.encodeToString(encrypt(next.toString().toByteArray()), Base64.NO_WRAP)
-        check(preferences.edit().putString("data", encoded).commit()) { "无法写入加密存储" }
+        check(preferences.edit().putString("data", encoded).commit()) { context.localized(R.string.error_secure_store_write) }
         data = next
     }
 

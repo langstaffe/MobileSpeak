@@ -102,7 +102,7 @@ enum NoiseSuppressionMode: String, CaseIterable {
     static func stored(in defaults: UserDefaults) -> Self {
         Self(rawValue: defaults.string(forKey: preferenceKey) ?? "") ?? .rnnoise
     }
-    var title: String { self == .rnnoise ? "RNNoise" : "无" }
+    var title: String { self == .rnnoise ? "RNNoise" : L10n.string("settings_noise_none") }
 }
 
 struct Bookmark: Codable, Identifiable {
@@ -176,8 +176,8 @@ private func coreChanged(_ context: Int) {
             query[kSecValueData as String] = data
             query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
             let added = SecItemAdd(query as CFDictionary, nil)
-            guard added == errSecSuccess else { throw bookmarkError("无法安全保存书签密码（\(added)）") }
-        } else if status != errSecSuccess { throw bookmarkError("无法安全保存书签密码（\(status)）") }
+            guard added == errSecSuccess else { throw bookmarkError(L10n.withDetail("error_bookmark_password_save", String(added))) }
+        } else if status != errSecSuccess { throw bookmarkError(L10n.withDetail("error_bookmark_password_save", String(status))) }
     }
     func bookmarkPassword(_ bookmark: Bookmark) throws -> String {
         guard let current = bookmarks.first(where: { $0.id == bookmark.id }) else { return "" }
@@ -186,19 +186,19 @@ private func coreChanged(_ context: Int) {
         var result: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
         if status == errSecItemNotFound { return "" }
-        guard status == errSecSuccess, let data = result as? Data, let value = String(data: data, encoding: .utf8) else { throw bookmarkError("无法读取书签密码（\(status)）") }
+        guard status == errSecSuccess, let data = result as? Data, let value = String(data: data, encoding: .utf8) else { throw bookmarkError(L10n.withDetail("error_bookmark_password_read", String(status))) }
         return value
     }
     private func bookmarkError(_ message: String) -> NSError {
         NSError(domain: "MobileSpeak.Bookmarks", code: 1, userInfo: [NSLocalizedDescriptionKey: message])
     }
     @discardableResult func saveBookmark(id: UUID?, title: String, host: String, port: String, nickname: String, password: String) throws -> Bookmark {
-        guard !bookmarkLoadFailed else { throw bookmarkError("书签数据读取失败，已停止写入以保护原有数据") }
+        guard !bookmarkLoadFailed else { throw bookmarkError(L10n.string("error_bookmark_protected")) }
         let host = host.trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: "[]")).lowercased()
         let nickname = nickname.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !host.isEmpty, host.utf8.count <= 1000, host.rangeOfCharacter(from: .whitespacesAndNewlines) == nil, !host.contains("/"), let port = UInt16(port), port > 0, !nickname.isEmpty, nickname.utf8.count <= 128, password.utf8.count <= 1024 else { throw bookmarkError("请填写有效的地址、端口、昵称和密码") }
+        guard !host.isEmpty, host.utf8.count <= 1000, host.rangeOfCharacter(from: .whitespacesAndNewlines) == nil, !host.contains("/"), let port = UInt16(port), port > 0, !nickname.isEmpty, nickname.utf8.count <= 128, password.utf8.count <= 1024 else { throw bookmarkError(L10n.string("error_bookmark_invalid")) }
         let duplicate = bookmarks.first { $0.host == host && $0.port == port && $0.nickname == nickname && $0.id != id }
-        if id != nil && duplicate != nil { throw bookmarkError("已有相同地址、端口和昵称的书签") }
+        if id != nil && duplicate != nil { throw bookmarkError(L10n.string("error_bookmark_duplicate")) }
         let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
         let existing = id.flatMap { id in bookmarks.first { $0.id == id } }
         let automaticallyNamed = title.isEmpty || (existing?.automaticallyNamed == true && title == existing?.title)
@@ -225,12 +225,12 @@ private func coreChanged(_ context: Int) {
     }
     func deleteBookmark(_ bookmark: Bookmark) {
         do {
-            guard !bookmarkLoadFailed else { throw bookmarkError("书签读取失败，无法删除") }
+            guard !bookmarkLoadFailed else { throw bookmarkError(L10n.string("error_bookmark_delete")) }
             let next = bookmarks.filter { $0.id != bookmark.id }
             let data = try JSONEncoder().encode(next)
             UserDefaults.standard.set(data, forKey: "mobilespeak.server.bookmarks"); bookmarks = next
             let status = SecItemDelete(passwordQuery(bookmark.id) as CFDictionary)
-            if status != errSecSuccess && status != errSecItemNotFound { throw bookmarkError("书签已删除，但密码清理失败（\(status)）") }
+            if status != errSecSuccess && status != errSecItemNotFound { throw bookmarkError(L10n.withDetail("error_bookmark_password_delete", String(status))) }
         } catch { self.error = error.localizedDescription }
     }
     func connectBookmark(_ bookmark: Bookmark) {
@@ -294,7 +294,7 @@ private func coreChanged(_ context: Int) {
                     bookmarks = migrated
                 }
             }
-            catch { bookmarkLoadFailed = true; self.error = "无法读取或安全迁移已有书签" }
+            catch { bookmarkLoadFailed = true; self.error = L10n.withDetail("error_bookmark_migrate", error.localizedDescription) }
         }
         ts_set_notifier(handle, coreChanged, Int(bitPattern: Unmanaged.passUnretained(self).toOpaque()))
         do {
@@ -302,14 +302,14 @@ private func coreChanged(_ context: Int) {
                 .appendingPathComponent("MobileSpeak", isDirectory: true)
             try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
             try send(["type": "configure", "storage": root.path])
-        } catch { self.error = "无法准备本地头像和聊天缓存：\(error.localizedDescription)" }
+        } catch { self.error = L10n.withDetail("error_cache_prepare", error.localizedDescription) }
         do { try send(["type": "set_noise_suppression", "mode": noiseSuppression.rawValue]) }
-        catch { self.error = "无法设置噪音抑制：\(error.localizedDescription)" }
+        catch { self.error = L10n.withDetail("error_noise_suppression", error.localizedDescription) }
     }
     func send(_ command: [String: Any]) throws {
         let data = try JSONSerialization.data(withJSONObject: command)
         let result = String(decoding: data, as: UTF8.self).withCString { ts_command(handle, $0) }
-        if result != 0 { throw NSError(domain: "MobileSpeak", code: Int(result), userInfo: [NSLocalizedDescriptionKey: "操作未能提交"]) }
+        if result != 0 { throw NSError(domain: "MobileSpeak", code: Int(result), userInfo: [NSLocalizedDescriptionKey: L10n.string("error_operation_submit")]) }
     }
     func receive() {
         guard let pointer = ts_poll(handle) else { return }
@@ -322,9 +322,9 @@ private func coreChanged(_ context: Int) {
                     do { try saveIdentity(JSONSerialization.data(withJSONObject: identity)) }
                     catch { self.error = error.localizedDescription }
                 } else if event["type"] as? String == "error" {
-                    error = event["message"] as? String
+                    error = L10n.coreError(event["code"] as? String, detail: event["detail"] as? String ?? event["message"] as? String)
                 } else if event["type"] as? String == "audio_muted" {
-                    error = event["message"] as? String
+                    error = L10n.coreError(event["code"] as? String, detail: event["detail"] as? String ?? event["message"] as? String)
                     if !muted {
                         microphoneMuted = true
                         audio.stopCapture()
@@ -351,14 +351,14 @@ private func coreChanged(_ context: Int) {
                     audio.listening = !deafened
                     Task { await setAudio() }
                 } catch {
-                    self.error = "音频启动失败：\(error.localizedDescription)"
+                    self.error = L10n.withDetail("error_audio_start", error.localizedDescription)
                     try? send(["type": "mute", "input": true, "output": deafened])
                 }
             } else if !connected && !reconnecting && wasInSession {
                 audioInterrupted = false
                 audio.stop()
             }
-        } catch { self.error = error.localizedDescription }
+        } catch { self.error = L10n.withDetail("error_generic", error.localizedDescription) }
     }
     func connect(host: String, port: String, nickname: String, password: String) {
         guard !connected && !busy else { return }
@@ -366,7 +366,7 @@ private func coreChanged(_ context: Int) {
         let nickname = nickname.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !host.isEmpty, host.rangeOfCharacter(from: .whitespacesAndNewlines) == nil,
               !host.contains("/"), let port = UInt16(port), port > 0, !nickname.isEmpty else {
-            error = "请填写有效的服务器地址、端口和昵称"; return
+            error = L10n.string("error_server_invalid"); return
         }
         do {
             let identity = try loadIdentity()
@@ -413,7 +413,7 @@ private func coreChanged(_ context: Int) {
             try send(["type": "set_noise_suppression", "mode": mode.rawValue])
             UserDefaults.standard.set(mode.rawValue, forKey: NoiseSuppressionMode.preferenceKey)
             noiseSuppression = mode
-        } catch { self.error = "无法设置噪音抑制：\(error.localizedDescription)" }
+        } catch { self.error = L10n.withDetail("error_noise_suppression", error.localizedDescription) }
     }
     @discardableResult func sendChannelMessage(_ text: String, channel: Channel) -> Bool {
         do {
@@ -423,7 +423,7 @@ private func coreChanged(_ context: Int) {
         } catch { self.error = error.localizedDescription; return false }
     }
     @discardableResult func sendPrivateMessage(_ text: String, member: Member) -> Bool {
-        guard let uid = member.uid else { error = "该用户没有可用的 TeamSpeak UID"; return false }
+        guard let uid = member.uid else { error = L10n.string("error_user_identity_unavailable"); return false }
         do {
             try send(["type": "send_private_message", "request_id": UUID().uuidString,
                       "client": member.id, "uid": uid, "message": text])
@@ -460,7 +460,7 @@ private func coreChanged(_ context: Int) {
                     } catch { self.error = error.localizedDescription }
                     return
                 }
-                guard allowed else { throw NSError(domain: "MobileSpeak", code: 1, userInfo: [NSLocalizedDescriptionKey: "请在设置中允许麦克风权限"]) }
+                guard allowed else { throw NSError(domain: "MobileSpeak", code: 1, userInfo: [NSLocalizedDescriptionKey: L10n.string("error_microphone_permission")]) }
                 try audio.startCapture()
             }
             try send(["type": "mute", "input": next.inputMuted, "output": next.deafened])
@@ -519,7 +519,7 @@ private func coreChanged(_ context: Int) {
             try send(["type": "mute", "input": muted, "output": deafened])
         } catch {
             audio.stopCapture()
-            self.error = "音频恢复失败：\(error.localizedDescription)"
+            self.error = L10n.withDetail("error_audio_recovery", error.localizedDescription)
             try? send(["type": "mute", "input": true, "output": deafened])
         }
     }
@@ -545,6 +545,6 @@ private func coreChanged(_ context: Int) {
         } else if code != errSecSuccess { throw keychainError(code) }
     }
     private func keychainError(_ code: OSStatus) -> NSError {
-        NSError(domain: NSOSStatusErrorDomain, code: Int(code), userInfo: [NSLocalizedDescriptionKey: "无法安全读取或保存 TS 身份（\(code)）"])
+        NSError(domain: NSOSStatusErrorDomain, code: Int(code), userInfo: [NSLocalizedDescriptionKey: L10n.withDetail("error_identity", String(code))])
     }
 }

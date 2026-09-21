@@ -76,13 +76,13 @@ final class PhoneAudio {
     func startCapture() throws {
         guard !capturing else { return }
         try ensureRunning()
-        guard let engine else { throw audioError("音频引擎未启动") }
+        guard let engine else { throw audioError(L10n.string("error_audio_engine_not_started")) }
         let input = engine.inputNode
         let inputFormat = input.outputFormat(forBus: 0)
         guard inputFormat.sampleRate > 0, inputFormat.channelCount > 0,
               let format = AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 1),
               let converter = AVAudioConverter(from: inputFormat, to: format) else {
-            throw audioError("麦克风音频格式不可用（\(inputFormat.sampleRate) Hz，\(inputFormat.channelCount) 声道）")
+            throw audioError(L10n.format("error_audio_format", inputFormat.sampleRate, Int64(inputFormat.channelCount)))
         }
         var pending = [Int16]()
         pending.reserveCapacity(1920)
