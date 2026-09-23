@@ -18,6 +18,23 @@
         }
       }
     },
+    "accessibility_choose_language" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Choose language"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "选择语言"
+          }
+        }
+      }
+    },
     "action_back" : {
       "extractionState" : "stale",
       "localizations" : {

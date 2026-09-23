@@ -8,6 +8,7 @@ import org.junit.Test
 class LocalizationTest {
     @Test
     fun stableCodesAndInvalidValuesResolveCorrectly() {
+        assertEquals(listOf("system", "zh-Hans", "en"), AppLanguage.entries.map(AppLanguage::code))
         assertEquals(AppLanguage.SYSTEM, AppLanguage.fromCode(null))
         assertEquals(AppLanguage.SYSTEM, AppLanguage.fromCode("legacy-value"))
         assertEquals(AppLanguage.SIMPLIFIED_CHINESE, AppLanguage.fromCode("zh-Hans"))

@@ -59,6 +59,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
@@ -69,6 +70,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
@@ -78,6 +80,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.Dispatchers
@@ -517,12 +520,19 @@ private fun BookmarkField(
     )
 }
 
+private val pageTitleInset = 14.dp
+
+@Composable
+private fun PageTitle(title: String, modifier: Modifier = Modifier) {
+    Text(title, modifier.padding(bottom = 8.dp), fontSize = 20.sp, lineHeight = 24.sp, fontWeight = FontWeight.ExtraBold)
+}
+
 @Composable
 private fun ChannelScreen(ui: SessionUiState, onSelect: (Channel) -> Unit, onChat: (Channel) -> Unit) {
     val haptic = LocalHapticFeedback.current
     val ownChannel = ui.snapshot.clients.firstOrNull { it.id == ui.snapshot.ownClient }?.channel
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(14.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
-        item { Text(stringResource(R.string.tab_channels), Modifier.padding(bottom = 8.dp), fontSize = 20.sp, lineHeight = 24.sp, fontWeight = FontWeight.ExtraBold) }
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(pageTitleInset), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+        item { PageTitle(stringResource(R.string.tab_channels)) }
         items(orderedChannels(ui.snapshot.channels), key = { it.first.id }) { (channel, depth) ->
             val spacer = channelSpacer(channel)
             val selected = channel.id == ownChannel
@@ -607,10 +617,10 @@ private fun ChannelDialog(channel: Channel, ui: SessionUiState, onDismiss: () ->
 
 @Composable
 private fun MemberScreen(ui: SessionUiState, onChat: (Member) -> Unit) {
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        item { Text(stringResource(R.string.tab_members), fontSize = 20.sp, lineHeight = 24.sp, fontWeight = FontWeight.Bold) }
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = pageTitleInset, bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        item { PageTitle(stringResource(R.string.tab_members), Modifier.padding(horizontal = pageTitleInset)) }
         items(ui.snapshot.clients.filter { it.id != ui.snapshot.ownClient }, key = { it.id }) { member ->
-            MemberRow(member, Modifier.clickable(enabled = member.uid != null) { onChat(member) }, ui.unread.privateCounts[member.uid] ?: 0)
+            MemberRow(member, Modifier.padding(horizontal = 16.dp).clickable(enabled = member.uid != null) { onChat(member) }, ui.unread.privateCounts[member.uid] ?: 0)
         }
     }
 }
@@ -641,52 +651,81 @@ private fun MemberRow(member: Member, modifier: Modifier = Modifier, unread: Int
 private fun SettingsScreen(ui: SessionUiState, requestPermissions: () -> Unit) {
     val haptic = LocalHapticFeedback.current
     val selectedLanguage = AppLanguage.selected()
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
-        Text(stringResource(R.string.tab_settings), fontSize = 20.sp, lineHeight = 24.sp, fontWeight = FontWeight.Bold)
-        SettingSwitch(stringResource(R.string.settings_microphone), !ui.microphoneMuted, !ui.deafened) { enabled ->
-            if (enabled && !ClientSession.microphonePermission) requestPermissions()
-            else ClientSession.setAudio(inputMuted = !enabled)
-        }
-        Text(stringResource(R.string.settings_microphone_help), fontSize = 13.sp, lineHeight = 16.sp, color = Palette.muted)
-        SettingSwitch(stringResource(R.string.settings_listening), !ui.deafened) { ClientSession.setAudio(deafened = !it) }
-        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text(stringResource(R.string.settings_noise_suppression), fontSize = 17.sp, lineHeight = 20.sp)
-            Column(Modifier.clip(RoundedCornerShape(14.dp)).background(Palette.card)) {
-                listOf("rnnoise" to "RNNoise", "none" to stringResource(R.string.settings_noise_none)).forEachIndexed { index, (mode, label) ->
-                    if (index > 0) HorizontalDivider(Modifier.padding(start = 16.dp), color = Palette.border)
-                    val selected = ui.noiseSuppression == mode
-                    val selectionState = stringResource(if (selected) R.string.selection_selected else R.string.selection_not_selected)
-                    Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).semantics { stateDescription = selectionState }.selectable(selected, role = Role.RadioButton) {
-                        if (!selected) {
-                            haptic.performHapticFeedback(HapticFeedbackType.SegmentTick)
-                            ClientSession.setNoiseSuppression(mode)
+    var languageMenuExpanded by remember { mutableStateOf(false) }
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(top = pageTitleInset, bottom = 20.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
+        PageTitle(stringResource(R.string.tab_settings), Modifier.padding(horizontal = pageTitleInset))
+        Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
+            SettingSwitch(stringResource(R.string.settings_microphone), !ui.microphoneMuted, !ui.deafened) { enabled ->
+                if (enabled && !ClientSession.microphonePermission) requestPermissions()
+                else ClientSession.setAudio(inputMuted = !enabled)
+            }
+            Text(stringResource(R.string.settings_microphone_help), fontSize = 13.sp, lineHeight = 16.sp, color = Palette.muted)
+            SettingSwitch(stringResource(R.string.settings_listening), !ui.deafened) { ClientSession.setAudio(deafened = !it) }
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(stringResource(R.string.settings_noise_suppression), fontSize = 17.sp, lineHeight = 20.sp)
+                Column(Modifier.clip(RoundedCornerShape(14.dp)).background(Palette.card)) {
+                    listOf("rnnoise" to "RNNoise", "none" to stringResource(R.string.settings_noise_none)).forEachIndexed { index, (mode, label) ->
+                        if (index > 0) HorizontalDivider(Modifier.padding(start = 16.dp), color = Palette.border)
+                        val selected = ui.noiseSuppression == mode
+                        val selectionState = stringResource(if (selected) R.string.selection_selected else R.string.selection_not_selected)
+                        Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).semantics { stateDescription = selectionState }.selectable(selected, role = Role.RadioButton) {
+                            if (!selected) {
+                                haptic.performHapticFeedback(HapticFeedbackType.SegmentTick)
+                                ClientSession.setNoiseSuppression(mode)
+                            }
+                        }.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text(label, Modifier.weight(1f), fontSize = 17.sp, lineHeight = 20.sp)
+                            SelectionCircle(selected)
                         }
-                    }.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text(label, Modifier.weight(1f), fontSize = 17.sp, lineHeight = 20.sp)
-                        SelectionCircle(selected)
                     }
                 }
             }
-        }
-        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text(stringResource(R.string.settings_language), fontSize = 17.sp, lineHeight = 20.sp)
-            Column(Modifier.clip(RoundedCornerShape(14.dp)).background(Palette.card)) {
-                AppLanguage.entries.forEachIndexed { index, language ->
-                    if (index > 0) HorizontalDivider(Modifier.padding(start = 16.dp), color = Palette.border)
-                    val selected = selectedLanguage == language
-                    val label = stringResource(when (language) {
-                        AppLanguage.SYSTEM -> R.string.language_system
-                        AppLanguage.SIMPLIFIED_CHINESE -> R.string.language_simplified_chinese
-                        AppLanguage.ENGLISH -> R.string.language_english
-                    })
-                    val selectionState = stringResource(if (selected) R.string.selection_selected else R.string.selection_not_selected)
-                    Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).semantics { stateDescription = selectionState }.selectable(selected, role = Role.RadioButton) {
-                        if (AppLanguage.select(language)) {
-                            haptic.performHapticFeedback(HapticFeedbackType.SegmentTick)
+            val languageTitle = stringResource(R.string.settings_language)
+            val currentLanguage = stringResource(selectedLanguage.title)
+            val chooseLanguage = stringResource(R.string.accessibility_choose_language)
+            Box(Modifier.fillMaxWidth()) {
+                Row(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Palette.card)
+                        .clickable(role = Role.Button, onClickLabel = chooseLanguage) { languageMenuExpanded = true }
+                        .clearAndSetSemantics {
+                            contentDescription = languageTitle
+                            stateDescription = currentLanguage
+                            onClick(chooseLanguage) { languageMenuExpanded = true; true }
                         }
-                    }.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text(label, Modifier.weight(1f), fontSize = 17.sp, lineHeight = 20.sp)
-                        SelectionCircle(selected)
+                        .heightIn(min = 56.dp).padding(horizontal = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Text(languageTitle, Modifier.weight(1f), fontSize = 17.sp, lineHeight = 20.sp, maxLines = 1)
+                    Text(currentLanguage, fontSize = 17.sp, lineHeight = 20.sp, color = Palette.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Icon(UiIcons.Back, null, Modifier.size(16.dp).rotate(-90f), tint = Palette.muted)
+                }
+                Box(Modifier.matchParentSize(), contentAlignment = Alignment.BottomEnd) {
+                    Box(Modifier.size(1.dp)) {
+                        DropdownMenu(
+                            expanded = languageMenuExpanded,
+                            onDismissRequest = { languageMenuExpanded = false },
+                            offset = DpOffset(0.dp, 24.dp),
+                            containerColor = Palette.card,
+                        ) {
+                            AppLanguage.entries.forEach { language ->
+                                val selected = selectedLanguage == language
+                                val selectionState = stringResource(if (selected) R.string.selection_selected else R.string.selection_not_selected)
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(language.title)) },
+                                    onClick = {
+                                        languageMenuExpanded = false
+                                        if (AppLanguage.select(language)) {
+                                            haptic.performHapticFeedback(HapticFeedbackType.SegmentTick)
+                                        }
+                                    },
+                                    trailingIcon = {
+                                        if (selected) Icon(UiIcons.Check, null, Modifier.size(18.dp), tint = Palette.accent)
+                                    },
+                                    modifier = Modifier.semantics { stateDescription = selectionState },
+                                )
+                            }
+                        }
                     }
                 }
             }

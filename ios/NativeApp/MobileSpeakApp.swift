@@ -20,9 +20,23 @@ private struct ChannelMemberListHeightKey: PreferenceKey {
     static let defaultValue: CGFloat = 52
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
 }
+private struct PageTitle: View {
+    static let inset: CGFloat = 14
+    let key: String
+    var body: some View {
+        Text(L10n.string(key))
+            .font(.system(.title3).weight(.heavy))
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.bottom, 8)
+    }
+}
 private extension View {
     @ViewBuilder func adaptiveSheetHeight(_ height: CGFloat) -> some View {
         if #available(iOS 16.0, *) { presentationDetents([.height(height)]) }
+        else { self }
+    }
+    @ViewBuilder func compactPopover() -> some View {
+        if #available(iOS 16.4, *) { presentationCompactAdaptation(.popover) }
         else { self }
     }
 }
@@ -172,6 +186,7 @@ struct HomeView: View {
     @State private var showConnect = false
     @State private var editingBookmark: Bookmark?
     @State private var deletingBookmark: Bookmark?
+    @State private var languageMenuPresented = false
     @State private var channelSheet = ChannelSheetState()
     @State private var lockedChannel: Channel?
     @State private var channelPassword = ""
@@ -315,7 +330,7 @@ struct HomeView: View {
     private var channels: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 9) {
-                Text(L10n.string("tab_channels")).font(.system(size: 20, weight: .heavy)).padding(.bottom, 8)
+                PageTitle(key: "tab_channels")
                 ForEach(client.orderedChannels, id: \.channel.id) { entry in
                     let channel = entry.channel
                     if let spacer = channel.spacer {
@@ -369,19 +384,19 @@ struct HomeView: View {
                             .padding(.leading, CGFloat(min(entry.depth, 4)) * 10)
                     }
                 }
-            }.padding(14)
+            }.padding(PageTitle.inset)
         }
     }
     private var members: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 16) {
-                Text(L10n.string("tab_members")).font(.title3.bold())
+                PageTitle(key: "tab_members").padding(.horizontal, PageTitle.inset)
                 ForEach(client.state.clients.filter { $0.id != client.state.ownClient }) { member in
                     if member.uid != nil {
-                        NavigationLink(destination: PrivateChatView(client: client, member: member)) { memberRow(member, showUnread: true) }.buttonStyle(.plain)
-                    } else { memberRow(member) }
+                        NavigationLink(destination: PrivateChatView(client: client, member: member)) { memberRow(member, showUnread: true) }.buttonStyle(.plain).padding(.horizontal, 16)
+                    } else { memberRow(member).padding(.horizontal, 16) }
                 }
-            }.padding(16)
+            }.padding(.top, PageTitle.inset).padding(.bottom, 16)
         }
     }
     private func memberRow(_ m: Member, showUnread: Bool = false) -> some View {
@@ -424,72 +439,96 @@ struct HomeView: View {
     private var settings: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                Text(L10n.string("tab_settings")).font(.title3.bold())
-                Toggle(L10n.string("settings_microphone"), isOn: Binding(get: { !client.microphoneMuted }, set: { value in Task { await client.setAudio(input: !value) } })).disabled(client.audioBusy || client.deafened)
-                Text(L10n.string("settings_microphone_help")).font(.footnote).foregroundStyle(Palette.muted)
-                Toggle(L10n.string("settings_listening"), isOn: Binding(get: { !client.deafened }, set: { value in Task { await client.setAudio(output: !value) } })).disabled(client.audioBusy)
-                VStack(alignment: .leading, spacing: 12) {
-                    Text(L10n.string("settings_noise_suppression"))
-                    VStack(spacing: 0) {
-                        ForEach(NoiseSuppressionMode.allCases, id: \.self) { mode in
-                            if mode != NoiseSuppressionMode.allCases.first {
-                                Rectangle().fill(Palette.border).frame(height: 1).padding(.leading, 16)
-                            }
-                            Button {
-                                guard mode != client.noiseSuppression else { return }
-                                UISelectionFeedbackGenerator().selectionChanged()
-                                client.setNoiseSuppression(mode)
-                            } label: {
-                                HStack {
-                                    Text(mode.title)
-                                    Spacer()
-                                    Image(systemName: client.noiseSuppression == mode ? "largecircle.fill.circle" : "circle")
-                                        .font(.system(size: 22))
-                                        .foregroundStyle(client.noiseSuppression == mode ? Palette.accent : Palette.muted)
-                                        .accessibilityHidden(true)
+                PageTitle(key: "tab_settings").padding(.horizontal, PageTitle.inset)
+                VStack(alignment: .leading, spacing: 24) {
+                    Toggle(L10n.string("settings_microphone"), isOn: Binding(get: { !client.microphoneMuted }, set: { value in Task { await client.setAudio(input: !value) } })).disabled(client.audioBusy || client.deafened)
+                    Text(L10n.string("settings_microphone_help")).font(.footnote).foregroundStyle(Palette.muted)
+                    Toggle(L10n.string("settings_listening"), isOn: Binding(get: { !client.deafened }, set: { value in Task { await client.setAudio(output: !value) } })).disabled(client.audioBusy)
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text(L10n.string("settings_noise_suppression"))
+                        VStack(spacing: 0) {
+                            ForEach(NoiseSuppressionMode.allCases, id: \.self) { mode in
+                                if mode != NoiseSuppressionMode.allCases.first {
+                                    Rectangle().fill(Palette.border).frame(height: 1).padding(.leading, 16)
                                 }
-                                .frame(maxWidth: .infinity, minHeight: 56)
-                                .padding(.horizontal, 16)
-                                .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityValue(L10n.string(client.noiseSuppression == mode ? "selection_selected" : "selection_not_selected"))
-                        }
-                    }
-                    .background(Palette.card)
-                    .clipShape(RoundedRectangle(cornerRadius: 14))
-                }
-                VStack(alignment: .leading, spacing: 12) {
-                    Text(L10n.string("settings_language"))
-                    VStack(spacing: 0) {
-                        ForEach(AppLanguage.allCases) { option in
-                            if option != AppLanguage.allCases.first {
-                                Rectangle().fill(Palette.border).frame(height: 1).padding(.leading, 16)
-                            }
-                            Button {
-                                guard language.select(option) else { return }
-                                UISelectionFeedbackGenerator().selectionChanged()
-                            } label: {
-                                HStack {
-                                    Text(L10n.string(option.titleKey))
-                                    Spacer()
-                                    Image(systemName: language.selection == option ? "largecircle.fill.circle" : "circle")
-                                        .font(.system(size: 22))
-                                        .foregroundStyle(language.selection == option ? Palette.accent : Palette.muted)
-                                        .accessibilityHidden(true)
+                                Button {
+                                    guard mode != client.noiseSuppression else { return }
+                                    UISelectionFeedbackGenerator().selectionChanged()
+                                    client.setNoiseSuppression(mode)
+                                } label: {
+                                    HStack {
+                                        Text(mode.title)
+                                        Spacer()
+                                        Image(systemName: client.noiseSuppression == mode ? "largecircle.fill.circle" : "circle")
+                                            .font(.system(size: 22))
+                                            .foregroundStyle(client.noiseSuppression == mode ? Palette.accent : Palette.muted)
+                                            .accessibilityHidden(true)
+                                    }
+                                    .frame(maxWidth: .infinity, minHeight: 56)
+                                    .padding(.horizontal, 16)
+                                    .contentShape(Rectangle())
                                 }
-                                .frame(maxWidth: .infinity, minHeight: 56)
-                                .padding(.horizontal, 16)
-                                .contentShape(Rectangle())
+                                .buttonStyle(.plain)
+                                .accessibilityValue(L10n.string(client.noiseSuppression == mode ? "selection_selected" : "selection_not_selected"))
                             }
-                            .buttonStyle(.plain)
-                            .accessibilityValue(L10n.string(language.selection == option ? "selection_selected" : "selection_not_selected"))
                         }
+                        .background(Palette.card)
+                        .clipShape(RoundedRectangle(cornerRadius: 14))
                     }
-                    .background(Palette.card)
-                    .clipShape(RoundedRectangle(cornerRadius: 14))
-                }
-            }.padding(20)
+                    Button { languageMenuPresented = true } label: {
+                        HStack(spacing: 12) {
+                            Text(L10n.string("settings_language"))
+                                .lineLimit(1)
+                                .layoutPriority(1)
+                            Spacer(minLength: 0)
+                            Text(L10n.string(language.selection.titleKey))
+                                .foregroundStyle(Palette.muted)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.75)
+                            Image(systemName: "chevron.down")
+                                .font(.caption.bold())
+                                .foregroundStyle(Palette.muted)
+                                .accessibilityHidden(true)
+                        }
+                        .frame(maxWidth: .infinity, minHeight: 56)
+                        .padding(.horizontal, 16)
+                        .contentShape(Rectangle())
+                        .background(Palette.card)
+                        .clipShape(RoundedRectangle(cornerRadius: 14))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(L10n.string("settings_language"))
+                    .accessibilityValue(L10n.string(language.selection.titleKey))
+                    .accessibilityHint(L10n.string("accessibility_choose_language"))
+                    .popover(isPresented: $languageMenuPresented, attachmentAnchor: .point(.topTrailing), arrowEdge: .bottom) {
+                        VStack(spacing: 0) {
+                            ForEach(AppLanguage.allCases) { option in
+                                Button {
+                                    languageMenuPresented = false
+                                    guard language.select(option) else { return }
+                                    UISelectionFeedbackGenerator().selectionChanged()
+                                } label: {
+                                    HStack(spacing: 12) {
+                                        Image(systemName: "checkmark")
+                                            .opacity(language.selection == option ? 1 : 0)
+                                            .accessibilityHidden(true)
+                                        Text(L10n.string(option.titleKey))
+                                        Spacer(minLength: 0)
+                                    }
+                                    .frame(minWidth: 170, minHeight: 44, alignment: .leading)
+                                    .padding(.horizontal, 16)
+                                    .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityValue(L10n.string(language.selection == option ? "selection_selected" : "selection_not_selected"))
+                            }
+                        }
+                        .padding(.vertical, 8)
+                        .compactPopover()
+                    }
+                }.padding(.horizontal, 20)
+            }.padding(.top, PageTitle.inset).padding(.bottom, 20)
         }
     }
     private var voiceBar: some View {

@@ -3,6 +3,7 @@ import XCTest
 
 final class ClientTests: XCTestCase {
     func testLanguageResolutionUsesSupportedLocalesAndEnglishFallback() {
+        XCTAssertEqual(AppLanguage.allCases, [.system, .simplifiedChinese, .english])
         XCTAssertEqual(AppLanguage.stored(in: UserDefaults(suiteName: "missing-\(UUID())")!), .system)
         XCTAssertEqual(AppLanguage.resolve(.system, systemLanguageTags: ["zh-Hans-CN"]), .simplifiedChinese)
         XCTAssertEqual(AppLanguage.resolve(.system, systemLanguageTags: ["zh-CN"]), .simplifiedChinese)

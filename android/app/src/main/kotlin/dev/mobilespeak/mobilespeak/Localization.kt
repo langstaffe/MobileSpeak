@@ -9,10 +9,10 @@ import androidx.core.os.ConfigurationCompat
 import androidx.core.os.LocaleListCompat
 import java.util.Locale
 
-internal enum class AppLanguage(val code: String, val tag: String?) {
-    SYSTEM("system", null),
-    SIMPLIFIED_CHINESE("zh-Hans", "zh-Hans"),
-    ENGLISH("en", "en");
+internal enum class AppLanguage(val code: String, val tag: String?, @param:StringRes val title: Int) {
+    SYSTEM("system", null, R.string.language_system),
+    SIMPLIFIED_CHINESE("zh-Hans", "zh-Hans", R.string.language_simplified_chinese),
+    ENGLISH("en", "en", R.string.language_english);
 
     companion object {
         fun fromCode(code: String?) = entries.firstOrNull { it.code == code } ?: SYSTEM
