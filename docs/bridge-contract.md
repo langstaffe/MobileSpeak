@@ -9,7 +9,7 @@
 - iOS 只通过 `Core.h` 的 C ABI 调用 Rust。
 - Android 只通过 `NativeCore.kt`/`android_jni.rs` 的 JNI 调用同一个 Rust 核心。
 - `shutdown` 是核心生命周期命令，仅由 `Bridge::drop` 使用，不是平台功能命令。
-- 平台公开命令为 `configure`、`connect`、`disconnect`、`join`、`mute`、`set_noise_suppression`、`send_channel_message`、`send_private_message`、`set_chat_visible`、`set_app_active`。
+- 平台公开命令为 `configure`、`connect`、`disconnect`、`join`、`mute`、`capture_stopped`、`set_noise_suppression`、`send_channel_message`、`send_private_message`、`set_chat_visible`、`set_app_active`。
 - 未知 JSON 字段会被 serde 忽略；未知命令、缺少必填字段或类型错误会被拒绝。
 
 ## 命令
@@ -23,6 +23,7 @@
 | `disconnect` | 无 | — | 连接中断开；未连接时无操作。 |
 | `join` | `channel: u64`, `password: string` | `channel` 必填；`password` 默认 `""` | `channel > 0`；密码最多 1024 bytes。仅在已完成订阅的会话中执行。 |
 | `mute` | `input: bool`, `output: bool` | 均必填 | 更新本地音频门控并通过 `tsclientlib.client_update()` 更新服务器状态。 |
+| `capture_stopped` | 无 | 无 | 平台明确停止采集时立即结束当前发言并清除预留帧；不改变麦克风意图，不发送 client_input_muted 更新。 |
 | `set_noise_suppression` | `mode: string` | 必填 | 枚举仅为 `rnnoise`、`none`；未连接时也会保存为下一会话设置。 |
 | `send_channel_message` | `request_id: string`, `channel: u64`, `message: string` | 均必填 | `request_id` 为非空 ASCII、最多 128 bytes；`channel > 0`；消息 trim 后非空、最多 8192 bytes，并且发送时必须仍在该频道。 |
 | `send_private_message` | `request_id: string`, `client: u16`, `uid: string`, `message: string` | 均必填 | `client > 0`；`uid` 非空、最多 256 bytes；request/message 同上；发送时 client 的 UID 必须仍匹配。 |
@@ -113,7 +114,7 @@ Member（`clients[]`）全部字段：
 | `badges` | Badge[] | 否 | 已识别徽章；未知徽章不会输出。 |
 | `serverGroupIcons` | GroupIcon[] | 否 | 有图标的服务器组，按 `(sort_id, id)` 排序。 |
 | `channelGroupIcon` | GroupIcon | 是 | 当前频道组有图标时存在。 |
-| `muted`, `deafened`, `speaking` | bool | 否 | 输入静音、输出静音、当前有解码队列。 |
+| `muted`, `deafened`, `speaking` | bool | 否 | 输入静音、输出静音；speaking 对自身表示核心已开始发送且尚未结束，对其他用户表示当前有解码队列。 |
 
 Badge：`id`、`name`、`description`、`filename` 均为必填 string，`iconPath` 为 nullable string。
 
@@ -171,17 +172,17 @@ GroupIcon：`id: u64`、`name: string`、`iconId: u32` 必填，`iconPath: strin
 
 - `create/destroy/command/poll/capture/playback` 映射同一 C ABI；JSON 用 UTF-8 `ByteArray`，避免 modified UTF-8 差异。
 - null/0 handle、capture 数组不是 960、playback 数组少于 1920 等 JNI 参数错误抛 Java runtime exception；C ABI 正常返回码保持不变。
-- Android 没有 notifier；`VoiceService` 的现有工作循环调用 `poll`。
+- Android 使用现有 JNI notifier，调度 ClientSession 的 drainCore 合并读取状态。
 
 ## Notifier
 
 notifier 只表示“核心状态可能有变化”，不携带数据，也不保证一次回调对应一个字段变化。实际值必须随后通过 `poll` 获取。
 
-回调在触发变更的 Rust worker/持久化线程上、且在 output mutex 持有期间执行，因此回调不得同步重入 `poll`、`command` 或其他可能获取同一锁的函数。iOS callback 只向 main queue 派发 `receive()`，符合此要求。Android 工作循环 poll 是允许的等价机制，不要求新增 JNI notifier。
+回调在触发变更的 Rust worker/持久化线程上、且在 output mutex 持有期间执行，因此回调不得同步重入 `poll`、`command` 或其他可能获取同一锁的函数。iOS callback 只向 main queue 派发 `receive()`，符合此要求。Android JNI callback 同样只调度 coreExecutor 上的 drainCore，不在 callback 内重入核心。
 
 ## 音频
 
-- Capture：48 kHz、单声道、signed i16、每次准确 960 samples（20 ms）。RNNoise 模式内部拆成两个 480-sample frame；失败时降级为未处理音频。
+- Capture：48 kHz、单声道、signed i16、每次准确 960 samples（20 ms）。检测内部拆成两个 480-sample frame；检测失败走现有会话错误清理，不能退回无限发送原始静音帧。
 - 核心只向 Opus Voice/Opus Music 频道发送；其他 codec 产生 `audio_muted`。
 - Playback：48 kHz、双声道、interleaved f32，每个 native frame 为 1920 samples（960 stereo frames，20 ms）；输出 buffer capacity 至少 1920。
 - Opus 编解码、RNNoise、音频队列在 Rust；AVAudioSession/AVAudioEngine 与 AudioRecord/AudioTrack 留在平台层。
@@ -192,3 +193,8 @@ notifier 只表示“核心状态可能有变化”，不携带数据，也不�
 - enum 扩展前必须更新两端：Swift 的 `ChatStatus` 是闭合 enum，未知值会解码失败。
 - 删除字段、改名、改变类型/必填性、改变 `null` 与空数组语义、改变 conversation ID 均属于破坏性变更；当前没有版本协商，必须同步发布 Rust/iOS/Android，并更新本文和契约测试。
 - 如需独立升级核心与 UI，再引入最小版本字段；当前同仓库同步构建，不新增推测性的版本系统。
+
+
+### 发言活动
+
+RNNoise 检测在 `rnnoise`/`none` 两种模式均运行；后者仍发送原 PCM。40ms 高置信度起音、100ms 预留音频、200ms 无有效语音结束保持均由共享 Rust 发送状态维护。保持期间编码发送尾音；到期发送一次 tsclientlib 标准空音频包。静音/失去权限/切频道/采集停止/断线立即清理，不等待保持期。接收开始与结束直接使用 AudioHandler 返回值，发送状态与接收状态变化均经现有 notifier 发布，不再用 200ms snapshot 轮询发现发言变化。无新增 UI 定时器或协议。

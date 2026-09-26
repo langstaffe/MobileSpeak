@@ -39,6 +39,7 @@
     <tr><td style="vertical-align: middle; text-align: center;">消息未读提醒</td><td style="vertical-align: middle; text-align: center;">✅</td><td style="vertical-align: middle; text-align: center;">✅</td></tr>
     <tr><td style="vertical-align: middle; text-align: center;">聊天记录</td><td style="vertical-align: middle; text-align: center;">✅</td><td style="vertical-align: middle; text-align: center;">✅</td></tr>
     <tr><td style="vertical-align: middle; text-align: center;">头像、徽章与服务器/频道组图标</td><td style="vertical-align: middle; text-align: center;">✅</td><td style="vertical-align: middle; text-align: center;">✅</td></tr>
+    <tr><td style="vertical-align: middle; text-align: center;">修改个人头像</td><td style="vertical-align: middle; text-align: center;">✅</td><td style="vertical-align: middle; text-align: center;">✅</td></tr>
     <tr><td style="vertical-align: middle; text-align: center;">文件、图片与链接分享（仅 TeamSpeak 6）</td><td style="vertical-align: middle; text-align: center;">✅</td><td style="vertical-align: middle; text-align: center;">❌</td></tr>
     <tr><td style="vertical-align: middle; text-align: center;">文件传输</td><td style="vertical-align: middle; text-align: center;">✅</td><td style="vertical-align: middle; text-align: center;">❌</td></tr>
     <tr><td style="vertical-align: middle; text-align: center;">频道与子频道创建/管理</td><td style="vertical-align: middle; text-align: center;">✅</td><td style="vertical-align: middle; text-align: center;">❌</td></tr>

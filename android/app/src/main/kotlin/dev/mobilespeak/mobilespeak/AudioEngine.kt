@@ -75,9 +75,11 @@ internal class AudioEngine(private val context: Context) {
         if (connected != nextConnected || deafened != nextDeafened || captureRequested != nextCaptureRequested) {
             Log.i(TAG, "Audio policy connected=$nextConnected listening=${!nextDeafened} capture=$nextCaptureRequested")
         }
+        val captureStopped = captureRequested && !nextCaptureRequested
         connected = nextConnected
         deafened = nextDeafened
         captureRequested = nextCaptureRequested
+        if (captureStopped) ClientSession.captureStopped()
         if (shouldReapplyCommunicationRoute(nextConnected, connectionChanged, reapplyRoute)) {
             refreshCommunicationRoute(if (connectionChanged) "connected" else "app foreground")
         }
@@ -86,6 +88,7 @@ internal class AudioEngine(private val context: Context) {
 
     fun stop() {
         if (!running.getAndSet(false)) return
+        ClientSession.captureStopped()
         wakeWorkers()
         record?.runCatching { stop() }
         track?.runCatching { pause() }
@@ -163,7 +166,7 @@ internal class AudioEngine(private val context: Context) {
                 }
                 val read = input.read(capture, captureOffset, capture.size - captureOffset, AudioRecord.READ_BLOCKING)
                 when {
-                    read > 0 -> {
+                    read > 0 && running.get() && shouldCapture() -> {
                         captureOffset += read
                         if (captureOffset == capture.size) {
                             val result = ClientSession.capture(capture)
@@ -345,6 +348,7 @@ internal class AudioEngine(private val context: Context) {
             )
         }
         record?.runCatching { stop() }
+        if (record != null) ClientSession.captureStopped()
         record?.runCatching { release() }
         record = null
         echoCanceler?.release()

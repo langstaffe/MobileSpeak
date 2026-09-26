@@ -1,0 +1,1 @@
+speech.pcm: 48 kHz mono signed 16-bit little-endian synthetic speech, phrase “Please keep the first word and the quiet ending.” No microphone recording or personal voice. Test-only classifier fixture; not a substitute for real acoustic validation.

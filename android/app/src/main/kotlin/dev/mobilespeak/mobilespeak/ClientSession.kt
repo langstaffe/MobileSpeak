@@ -412,6 +412,8 @@ internal object ClientSession {
         }
     }
 
+    fun captureStopped() { if (initialized) send(JSONObject().put("type", "capture_stopped")) }
+
     fun capture(samples: ShortArray): Int = NativeCore.capture(handle, samples)
     fun playback(samples: FloatArray): Int = NativeCore.playback(handle, samples)
     fun shouldRunService() = acceptingConnection || state.value.snapshot.status in setOf("connected", "connecting", "reconnecting")

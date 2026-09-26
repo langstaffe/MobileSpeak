@@ -3,8 +3,8 @@
 mod android_jni;
 mod avatar;
 mod badges;
+mod voice;
 
-use audiopus::{coder::Encoder, Application, Channels, SampleRate};
 use badges::{known_badges, BadgeMetadata};
 use futures::StreamExt;
 use nnnoiseless::DenoiseState;
@@ -14,11 +14,10 @@ use std::{
     collections::{HashMap, HashSet, VecDeque},
     ffi::{c_char, CStr, CString},
     fs,
-    panic::{catch_unwind, AssertUnwindSafe},
     path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
     sync::{mpsc as std_mpsc, Arc, Mutex},
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use tokio::{io::AsyncReadExt, sync::mpsc};
 use tsclientlib::prelude::*;
@@ -54,6 +53,7 @@ pub enum Command {
         input: bool,
         output: bool,
     },
+    CaptureStopped,
     SetNoiseSuppression {
         mode: NoiseSuppressionMode,
     },
@@ -96,26 +96,14 @@ pub enum NoiseSuppressionMode {
     None,
 }
 
-fn new_denoiser(mode: NoiseSuppressionMode) -> Option<Box<DenoiseState<'static>>> {
-    if mode == NoiseSuppressionMode::None {
-        return None;
-    }
-    match catch_unwind(DenoiseState::new) {
-        Ok(state) => Some(state),
-        Err(_) => {
-            eprintln!("RNNoise initialization failed; sending unprocessed microphone audio");
-            None
-        }
-    }
-}
-
 // The capture bridge supplies one 20 ms, 48 kHz mono i16 packet. RNNoise consumes
 // 10 ms float frames in the i16 amplitude range, so no extra buffering is needed.
-fn denoise_packet(samples: &[i16], state: &mut DenoiseState<'_>) -> Option<[i16; 960]> {
+fn denoise_packet(samples: &[i16], state: &mut DenoiseState<'_>) -> Option<([i16; 960], f32)> {
     if samples.len() != 960 {
         return None;
     }
     let mut output = [0i16; 960];
+    let mut probability = 0f32;
     let mut input_frame = [0f32; DenoiseState::FRAME_SIZE];
     let mut output_frame = [0f32; DenoiseState::FRAME_SIZE];
     for (input, output) in samples
@@ -125,7 +113,11 @@ fn denoise_packet(samples: &[i16], state: &mut DenoiseState<'_>) -> Option<[i16;
         for (sample, value) in input.iter().zip(&mut input_frame) {
             *value = f32::from(*sample);
         }
-        state.process_frame(&mut output_frame, &input_frame);
+        let voice = state.process_frame(&mut output_frame, &input_frame);
+        if !voice.is_finite() {
+            return None;
+        }
+        probability = probability.max(voice);
         for (value, sample) in output_frame.iter().zip(output) {
             if !value.is_finite() {
                 return None;
@@ -135,7 +127,7 @@ fn denoise_packet(samples: &[i16], state: &mut DenoiseState<'_>) -> Option<[i16;
                 .clamp(f32::from(i16::MIN), f32::from(i16::MAX)) as i16;
         }
     }
-    Some(output)
+    Some((output, probability))
 }
 
 impl Command {
@@ -545,10 +537,20 @@ fn chat_path(root: &Path, server: &str) -> PathBuf {
 fn path_if_cached(path: PathBuf) -> Option<String> {
     path.is_file().then(|| path.to_string_lossy().into_owned())
 }
+fn send_voice(
+    con: &mut Connection,
+    codec: CodecType,
+    data: &[u8],
+) -> Result<(), Box<dyn std::error::Error>> {
+    con.send_audio(OutAudio::new(&AudioData::C2S { id: 0, codec, data }))?;
+    Ok(())
+}
+
 fn snapshot(
     con: &Connection,
     out: &Arc<Mutex<Output>>,
     audio: &AudioHandler,
+    sending: bool,
     storage: Option<&Path>,
 ) {
     let Ok(state) = con.get_state() else { return };
@@ -606,7 +608,7 @@ fn snapshot(
                 "avatarHash":client.avatar_hash,"avatarPath":avatar_path,
                 "badges":badges,"serverGroupIcons":server_group_icons,"channelGroupIcon":channel_group_icon,
                 "muted":client.input_muted,"deafened":client.output_muted,
-                "speaking":audio.get_queues().contains_key(&client.id)
+                "speaking":if client.id == state.own_client { sending } else { audio.get_queues().contains_key(&client.id) }
             })
         })
         .collect();
@@ -1143,13 +1145,12 @@ async fn session(
         .output_hardware_enabled(true)
         .connect()?;
     let mut audio = AudioHandler::new();
-    let encoder = Encoder::new(SampleRate::Hz48000, Channels::Mono, Application::Voip)?;
-    let mut denoiser = new_denoiser(*noise_suppression);
+    let mut voice = voice::VoiceSender::new()?;
+    let mut voice_channel = None;
     let mut input_muted = true;
     let mut output_muted = false;
     let mut subscribed = false;
     let mut first_connection = true;
-    let mut ticks = 0;
     let mut current_server: Option<String> = None;
     let mut chats = ChatStore::default();
     let mut chat_writable = true;
@@ -1174,6 +1175,12 @@ async fn session(
             _ = &mut deadline, if first_connection => return Err("Connection timed out after 30 seconds".into()),
             event = async { con.events().next().await } => match event {
                 Some(Ok(StreamItem::BookEvents(events))) => {
+                    let channel = con.get_state().ok().and_then(|state| state.clients.get(&state.own_client).map(|me| (me.channel, state.channels.get(&me.channel).map(|channel| channel.codec))));
+                    if channel != voice_channel || !con.can_send_audio() {
+                        let _ = voice.interrupt(|codec, data| send_voice(&mut con, codec, data));
+                        while pcm.try_recv().is_ok() {}
+                        voice_channel = channel;
+                    }
                     if let Ok(state) = con.get_state() {
                         if events.iter().any(|event| matches!(event, Event::PropertyChanged { id: tsclientlib::events::PropertyId::ClientAvatarHash(client), .. } if *client == state.own_client)) {
                             if let Some(me) = state.clients.get(&state.own_client) {
@@ -1221,7 +1228,7 @@ async fn session(
                         publish_chat(out, &chats, storage.as_deref(), current_server.as_deref());
                     }
                     out.lock().unwrap().set_unread(unread.snapshot());
-                    snapshot(&con, out, &audio, storage.as_deref());
+                    snapshot(&con, out, &audio, voice.speaking(), storage.as_deref());
                     if subscribed { avatar.check(&mut con, storage.as_deref(), &avatar_tx, &mut operations, out); }
                     schedule_media(&mut con, storage.as_deref(), &mut media_active, &mut media_failed, &mut transfers);
                     schedule_badges(&con, storage.as_deref(), &mut badge_active, &badge_failed, &badge_tx);
@@ -1232,13 +1239,26 @@ async fn session(
                 Some(Ok(StreamItem::IdentityLevelIncreasing(level))) => {
                     if level > 24 { con.cancel_identity_level_increase(); return Err("Server requires identity level above 24; import a higher-level identity".into()); }
                 },
+                Some(Ok(StreamItem::AudioChange(change))) => {
+                    match change {
+                        tsclientlib::AudioEvent::CanSendAudio(false) => {
+                            let _ = voice.interrupt(|codec, data| send_voice(&mut con, codec, data));
+                            while pcm.try_recv().is_ok() {}
+                        },
+                        tsclientlib::AudioEvent::CanReceiveAudio(false) => { audio.reset(); out.lock().unwrap().audio.clear(); },
+                        _ => {},
+                    }
+                    snapshot(&con, out, &audio, voice.speaking(), storage.as_deref());
+                },
                 Some(Ok(StreamItem::Audio(packet))) => {
                     if !output_muted {
                         let from = match packet.data().data() {
                             AudioData::S2C { from, .. } | AudioData::S2CWhisper { from, .. } => tsclientlib::ClientId(*from),
                             _ => continue,
                         };
-                        let _ = audio.handle_packet(from, packet);
+                        if matches!(audio.handle_packet(from, packet), Ok(Some(_))) {
+                            snapshot(&con, out, &audio, voice.speaking(), storage.as_deref());
+                        }
                     }
                 },
                 Some(Ok(StreamItem::MessageResult(handle, result))) => match operations.remove(&handle) {
@@ -1335,7 +1355,9 @@ async fn session(
                     media_failed.clear();
                     transfers.clear();
                     audio.reset();
-                    denoiser = new_denoiser(*noise_suppression);
+                    let _ = voice.interrupt(|_, _| Ok(()));
+                    voice_channel = None;
+                    while pcm.try_recv().is_ok() {}
                     out.lock().unwrap().status("reconnecting");
                 },
                 Some(Err(error)) => return Err(error.into()),
@@ -1345,7 +1367,7 @@ async fn session(
             Some((request, result)) = media_rx.recv() => {
                 media_active.remove(&request.key);
                 if result.is_err() { media_failed.insert(request.key); }
-                snapshot(&con, out, &audio, storage.as_deref());
+                snapshot(&con, out, &audio, voice.speaking(), storage.as_deref());
                 publish_chat(out, &chats, storage.as_deref(), current_server.as_deref());
                 schedule_media(&mut con, storage.as_deref(), &mut media_active, &mut media_failed, &mut transfers);
             },
@@ -1356,17 +1378,19 @@ async fn session(
             Some((request, result)) = badge_rx.recv() => {
                 badge_active.remove(&request.key);
                 if result.is_err() { badge_failed.insert(request.key); }
-                snapshot(&con, out, &audio, storage.as_deref());
+                snapshot(&con, out, &audio, voice.speaking(), storage.as_deref());
                 schedule_badges(&con, storage.as_deref(), &mut badge_active, &badge_failed, &badge_tx);
             },
             received = rx.recv() => match received {
                 Some(Command::Disconnect) | None => {
                     avatar.disconnected();
+                    let _ = voice.interrupt(|codec, data| send_voice(&mut con, codec, data));
+                    out.lock().unwrap().status("disconnected");
                     con.disconnect(DisconnectOptions::new())?;
                     let _ = tokio::time::timeout(Duration::from_secs(2), async { while con.events().next().await.is_some() {} }).await;
                     return Ok(false);
                 },
-                Some(Command::Shutdown) => { avatar.disconnected(); let _ = con.disconnect(DisconnectOptions::new()); return Ok(true); },
+                Some(Command::Shutdown) => { avatar.disconnected(); let _ = voice.interrupt(|codec, data| send_voice(&mut con, codec, data)); out.lock().unwrap().status("disconnected"); let _ = con.disconnect(DisconnectOptions::new()); return Ok(true); },
                 Some(Command::Connect { .. }) => report_code(out, "disconnect_before_connect", None),
                 Some(Command::AvatarSelect { .. } | Command::AvatarSet { .. }) => unreachable!("avatar storage commands are handled by Bridge::send"),
                 Some(Command::Configure { .. }) => report_code(out, "storage_change_while_connected", None),
@@ -1389,15 +1413,19 @@ async fn session(
                     if state.clients.get(&state.own_client).is_some_and(|client| client.channel.0 == channel) { continue; }
                     let Some(me) = state.clients.get(&state.own_client) else { report_code(out, "client_state_unavailable", None); continue; };
                     let request = me.client_move(ChannelId(channel)).set_password(&password).to_packet();
+                    let _ = voice.interrupt(|codec, data| send_voice(&mut con, codec, data));
+                    while pcm.try_recv().is_ok() {}
+                    audio.reset(); out.lock().unwrap().audio.clear();
+                    snapshot(&con, out, &audio, false, storage.as_deref());
                     let handle = request.send_with_result(&mut con)?;
                     operations.insert(handle, PendingOperation::Other("join_channel_failed"));
-                    audio.reset(); out.lock().unwrap().audio.clear();
                 },
                 Some(Command::Mute { input, output }) => {
+                    if input || output { let _ = voice.interrupt(|codec, data| send_voice(&mut con, codec, data)); }
                     input_muted = input; output_muted = output;
                     if output { audio.reset(); out.lock().unwrap().audio.clear(); }
                     while pcm.try_recv().is_ok() {}
-                    denoiser = new_denoiser(*noise_suppression);
+                    snapshot(&con, out, &audio, voice.speaking(), storage.as_deref());
                     if subscribed {
                         let update = con.get_state()?.client_update()
                             .set_input_muted(input)
@@ -1408,10 +1436,14 @@ async fn session(
                         }
                     }
                 },
+                Some(Command::CaptureStopped) => {
+                    let _ = voice.interrupt(|codec, data| send_voice(&mut con, codec, data));
+                    while pcm.try_recv().is_ok() {}
+                    snapshot(&con, out, &audio, false, storage.as_deref());
+                },
                 Some(Command::SetNoiseSuppression { mode }) => {
                     if *noise_suppression != mode {
                         *noise_suppression = mode;
-                        denoiser = new_denoiser(mode);
                     }
                 },
                 Some(Command::SendChannelMessage { request_id, channel, message }) => {
@@ -1476,45 +1508,42 @@ async fn session(
                 },
             },
             Some(samples) = pcm.recv() => {
-                if !input_muted && !output_muted && con.can_send_audio() {
-                    let mut encoded = [0u8; 1275];
+                if !input_muted && !output_muted && con.can_send_audio()
+                    && !operations.values().any(|op| matches!(op, PendingOperation::Other("join_channel_failed"))) {
                     let state = con.get_state()?;
                     let codec = state.clients.get(&state.own_client)
                         .and_then(|me| state.channels.get(&me.channel)).map(|channel| channel.codec);
                     let codec = match codec {
                         Some(tsclientlib::Codec::OpusVoice) => CodecType::OpusVoice,
                         Some(tsclientlib::Codec::OpusMusic) => CodecType::OpusMusic,
-                        _ => { input_muted = true; report_audio_muted(out, "legacy_codec", None); continue; }
+                        _ => {
+                            let _ = voice.interrupt(|codec, data| send_voice(&mut con, codec, data));
+                            input_muted = true;
+                            snapshot(&con, out, &audio, false, storage.as_deref());
+                            report_audio_muted(out, "legacy_codec", None); continue;
+                        }
                     };
-                    let denoised = denoiser.as_mut().and_then(|state| {
-                        catch_unwind(AssertUnwindSafe(|| denoise_packet(&samples, state)))
-                            .ok()
-                            .flatten()
-                    });
-                    if denoiser.is_some() && denoised.is_none() {
-                        eprintln!("RNNoise processing failed; sending unprocessed microphone audio");
-                        denoiser = None;
-                    }
-                    let input = denoised.as_ref().map_or(samples.as_slice(), |packet| packet.as_slice());
-                    let len = encoder.encode(input, &mut encoded)?;
-                    con.send_audio(OutAudio::new(&AudioData::C2S { id:0, codec, data:&encoded[..len] }))?;
+                    let speaking = voice.speaking();
+                    voice.process(&samples, *noise_suppression, codec, Instant::now(), |codec, data| send_voice(&mut con, codec, data))?;
+                    if speaking != voice.speaking() { snapshot(&con, out, &audio, voice.speaking(), storage.as_deref()); }
                 }
             },
             _ = clock.tick() => {
+                let speaking = voice.speaking();
+                voice.expire(Instant::now(), |codec, data| send_voice(&mut con, codec, data))?;
+                if speaking != voice.speaking() { snapshot(&con, out, &audio, voice.speaking(), storage.as_deref()); }
                 avatar.tick(out);
                 if subscribed { avatar.check(&mut con, storage.as_deref(), &avatar_tx, &mut operations, out); }
-                if subscribed {
-                    if !output_muted {
+                if subscribed && !output_muted {
                         let mut samples = vec![0f32; 1920];
-                        audio.fill_buffer(&mut samples);
+                        if !audio.fill_buffer(&mut samples).is_empty() {
+                            snapshot(&con, out, &audio, voice.speaking(), storage.as_deref());
+                        }
                         for value in &mut samples { *value = value.clamp(-1., 1.); }
                         let mut output = out.lock().unwrap();
                         // ponytail: one active server; retain at most 100ms when the UI stalls.
                         if output.audio.len() >= 5 { output.audio.pop_front(); }
                         output.audio.push_back(samples);
-                    }
-                    ticks += 1;
-                    if ticks % 10 == 0 { snapshot(&con, out, &audio, storage.as_deref()); }
                 }
             }
         }
@@ -1777,8 +1806,8 @@ mod tests {
                     as i16;
             }
         }
-        assert_eq!(actual, expected);
-        assert_ne!(actual, samples);
+        assert_eq!(actual.0, expected);
+        assert_ne!(actual.0, samples);
     }
     #[test]
     fn unread_counts_only_new_unseen_messages_in_the_current_server_and_channel() {

@@ -121,7 +121,10 @@ final class PhoneAudio {
         NSError(domain: "MobileSpeak", code: 2, userInfo: [NSLocalizedDescriptionKey: message])
     }
     func stopCapture() {
-        if capturing { engine?.inputNode.removeTap(onBus: 0); capturing = false }
+        if capturing {
+            engine?.inputNode.removeTap(onBus: 0); capturing = false
+            _ = "{\"type\":\"capture_stopped\"}".withCString { ts_command(handle, $0) }
+        }
     }
     func pauseForInterruption() {
         stopCapture()
