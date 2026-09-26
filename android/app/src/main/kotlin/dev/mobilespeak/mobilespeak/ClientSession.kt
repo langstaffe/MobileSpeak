@@ -15,6 +15,7 @@ import java.io.File
 import java.util.UUID
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 
 @SuppressLint("StaticFieldLeak") // The stored context is applicationContext and owns the process session.
 internal object ClientSession {
@@ -26,6 +27,11 @@ internal object ClientSession {
     }
     private val coreDirty = AtomicBoolean()
     private val coreScheduled = AtomicBoolean()
+    private val avatarWorker = Executors.newSingleThreadExecutor { task -> Thread(task, "MobileSpeakAvatar") }
+    private val avatarSelection = AtomicLong()
+    private val avatarLock = Any()
+    private val mutableAvatarSave = MutableStateFlow<Pair<Long, Boolean?>?>(null)
+    val avatarSave = mutableAvatarSave.asStateFlow()
     val state = mutableState.asStateFlow()
     private lateinit var context: Context
     private lateinit var store: SecureStore
@@ -44,20 +50,112 @@ internal object ClientSession {
             store = SecureStore(context)
             val noise = context.getSharedPreferences("mobilespeak.settings", Context.MODE_PRIVATE)
                 .getString("noise", "rnnoise") ?: "rnnoise"
+            val root = File(context.filesDir, "core")
+            val preview = File(root, AvatarImages.previewName)
+            val upload = File(root, AvatarImages.uploadName)
+            val currentPreview = activeAvatarDirectory(root)?.let { File(it, "preview.jpg") }
             microphonePermission = context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
             mutableState.value = mutableState.value.copy(
                 bookmarks = runCatching { store.bookmarks() }.getOrDefault(emptyList()),
                 noiseSuppression = noise,
                 microphoneMuted = !microphonePermission,
                 error = store.readError,
+                avatarPreviewPath = if (currentPreview?.isFile == true) currentPreview.absolutePath
+                else if (!File(root, AvatarImages.currentName).exists() && preview.isFile && upload.isFile) {
+                    (if (preview.lastModified() > upload.lastModified()) upload else preview).absolutePath
+                } else null,
             )
             NativeCore.setNotifier(handle, Runnable(::scheduleCorePoll))
             scheduleCorePoll()
-            val root = File(context.filesDir, "core").apply { mkdirs() }
+            root.mkdirs()
             send(JSONObject().put("type", "configure").put("storage", root.absolutePath))
             send(JSONObject().put("type", "set_noise_suppression").put("mode", noise))
             initialized = true
         }
+    }
+
+    fun beginAvatarSelection(): Long = synchronized(avatarLock) {
+        mutableAvatarSave.value = null
+        avatarSelection.incrementAndGet().also { send(JSONObject().put("type", "avatar_select").put("selection", it)) }
+    }
+    fun isCurrentAvatarSelection(selection: Long) = avatarSelection.get() == selection
+    fun cancelAvatarSelection(selection: Long) = synchronized(avatarLock) {
+        if (selection == avatarSelection.get()) {
+            avatarSelection.incrementAndGet().also { send(JSONObject().put("type", "avatar_select").put("selection", it)) }
+            mutableAvatarSave.value = null
+        }
+    }
+
+    fun saveAvatar(image: android.graphics.Bitmap, crop: AvatarCrop, selection: Long) {
+        synchronized(avatarLock) {
+            if (selection != avatarSelection.get() || mutableAvatarSave.value?.let { it.first == selection && it.second != false } == true) return
+            mutableAvatarSave.value = selection to null
+        }
+        avatarWorker.execute {
+            if (selection != avatarSelection.get()) return@execute
+            var directory: File? = null
+            val result = runCatching {
+                val (preview, uploads) = AvatarImages.prepare(image, crop)
+                if (selection != avatarSelection.get()) return@execute
+                val root = File(context.filesDir, "core")
+                val next = File(root, "avatars/${UUID.randomUUID()}").apply { check(mkdirs()) }
+                directory = next
+                writeAvatar(File(next, "preview.jpg"), preview)
+                uploads.forEachIndexed { index, bytes -> writeAvatar(File(next, "upload-$index.jpg"), bytes) }
+                if (selection != avatarSelection.get()) return@runCatching
+                check(send(JSONObject().put("type", "avatar_set").put("selection", selection).put("image", next.name))) { "Unable to save avatar intent" }
+                directory = null // Core committed this version; stale callbacks must never remove it.
+                synchronized(avatarLock) {
+                    if (selection == avatarSelection.get()) mutableAvatarSave.value = selection to true
+                }
+
+            }
+            directory?.let { staged ->
+                // A failed rollback must not remove files still referenced by the current pointer.
+                if (activeAvatarDirectory(File(context.filesDir, "core")) != staged) runCatching { staged.deleteRecursively() }
+            }
+            synchronized(avatarLock) {
+                if (selection == avatarSelection.get() && result.isFailure) {
+                    avatarFailure()
+                    mutableAvatarSave.value = selection to false
+                }
+            }
+        }
+    }
+
+    fun clearAvatar() {
+        val selection = synchronized(avatarLock) {
+            if (state.value.avatarClearingLocally) return
+            mutableState.update { it.copy(avatarClearingLocally = true) }
+            beginAvatarSelection()
+        }
+        avatarWorker.execute {
+            val saved = send(JSONObject().put("type", "avatar_set").put("selection", selection).put("image", JSONObject.NULL))
+            synchronized(avatarLock) {
+                mutableState.update { it.copy(avatarClearingLocally = false) }
+                if (selection == avatarSelection.get()) {
+                    if (saved) mutableState.update { it.copy(avatarPreviewPath = null, avatarRevision = it.avatarRevision + 1, avatarIntent = "clear") }
+                    else mutableState.update { it.copy(avatarStatus = "clear_save_failed", avatarDetail = null) }
+                }
+            }
+        }
+    }
+
+    private fun activeAvatarDirectory(root: File): File? {
+        val current = File(root, AvatarImages.currentName)
+        if (!current.isFile || current.length() !in 1..64) return null
+        val id = runCatching { current.readText() }.getOrNull() ?: return null
+        return if (id.matches(Regex("[0-9a-fA-F-]{1,64}"))) File(root, "avatars/$id") else null
+    }
+
+    private fun writeAvatar(file: File, bytes: ByteArray) {
+        val temp = File(file.parentFile, "${file.name}.tmp")
+        temp.outputStream().use { it.write(bytes) }
+        check(temp.renameTo(file)) { "Unable to save avatar" }
+    }
+
+    private fun avatarFailure() {
+        mutableState.update { it.copy(avatarStatus = "failed", avatarDetail = context.localized(R.string.avatar_image_error)) }
     }
 
     fun connect(bookmark: Bookmark) {
@@ -219,6 +317,29 @@ internal object ClientSession {
         }
     }
 
+    private fun avatarSyncDetail(event: JSONObject): String? {
+        val detail = event.stringOrNull("detail")
+        if (event.optString("status") !in listOf("failed", "clear_failed")) return detail
+        val phase = when (event.stringOrNull("phase")) {
+            "local_read" -> R.string.avatar_stage_local_read
+            "server_self" -> R.string.avatar_stage_server_self
+            "upload_connection" -> R.string.avatar_stage_upload_connection
+            "upload_write" -> R.string.avatar_stage_upload_write
+            "hash_command" -> R.string.avatar_stage_hash_command
+            "server_hash" -> R.string.avatar_stage_server_hash
+            "verify_connection" -> R.string.avatar_stage_verify_connection
+            "verify_file" -> R.string.avatar_stage_verify_file
+            "synced" -> R.string.avatar_stage_synced
+            "delete_command" -> R.string.avatar_stage_delete_command
+            "clear_hash" -> R.string.avatar_stage_clear_hash
+            "cleared" -> R.string.avatar_stage_cleared
+            "previous_transfer_query" -> R.string.avatar_stage_previous_transfer_query
+            "previous_transfer_stop" -> R.string.avatar_stage_previous_transfer_stop
+            else -> return detail
+        }
+        return context.localized(R.string.error_with_detail, context.localized(phase), detail.orEmpty())
+    }
+
     private fun applyEnvelope(envelope: JSONObject) {
         val wasConnected = state.value.snapshot.status == "connected"
         var eventError: String? = null
@@ -246,6 +367,15 @@ internal object ClientSession {
                         event.stringOrNull("detail") ?: event.stringOrNull("message"),
                     )
                 }
+                "avatar_local" -> mutableState.update { it.copy(
+                    avatarIntent = event.getString("intent"), avatarCleanupDetail = null,
+                    avatarPreviewPath = if (event.getString("intent") == "clear") null else event.stringOrNull("preview") ?: it.avatarPreviewPath,
+                    avatarRevision = it.avatarRevision + 1,
+                ) }
+                "avatar_cleanup_failed" -> mutableState.update { it.copy(avatarCleanupDetail = context.localized(R.string.error_with_detail, context.localized(R.string.avatar_cleanup_error), event.optString("detail"))) }
+                "avatar_sync" -> mutableState.update { it.copy(
+                    avatarStatus = event.getString("status"), avatarDetail = avatarSyncDetail(event),
+                ) }
             }
         }
         val nextSnapshot = envelope.getJSONObject("snapshot").snapshot()

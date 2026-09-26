@@ -120,6 +120,13 @@ data class SessionUiState(
     val microphoneMuted: Boolean = true,
     val deafened: Boolean = false,
     val noiseSuppression: String = "rnnoise",
+    val avatarPreviewPath: String? = null,
+    val avatarRevision: Long = 0,
+    val avatarIntent: String = "unset",
+    val avatarClearingLocally: Boolean = false,
+    val avatarCleanupDetail: String? = null,
+    val avatarStatus: String = "idle",
+    val avatarDetail: String? = null,
 )
 
 internal fun orderedChannels(channels: List<Channel>): List<Pair<Channel, Int>> {

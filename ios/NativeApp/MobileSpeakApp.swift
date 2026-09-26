@@ -1,6 +1,9 @@
 import SwiftUI
 import AVFoundation
 import UIKit
+import PhotosUI
+import ImageIO
+import UniformTypeIdentifiers
 
 enum Palette {
     static let background = Color(hex: 0x2B2D31)
@@ -12,6 +15,261 @@ enum Palette {
     static let accent = Color(hex: 0x5865F2)
     static let green = Color(hex: 0x23A559)
     static let disconnect = Color(hex: 0xC83F4A)
+}
+
+struct AvatarSelectionRequest: Identifiable {
+    let id: Int
+}
+
+struct AvatarPicker: UIViewControllerRepresentable {
+    let selection: Int
+    let onDismiss: () -> Void
+    let onImage: (UIImage) -> Void
+
+    func makeUIViewController(context: Context) -> PHPickerViewController {
+        var configuration = PHPickerConfiguration(photoLibrary: .shared())
+        configuration.filter = .images
+        configuration.selectionLimit = 1
+        let picker = PHPickerViewController(configuration: configuration)
+        picker.delegate = context.coordinator
+        return picker
+    }
+    func updateUIViewController(_ controller: PHPickerViewController, context: Context) {
+        context.coordinator.parent = self
+    }
+    func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
+
+    final class Coordinator: NSObject, PHPickerViewControllerDelegate {
+        var parent: AvatarPicker
+        private var request = 0
+        init(parent: AvatarPicker) { self.parent = parent }
+        func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
+            load(results.first?.itemProvider)
+        }
+        func load(_ provider: NSItemProvider?) {
+            request += 1
+            let request = request
+            let selection = parent.selection
+            guard let provider else {
+                Client.shared.cancelAvatarSelection(parent.selection)
+                parent.onDismiss()
+                return
+            }
+            guard let type = provider.registeredTypeIdentifiers.first(where: { UTType($0)?.conforms(to: .image) == true }) else {
+                Client.shared.avatarImageFailed(selection: parent.selection)
+                parent.onDismiss()
+                return
+            }
+            // Decode while the provider's temporary URL is valid; ImageIO bounds the allocation.
+            provider.loadFileRepresentation(forTypeIdentifier: type) { url, _ in
+                let image = url.flatMap { try? AvatarImages.load($0) }
+                Task { @MainActor in
+                    guard request == self.request, selection == self.parent.selection,
+                          Client.shared.isCurrentAvatarSelection(selection) else { return }
+                    if let image { self.parent.onImage(image) }
+                    else {
+                        Client.shared.avatarImageFailed(selection: selection)
+                        self.parent.onDismiss()
+                    }
+                }
+            }
+        }
+    }
+}
+
+struct AvatarCrop: Equatable {
+    var x: CGFloat = 0.5
+    var y: CGFloat = 0.5
+    var zoom: CGFloat = 1
+
+    func rect(in size: CGSize) -> CGRect {
+        let side = max(1, floor(min(size.width, size.height) / min(4, max(1, zoom))))
+        return CGRect(x: floor(min(size.width - side, max(0, x * size.width - side / 2))),
+                      y: floor(min(size.height - side, max(0, y * size.height - side / 2))), width: side, height: side)
+    }
+    mutating func move(dx: CGFloat, dy: CGFloat, in size: CGSize) {
+        let side = rect(in: size).width
+        x = min(1 - side / (2 * size.width), max(side / (2 * size.width), x + dx * side / size.width))
+        y = min(1 - side / (2 * size.height), max(side / (2 * size.height), y + dy * side / size.height))
+    }
+}
+
+enum AvatarImages {
+    static func load(_ url: URL) throws -> UIImage {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary),
+              CGImageSourceGetCount(source) == 1,
+              let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceThumbnailMaxPixelSize: 2048,
+                kCGImageSourceShouldCacheImmediately: true,
+              ] as CFDictionary) else { throw NSError(domain: "AvatarImages", code: 1) }
+        return UIImage(cgImage: thumbnail)
+    }
+    static func prepare(_ url: URL) throws -> (Data, [Data]) { try prepare(load(url), crop: AvatarCrop()) }
+    static func prepare(_ image: UIImage, crop: AvatarCrop) throws -> (Data, [Data]) {
+        guard image.imageOrientation == .up, let source = image.cgImage,
+              let square = source.cropping(to: crop.rect(in: CGSize(width: source.width, height: source.height))) else {
+            throw NSError(domain: "AvatarImages", code: 1)
+        }
+        let image = UIImage(cgImage: square)
+        let preview = jpeg(image, maxSide: 640, quality: 0.9)
+        let uploads = [(CGFloat(2048), CGFloat(0.9)), (768, 0.8), (256, 0.65)]
+            .map { jpeg(image, maxSide: $0.0, quality: $0.1) }
+        guard !preview.isEmpty, uploads.allSatisfy({ !$0.isEmpty && $0.count <= 8 * 1024 * 1024 }) else {
+            throw NSError(domain: "AvatarImages", code: 2)
+        }
+        return (preview, uploads)
+    }
+    private static func jpeg(_ image: UIImage, maxSide: CGFloat, quality: CGFloat) -> Data {
+        let side = max(1, floor(min(maxSide, image.size.width)))
+        let size = CGSize(width: side, height: side)
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 1
+        format.opaque = true
+        return UIGraphicsImageRenderer(size: size, format: format).jpegData(withCompressionQuality: quality) { context in
+            UIColor.white.setFill()
+            context.fill(CGRect(origin: .zero, size: size))
+            image.draw(in: CGRect(origin: .zero, size: size))
+        }
+    }
+}
+
+private struct AvatarSelectionPage: View {
+    let selection: Int
+    let onDismiss: () -> Void
+    @State private var image: UIImage?
+    var body: some View {
+        if let image {
+            AvatarCropPage(image: image, selection: selection, onDismiss: onDismiss)
+                .id(ObjectIdentifier(image))
+        } else {
+            AvatarPicker(selection: selection, onDismiss: onDismiss, onImage: { image = $0 })
+        }
+    }
+}
+
+// UIScrollView supplies constrained native pan/pinch. Only its square viewport is exported.
+struct AvatarCropCanvas: UIViewRepresentable {
+    let image: UIImage
+    @Binding var crop: AvatarCrop
+    func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
+    func makeUIView(context: Context) -> CropScroll {
+        let view = CropScroll()
+        view.backgroundColor = .white // Match the existing opaque JPEG compositing for transparent sources.
+        view.photo.image = image
+        view.photo.frame = CGRect(origin: .zero, size: image.size)
+        view.addSubview(view.photo)
+        view.delegate = context.coordinator
+        view.showsHorizontalScrollIndicator = false
+        view.showsVerticalScrollIndicator = false
+        view.bounces = false
+        view.bouncesZoom = false
+        view.contentInsetAdjustmentBehavior = .never
+        view.onLayout = { [weak view, weak coordinator = context.coordinator] in
+            if let view, let coordinator { coordinator.apply(to: view) }
+        }
+        return view
+    }
+    func updateUIView(_ view: CropScroll, context: Context) {
+        context.coordinator.parent = self
+        if context.coordinator.reported != crop { context.coordinator.apply(to: view) }
+    }
+    final class CropScroll: UIScrollView {
+        let photo = UIImageView()
+        var onLayout: (() -> Void)?
+        private var previousSize = CGSize.zero
+        override func layoutSubviews() {
+            super.layoutSubviews()
+            if bounds.size != previousSize { previousSize = bounds.size; onLayout?() }
+        }
+    }
+    final class Coordinator: NSObject, UIScrollViewDelegate {
+        var parent: AvatarCropCanvas
+        var applying = false
+        var reported: AvatarCrop?
+        init(parent: AvatarCropCanvas) { self.parent = parent }
+        func viewForZooming(in scrollView: UIScrollView) -> UIView? { (scrollView as? CropScroll)?.photo }
+        func apply(to view: CropScroll) {
+            guard view.bounds.width > 0, !applying else { return }
+            applying = true
+            reported = parent.crop
+            defer { applying = false }
+            let minimum = view.bounds.width / min(parent.image.size.width, parent.image.size.height)
+            let rect = parent.crop.rect(in: parent.image.size)
+            view.minimumZoomScale = minimum
+            view.maximumZoomScale = minimum * 4
+            view.setZoomScale(view.bounds.width / rect.width, animated: false)
+            view.contentSize = CGSize(width: parent.image.size.width * view.zoomScale, height: parent.image.size.height * view.zoomScale)
+            view.setContentOffset(CGPoint(x: rect.minX * view.zoomScale, y: rect.minY * view.zoomScale), animated: false)
+        }
+        func scrollViewDidScroll(_ scrollView: UIScrollView) { changed(scrollView) }
+        func scrollViewDidZoom(_ scrollView: UIScrollView) { changed(scrollView) }
+        func changed(_ view: UIScrollView) {
+            guard !applying, view.bounds.width > 0, view.zoomScale > 0 else { return }
+            let size = parent.image.size
+            var value = AvatarCrop(x: (view.contentOffset.x + view.bounds.width / 2) / view.zoomScale / size.width,
+                y: (view.contentOffset.y + view.bounds.height / 2) / view.zoomScale / size.height,
+                zoom: view.zoomScale / (view.bounds.width / min(size.width, size.height)))
+            value.move(dx: 0, dy: 0, in: size)
+            reported = value
+            if value != parent.crop { parent.crop = value }
+        }
+    }
+}
+
+struct AvatarCropPage: View {
+    let image: UIImage
+    let selection: Int
+    let onDismiss: () -> Void
+    @State private var crop = AvatarCrop()
+    @State private var saving = false
+    @State private var failed = false
+    var body: some View {
+        NavigationView {
+            GeometryReader { geometry in
+                let side = max(100, min(420, min(geometry.size.width - 32, geometry.size.height * 0.55)))
+                ScrollView {
+                    VStack(spacing: 20) {
+                        Text(L10n.string("avatar_crop_hint")).font(.footnote).foregroundStyle(Palette.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                        AvatarCropCanvas(image: image, crop: $crop)
+                            .allowsHitTesting(!saving)
+                            .frame(width: side, height: side).clipped()
+                            .overlay(Rectangle().fill(.black.opacity(0.35)).mask(Rectangle().overlay(Circle().blendMode(.destinationOut)).compositingGroup()).allowsHitTesting(false))
+                            .overlay(Rectangle().stroke(.white.opacity(0.8), lineWidth: 1).allowsHitTesting(false))
+                            .overlay(Circle().stroke(.white, lineWidth: 2).allowsHitTesting(false))
+                            .accessibilityElement(children: .ignore)
+                            .accessibilityLabel(L10n.string("avatar_crop_area"))
+                            .accessibilityHint(L10n.string("avatar_crop_hint"))
+                            .accessibilityAction(named: Text(L10n.string("avatar_crop_left"))) { if !saving { crop.move(dx: -0.1, dy: 0, in: image.size) } }
+                            .accessibilityAction(named: Text(L10n.string("avatar_crop_up"))) { if !saving { crop.move(dx: 0, dy: -0.1, in: image.size) } }
+                            .accessibilityAction(named: Text(L10n.string("avatar_crop_down"))) { if !saving { crop.move(dx: 0, dy: 0.1, in: image.size) } }
+                            .accessibilityAction(named: Text(L10n.string("avatar_crop_right"))) { if !saving { crop.move(dx: 0.1, dy: 0, in: image.size) } }
+                        Text(L10n.string("avatar_crop_zoom")).frame(maxWidth: .infinity, alignment: .leading)
+                        Slider(value: Binding(get: { crop.zoom }, set: { crop.zoom = $0; crop.move(dx: 0, dy: 0, in: image.size) }), in: 1...4).accessibilityLabel(L10n.string("avatar_crop_zoom"))
+                        if failed { Text(L10n.string("avatar_crop_error")).foregroundStyle(Palette.disconnect) }
+                        Button {
+                            guard !saving else { return }
+                            saving = true
+                            let value = crop
+                            Task {
+                                let result = await Task.detached(priority: .userInitiated) { try? AvatarImages.prepare(image, crop: value) }.value
+                                if let result, await Client.shared.saveAvatar(preview: result.0, uploads: result.1, selection: selection) { onDismiss() }
+                                else { failed = true; saving = false }
+                            }
+                        } label: {
+                            HStack { if saving { ProgressView() }; Text(L10n.string(saving ? "avatar_crop_saving" : "avatar_crop_use")) }
+                                .frame(maxWidth: .infinity, minHeight: 48)
+                        }.buttonStyle(.borderedProminent).tint(Palette.accent)
+                    }.padding(16).disabled(saving)
+                }.background(Palette.background)
+            }
+            .navigationTitle(L10n.string("avatar_crop_title"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button(L10n.string("action_cancel"), action: onDismiss).disabled(saving) } }
+        }.navigationViewStyle(.stack).interactiveDismissDisabled(saving)
+    }
 }
 extension Color {
     init(hex: UInt32) { self.init(red: Double((hex >> 16) & 255) / 255, green: Double((hex >> 8) & 255) / 255, blue: Double(hex & 255) / 255) }
@@ -179,14 +437,40 @@ struct ChannelSheetState {
         return queued
     }
 }
+extension View {
+    func avatarSelectionSheet(selection: Binding<AvatarSelectionRequest?>) -> some View {
+        // The item supplies its ID at presentation time; a separate Boolean sheet
+        // can capture the initial selection number on the very first opening.
+        sheet(item: selection) { request in
+            AvatarSelectionPage(selection: request.id, onDismiss: {
+                guard selection.wrappedValue?.id == request.id else { return }
+                Client.shared.cancelAvatarSelection(request.id)
+                selection.wrappedValue = nil
+            })
+            .id(request.id)
+            .onDisappear { Client.shared.cancelAvatarSelection(request.id) }
+        }
+    }
+    func avatarClearConfirmation(isPresented: Binding<Bool>, connected: Bool, clear: @escaping () -> Void) -> some View {
+        alert(L10n.string("avatar_remove"), isPresented: isPresented) {
+            Button(L10n.string("action_cancel"), role: .cancel) {}
+            Button(L10n.string("avatar_remove"), role: .destructive, action: clear)
+        } message: {
+            Text(L10n.string(connected ? "avatar_clear_confirm_connected" : "avatar_clear_confirm_offline"))
+        }
+    }
+}
+
 struct HomeView: View {
     @ObservedObject var client: Client
     @EnvironmentObject private var language: LanguageSettings
-    @State private var tab = 0
+    @State var tab = 0
     @State private var showConnect = false
     @State private var editingBookmark: Bookmark?
     @State private var deletingBookmark: Bookmark?
     @State private var languageMenuPresented = false
+    @State private var avatarClearPresented = false
+    @State private var avatarSelection: AvatarSelectionRequest?
     @State private var channelSheet = ChannelSheetState()
     @State private var lockedChannel: Channel?
     @State private var channelPassword = ""
@@ -441,6 +725,56 @@ struct HomeView: View {
             VStack(alignment: .leading, spacing: 24) {
                 PageTitle(key: "tab_settings").padding(.horizontal, PageTitle.inset)
                 VStack(alignment: .leading, spacing: 24) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack(spacing: 14) {
+                            Group {
+                                if let preview = client.avatarPreview {
+                                    Image(uiImage: preview).resizable().scaledToFill()
+                                } else {
+                                    Image(systemName: "person.fill").foregroundStyle(Palette.muted)
+                                }
+                            }
+                            .frame(width: 64, height: 64)
+                            .background(Palette.selected)
+                            .clipShape(Circle())
+                            .accessibilityLabel(L10n.string("avatar_preview"))
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(L10n.string("avatar_title"))
+                                Text(L10n.string(client.avatarIntent == "clear" ? "avatar_cleared_local" : (client.avatarPreview == nil ? "avatar_none" : "avatar_local")))
+                                    .font(.footnote).foregroundStyle(Palette.muted)
+                            }
+                            Spacer(minLength: 0)
+                            Button(L10n.string(client.avatarPreview == nil ? "avatar_choose" : "avatar_change")) {
+                                avatarSelection = AvatarSelectionRequest(id: client.beginAvatarSelection())
+                            }
+                            .buttonStyle(.plain).foregroundStyle(Palette.accent)
+                            .frame(minHeight: 44)
+                            .accessibilityHint(L10n.string("avatar_choose_hint"))
+                        }
+                        .padding(16)
+                        .background(Palette.card)
+                        .clipShape(RoundedRectangle(cornerRadius: 14))
+                        Button(role: .destructive) { avatarClearPresented = true } label: {
+                            Text(L10n.string("avatar_remove"))
+                                .font(.body)
+                                .frame(minWidth: 48, minHeight: 48, alignment: .trailing)
+                                .contentShape(Rectangle())
+                        }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(Palette.disconnect)
+                            .opacity(client.avatarClearingLocally || client.avatarStatus == "clearing" ? 0.38 : 1)
+                            .frame(maxWidth: .infinity, alignment: .trailing)
+                            .disabled(client.avatarClearingLocally || client.avatarStatus == "clearing")
+                            .avatarClearConfirmation(isPresented: $avatarClearPresented, connected: client.connected, clear: client.clearAvatar)
+                        if let detail = client.avatarCleanupDetail { Text(detail).font(.footnote).foregroundStyle(Palette.disconnect) }
+                        if ["checking", "uploading", "clearing", "failed", "clear_failed", "clear_save_failed"].contains(client.avatarStatus) {
+                            Text(L10n.string("avatar_\(client.avatarStatus)")
+                                 + (["failed", "clear_failed", "clear_save_failed"].contains(client.avatarStatus) ? client.avatarDetail.map { ": \($0)" } ?? "" : ""))
+                                .font(.footnote)
+                                .foregroundStyle(["failed", "clear_failed", "clear_save_failed"].contains(client.avatarStatus) ? Palette.disconnect : Palette.muted)
+                        }
+                    }
+                    .avatarSelectionSheet(selection: $avatarSelection)
                     Toggle(L10n.string("settings_microphone"), isOn: Binding(get: { !client.microphoneMuted }, set: { value in Task { await client.setAudio(input: !value) } })).disabled(client.audioBusy || client.deafened)
                     Text(L10n.string("settings_microphone_help")).font(.footnote).foregroundStyle(Palette.muted)
                     Toggle(L10n.string("settings_listening"), isOn: Binding(get: { !client.deafened }, set: { value in Task { await client.setAudio(output: !value) } })).disabled(client.audioBusy)

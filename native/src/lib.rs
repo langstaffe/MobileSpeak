@@ -1,6 +1,7 @@
 //! Mobile-only C ABI. TeamSpeak protocol state, chat and file transfers live on one Rust worker.
 #[cfg(target_os = "android")]
 mod android_jni;
+mod avatar;
 mod badges;
 
 use audiopus::{coder::Encoder, Application, Channels, SampleRate};
@@ -75,6 +76,14 @@ pub enum Command {
     },
     SetAppActive {
         active: bool,
+    },
+    AvatarChanged,
+    AvatarSelect {
+        selection: u64,
+    },
+    AvatarSet {
+        selection: u64,
+        image: Option<String>,
     },
     Disconnect,
     Shutdown,
@@ -407,6 +416,7 @@ pub struct Bridge {
     tx: mpsc::Sender<Command>,
     pcm: mpsc::Sender<Vec<i16>>,
     output: Arc<Mutex<Output>>,
+    avatar_store: Arc<avatar::Store>,
 }
 
 fn report(out: &Arc<Mutex<Output>>, error: impl std::fmt::Display) {
@@ -705,6 +715,9 @@ struct BadgeRequest {
     url: String,
     local: PathBuf,
 }
+fn avatar_remote(uid: &tsclientlib::Uid) -> String {
+    format!("/avatar_{}", uid.as_avatar())
+}
 fn desired_media(con: &Connection, storage: &Path) -> Vec<MediaRequest> {
     let Ok(state) = con.get_state() else {
         return Vec::new();
@@ -721,7 +734,7 @@ fn desired_media(con: &Connection, storage: &Path) -> Vec<MediaRequest> {
         let uid_text = format!("{}", uid.as_ref());
         result.push(MediaRequest {
             key: format!("{server}:avatar:{uid_text}:{}", client.avatar_hash),
-            remote: format!("/avatar_{}", uid.as_avatar()),
+            remote: avatar_remote(uid),
             local: avatar_path(storage, &server, &uid_text, &client.avatar_hash),
         });
     }
@@ -861,6 +874,11 @@ async fn download_badge(request: &BadgeRequest) -> Result<(), String> {
 
 enum PendingOperation {
     Chat(String),
+    Avatar(avatar::Token),
+    AvatarInfo(avatar::Token),
+    AvatarDelete(avatar::Token),
+    AvatarDrain(avatar::Token),
+    AvatarStop(avatar::Token),
     Other(&'static str),
 }
 
@@ -1089,6 +1107,7 @@ async fn session(
     persist_tx: &std_mpsc::Sender<PersistJob>,
     app_active: &mut bool,
     noise_suppression: &mut NoiseSuppressionMode,
+    avatar_store: &Arc<avatar::Store>,
 ) -> Result<bool, Box<dyn std::error::Error>> {
     let Command::Connect {
         address,
@@ -1135,6 +1154,9 @@ async fn session(
     let mut chats = ChatStore::default();
     let mut chat_writable = true;
     let mut operations = HashMap::<MessageHandle, PendingOperation>::new();
+    let mut avatar = avatar::AvatarSync::default();
+    avatar.ready();
+    let (avatar_tx, mut avatar_rx) = mpsc::unbounded_channel::<avatar::Completion>();
     let mut media_active = HashSet::<String>::new();
     let mut media_failed = HashSet::<String>::new();
     let mut transfers = HashMap::<FiletransferHandle, MediaRequest>::new();
@@ -1147,10 +1169,18 @@ async fn session(
     let deadline = tokio::time::sleep(Duration::from_secs(30));
     tokio::pin!(deadline);
     loop {
+        avatar.observe(avatar_store, out);
         tokio::select! {
             _ = &mut deadline, if first_connection => return Err("Connection timed out after 30 seconds".into()),
             event = async { con.events().next().await } => match event {
                 Some(Ok(StreamItem::BookEvents(events))) => {
+                    if let Ok(state) = con.get_state() {
+                        if events.iter().any(|event| matches!(event, Event::PropertyChanged { id: tsclientlib::events::PropertyId::ClientAvatarHash(client), .. } if *client == state.own_client)) {
+                            if let Some(me) = state.clients.get(&state.own_client) {
+                                avatar.server_hash_changed(&me.avatar_hash, out);
+                            }
+                        }
+                    }
                     if !subscribed && con.get_state().is_ok() {
                         let handle = con
                             .get_state()?
@@ -1192,6 +1222,7 @@ async fn session(
                     }
                     out.lock().unwrap().set_unread(unread.snapshot());
                     snapshot(&con, out, &audio, storage.as_deref());
+                    if subscribed { avatar.check(&mut con, storage.as_deref(), &avatar_tx, &mut operations, out); }
                     schedule_media(&mut con, storage.as_deref(), &mut media_active, &mut media_failed, &mut transfers);
                     schedule_badges(&con, storage.as_deref(), &mut badge_active, &badge_failed, &badge_tx);
                 },
@@ -1222,9 +1253,40 @@ async fn session(
                     Some(PendingOperation::Other(code)) => if let Err(error) = result {
                         report_code(out, code, Some(error.to_string()));
                     },
+                    Some(PendingOperation::Avatar(generation)) => {
+                        avatar.updated(generation, result.map_err(|error| format!("{:?} (0x{:04x}) missing_permission={:?}", error.error, error.error as u32, error.missing_permission)), out);
+                        if subscribed { avatar.check(&mut con, storage.as_deref(), &avatar_tx, &mut operations, out); }
+                    },
+                    Some(PendingOperation::AvatarDrain(token)) => {
+                        avatar.transfer_list_result(token, result.map_err(|e| format!("{:?} (0x{:04x}) missing_permission={:?}", e.error, e.error as u32, e.missing_permission)), &mut con, &mut operations, out);
+                        if subscribed { avatar.check(&mut con, storage.as_deref(), &avatar_tx, &mut operations, out); }
+                    },
+                    Some(PendingOperation::AvatarStop(token)) => {
+                        avatar.transfer_stopped(token, result.map_err(|e| format!("{:?} (0x{:04x}) missing_permission={:?}", e.error, e.error as u32, e.missing_permission)), out);
+                        if subscribed { avatar.check(&mut con, storage.as_deref(), &avatar_tx, &mut operations, out); }
+                    },
+                    Some(PendingOperation::AvatarDelete(token)) => {
+                        avatar.deleted(token, result, out);
+                        if subscribed { avatar.check(&mut con, storage.as_deref(), &avatar_tx, &mut operations, out); }
+                    },
+                    Some(PendingOperation::AvatarInfo(token)) => {
+                        avatar.info_result(token, result.map_err(|error| format!("{:?} (0x{:04x}) missing_permission={:?}", error.error, error.error as u32, error.missing_permission)), &mut con, out);
+                        if subscribed { avatar.check(&mut con, storage.as_deref(), &avatar_tx, &mut operations, out); }
+                    },
                     None => {},
                 },
+                Some(Ok(StreamItem::MessageEvent(msg))) => {
+                    avatar.info(&msg, &mut con, out);
+                    if subscribed { avatar.check(&mut con, storage.as_deref(), &avatar_tx, &mut operations, out); }
+                },
+                Some(Ok(StreamItem::FileUpload(handle, transfer))) => {
+                    avatar.file_upload(handle, transfer, &avatar_tx, out);
+                    if subscribed { avatar.check(&mut con, storage.as_deref(), &avatar_tx, &mut operations, out); }
+                },
                 Some(Ok(StreamItem::FileDownload(handle, download))) => {
+                    let mut download = Some(download);
+                    if avatar.file_download(handle, &mut download, &avatar_tx, out) { continue; }
+                    let download = download.unwrap();
                     if let Some(request) = transfers.remove(&handle) {
                         let tx = media_tx.clone();
                         tokio::spawn(async move {
@@ -1247,7 +1309,12 @@ async fn session(
                         });
                     }
                 },
-                Some(Ok(StreamItem::FiletransferFailed(handle, _))) => {
+                Some(Ok(StreamItem::FiletransferFailed(handle, error))) => {
+                    if avatar.file_failed(handle, error, out) {
+                        avatar.finish_upload(&mut con, &mut operations, out);
+                        if subscribed { avatar.check(&mut con, storage.as_deref(), &avatar_tx, &mut operations, out); }
+                        continue;
+                    }
                     if let Some(request) = transfers.remove(&handle) {
                         media_active.remove(&request.key);
                         media_failed.insert(request.key);
@@ -1260,6 +1327,9 @@ async fn session(
                         publish_chat(out, &chats, storage.as_deref(), current_server.as_deref());
                     }
                     operations.clear();
+                    if avatar.disconnected() {
+                        out.lock().unwrap().event(json!({"type":"avatar_sync","status":"idle","detail":null}));
+                    }
                     subscribed = false;
                     media_active.clear();
                     media_failed.clear();
@@ -1279,6 +1349,10 @@ async fn session(
                 publish_chat(out, &chats, storage.as_deref(), current_server.as_deref());
                 schedule_media(&mut con, storage.as_deref(), &mut media_active, &mut media_failed, &mut transfers);
             },
+            Some(completion) = avatar_rx.recv() => {
+                avatar.completed(completion, &mut con, &mut operations, out);
+                if subscribed { avatar.check(&mut con, storage.as_deref(), &avatar_tx, &mut operations, out); }
+            },
             Some((request, result)) = badge_rx.recv() => {
                 badge_active.remove(&request.key);
                 if result.is_err() { badge_failed.insert(request.key); }
@@ -1287,13 +1361,19 @@ async fn session(
             },
             received = rx.recv() => match received {
                 Some(Command::Disconnect) | None => {
+                    avatar.disconnected();
                     con.disconnect(DisconnectOptions::new())?;
                     let _ = tokio::time::timeout(Duration::from_secs(2), async { while con.events().next().await.is_some() {} }).await;
                     return Ok(false);
                 },
-                Some(Command::Shutdown) => { let _ = con.disconnect(DisconnectOptions::new()); return Ok(true); },
+                Some(Command::Shutdown) => { avatar.disconnected(); let _ = con.disconnect(DisconnectOptions::new()); return Ok(true); },
                 Some(Command::Connect { .. }) => report_code(out, "disconnect_before_connect", None),
+                Some(Command::AvatarSelect { .. } | Command::AvatarSet { .. }) => unreachable!("avatar storage commands are handled by Bridge::send"),
                 Some(Command::Configure { .. }) => report_code(out, "storage_change_while_connected", None),
+                Some(Command::AvatarChanged) => {
+                    avatar.observe(avatar_store, out);
+                    if subscribed { avatar.check(&mut con, storage.as_deref(), &avatar_tx, &mut operations, out); }
+                },
                 Some(Command::SetChatVisible { server, conversation, token, visible }) => {
                     unread.set_visible(&server, &conversation, &token, visible);
                     out.lock().unwrap().set_unread(unread.snapshot());
@@ -1421,6 +1501,8 @@ async fn session(
                 }
             },
             _ = clock.tick() => {
+                avatar.tick(out);
+                if subscribed { avatar.check(&mut con, storage.as_deref(), &avatar_tx, &mut operations, out); }
                 if subscribed {
                     if !output_muted {
                         let mut samples = vec![0f32; 1920];
@@ -1449,6 +1531,8 @@ impl Bridge {
             .lock()
             .unwrap()
             .set_unread(UnreadState::default().snapshot());
+        let avatar_store = Arc::new(avatar::Store::default());
+        let worker_avatar_store = avatar_store.clone();
         let worker_output = output.clone();
         let persistence_output = output.clone();
         let (persist_tx, persist_rx) = std_mpsc::channel::<PersistJob>();
@@ -1484,7 +1568,8 @@ impl Bridge {
                         Command::SetAppActive { active } => app_active = active,
                         Command::SetNoiseSuppression { mode } => noise_suppression = mode,
                         Command::Configure { storage: value } => {
-                            storage = Some(PathBuf::from(value))
+                            storage = Some(PathBuf::from(value));
+                            avatar::offline(&worker_avatar_store, &worker_output).await;
                         }
                         request @ Command::Connect { .. } => {
                             match session(
@@ -1496,6 +1581,7 @@ impl Bridge {
                                 &persist_tx,
                                 &mut app_active,
                                 &mut noise_suppression,
+                                &worker_avatar_store,
                             )
                             .await
                             {
@@ -1504,23 +1590,62 @@ impl Bridge {
                                 _ => {}
                             }
                             worker_output.lock().unwrap().status("disconnected");
+                            avatar::offline(&worker_avatar_store, &worker_output).await;
                             worker_output.lock().unwrap().set_chats(json!([]));
                             worker_output
                                 .lock()
                                 .unwrap()
                                 .set_unread(UnreadState::default().snapshot());
                         }
+                        Command::AvatarChanged => {
+                            avatar::offline(&worker_avatar_store, &worker_output).await
+                        }
                         _ => {}
                     }
                 }
             });
         });
-        Self { tx, pcm, output }
+        Self {
+            tx,
+            pcm,
+            output,
+            avatar_store,
+        }
     }
     pub fn send(&self, json: &str) -> Result<(), String> {
         let request: Command = serde_json::from_str(json).map_err(|error| error.to_string())?;
         request.validate().map_err(str::to_owned)?;
-        self.tx.try_send(request).map_err(|error| error.to_string())
+        match request {
+            Command::AvatarSelect { selection } => {
+                self.avatar_store
+                    .selection
+                    .fetch_max(selection, Ordering::AcqRel);
+                Ok(())
+            }
+            Command::AvatarSet { selection, image } => {
+                let permit = self.tx.try_reserve().map_err(|error| error.to_string())?;
+                avatar::persist(
+                    &self.avatar_store,
+                    selection,
+                    image.as_deref(),
+                    &self.output,
+                )?;
+                permit.send(Command::AvatarChanged);
+                Ok(())
+            }
+            Command::Configure { ref storage } => {
+                let root = PathBuf::from(storage);
+                let permit = self.tx.try_reserve().map_err(|error| error.to_string())?;
+                let mut root_slot = self.avatar_store.root.lock().unwrap();
+                if root_slot.as_ref().is_some_and(|existing| existing != &root) {
+                    return Err("Avatar storage cannot change during this core lifetime".into());
+                }
+                *root_slot = Some(root);
+                permit.send(request);
+                Ok(())
+            }
+            _ => self.tx.try_send(request).map_err(|error| error.to_string()),
+        }
     }
     pub fn poll(&self) -> Value {
         let mut out = self.output.lock().unwrap();

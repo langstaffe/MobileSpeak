@@ -7,6 +7,7 @@ import android.os.Build
 import android.os.Bundle
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.animation.AnimatedContent
@@ -16,6 +17,7 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.updateTransition
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
@@ -143,7 +145,7 @@ class MainActivity : AppCompatActivity() {
     }
 }
 
-private object Palette {
+internal object Palette {
     val text = Color(0xFFF2F3F5)
     val background = Color(0xFF2B2D31)
     val bottom = Color(0xFF292B2F)
@@ -372,7 +374,7 @@ private fun BusyScreen(status: String) {
 }
 
 @Composable
-private fun BookmarkScreen(
+internal fun BookmarkScreen(
     ui: SessionUiState,
     onAdd: () -> Unit,
     onEdit: (Bookmark) -> Unit,
@@ -400,7 +402,7 @@ private fun BookmarkScreen(
         items(ui.bookmarks, key = { it.id }) { bookmark ->
             var menu by remember { mutableStateOf(false) }
             Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Palette.card).padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                Row(Modifier.weight(1f).heightIn(min = 64.dp).clickable { onConnect(bookmark) }, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(Modifier.weight(1f).heightIn(min = 64.dp).clickable(interactionSource = null, indication = null) { onConnect(bookmark) }, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     Avatar(bookmark.title, null, false, 34)
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                         Text(bookmark.title, fontSize = 17.sp, lineHeight = 20.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -418,7 +420,7 @@ private fun BookmarkScreen(
             }
         }
         item {
-            Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(onClick = onAdd).padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(interactionSource = null, indication = null, onClick = onAdd).padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Icon(UiIcons.Plus, null, Modifier.size(18.dp))
                 Text(stringResource(R.string.bookmark_add_server), fontSize = 17.sp, lineHeight = 20.sp)
             }
@@ -528,7 +530,7 @@ private fun PageTitle(title: String, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun ChannelScreen(ui: SessionUiState, onSelect: (Channel) -> Unit, onChat: (Channel) -> Unit) {
+internal fun ChannelScreen(ui: SessionUiState, onSelect: (Channel) -> Unit, onChat: (Channel) -> Unit) {
     val haptic = LocalHapticFeedback.current
     val ownChannel = ui.snapshot.clients.firstOrNull { it.id == ui.snapshot.ownClient }?.channel
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(pageTitleInset), verticalArrangement = Arrangement.spacedBy(9.dp)) {
@@ -547,7 +549,7 @@ private fun ChannelScreen(ui: SessionUiState, onSelect: (Channel) -> Unit, onCha
                     textAlign = when { marker.startsWith("[c") -> TextAlign.Center; marker.startsWith("[r") -> TextAlign.End; else -> TextAlign.Start })
             } else {
                 Row(card.border(if (selected) 2.dp else 1.dp, if (selected) Palette.accent else Palette.border, shape).padding(10.dp).padding(start = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Column(Modifier.weight(1f).clickable {
+                    Column(Modifier.weight(1f).clickable(interactionSource = null, indication = null) {
                         haptic.performHapticFeedback(HapticFeedbackType.VirtualKey)
                         onSelect(channel)
                     }, verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -616,11 +618,11 @@ private fun ChannelDialog(channel: Channel, ui: SessionUiState, onDismiss: () ->
 }
 
 @Composable
-private fun MemberScreen(ui: SessionUiState, onChat: (Member) -> Unit) {
+internal fun MemberScreen(ui: SessionUiState, onChat: (Member) -> Unit) {
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = pageTitleInset, bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         item { PageTitle(stringResource(R.string.tab_members), Modifier.padding(horizontal = pageTitleInset)) }
         items(ui.snapshot.clients.filter { it.id != ui.snapshot.ownClient }, key = { it.id }) { member ->
-            MemberRow(member, Modifier.padding(horizontal = 16.dp).clickable(enabled = member.uid != null) { onChat(member) }, ui.unread.privateCounts[member.uid] ?: 0)
+            MemberRow(member, Modifier.padding(horizontal = 16.dp).clickable(enabled = member.uid != null, interactionSource = null, indication = null) { onChat(member) }, ui.unread.privateCounts[member.uid] ?: 0)
         }
     }
 }
@@ -650,11 +652,69 @@ private fun MemberRow(member: Member, modifier: Modifier = Modifier, unread: Int
 @Composable
 private fun SettingsScreen(ui: SessionUiState, requestPermissions: () -> Unit) {
     val haptic = LocalHapticFeedback.current
+    var avatarClearPresented by rememberSaveable { mutableStateOf(false) }
+    var avatarUri by rememberSaveable { mutableStateOf<String?>(null) }
+    var avatarSelection by rememberSaveable { mutableStateOf(0L) }
+    val avatarPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri != null && ClientSession.isCurrentAvatarSelection(avatarSelection)) avatarUri = uri.toString()
+        else ClientSession.cancelAvatarSelection(avatarSelection)
+    }
+    avatarUri?.let { uri ->
+        AvatarCropDialog(uri, avatarSelection) {
+            ClientSession.cancelAvatarSelection(avatarSelection)
+            avatarUri = null
+        }
+    }
+    if (avatarClearPresented) AlertDialog(
+        onDismissRequest = { avatarClearPresented = false },
+        title = { Text(stringResource(R.string.avatar_remove)) },
+        text = { Text(stringResource(if (ui.snapshot.status == "connected") R.string.avatar_clear_confirm_connected else R.string.avatar_clear_confirm_offline)) },
+        confirmButton = { TextButton(onClick = { avatarClearPresented = false; ClientSession.clearAvatar() }) { Text(stringResource(R.string.avatar_remove), color = Palette.disconnect) } },
+        dismissButton = { TextButton(onClick = { avatarClearPresented = false }) { Text(stringResource(R.string.action_cancel)) } },
+        containerColor = Palette.card, titleContentColor = Palette.text, textContentColor = Palette.text,
+    )
     val selectedLanguage = AppLanguage.selected()
     var languageMenuExpanded by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(top = pageTitleInset, bottom = 20.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
         PageTitle(stringResource(R.string.tab_settings), Modifier.padding(horizontal = pageTitleInset))
         Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Palette.card)
+                    .padding(16.dp), verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                    Box(Modifier.size(64.dp).clip(CircleShape).background(Palette.selected), contentAlignment = Alignment.Center) {
+                        if (ui.avatarPreviewPath == null) Icon(UiIcons.Person, null, Modifier.size(28.dp), tint = Palette.muted)
+                        else LocalImage(ui.avatarPreviewPath, Modifier.fillMaxSize(), stringResource(R.string.avatar_preview), ui.avatarRevision)
+                    }
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(stringResource(R.string.avatar_title), fontSize = 17.sp, lineHeight = 22.sp)
+                        Text(stringResource(if (ui.avatarIntent == "clear") R.string.avatar_cleared_local else if (ui.avatarPreviewPath == null) R.string.avatar_none else R.string.avatar_local),
+                            fontSize = 13.sp, lineHeight = 17.sp, color = Palette.muted)
+                    }
+                    TextButton(onClick = { avatarSelection = ClientSession.beginAvatarSelection(); avatarPicker.launch(
+                        androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                    ) }) { Text(stringResource(if (ui.avatarPreviewPath == null) R.string.avatar_choose else R.string.avatar_change)) }
+                }
+                TextButton(onClick = { avatarClearPresented = true }, enabled = !ui.avatarClearingLocally && ui.avatarStatus != "clearing",
+                    modifier = Modifier.align(Alignment.End).heightIn(min = 48.dp),
+                    contentPadding = PaddingValues(0.dp),
+                    colors = ButtonDefaults.textButtonColors(contentColor = Palette.disconnect)) {
+                    Text(stringResource(R.string.avatar_remove), fontSize = 17.sp, lineHeight = 22.sp, fontWeight = FontWeight.Normal)
+                }
+                ui.avatarCleanupDetail?.let { Text(it, fontSize = 13.sp, color = Palette.disconnect) }
+                if (ui.avatarStatus in listOf("checking", "uploading", "clearing", "failed", "clear_failed", "clear_save_failed")) {
+                    val status = when (ui.avatarStatus) {
+                        "checking" -> R.string.avatar_checking
+                        "uploading" -> R.string.avatar_uploading
+                        "failed" -> R.string.avatar_failed
+                        "clearing" -> R.string.avatar_clearing
+                        "clear_failed" -> R.string.avatar_clear_failed
+                        else -> R.string.avatar_clear_save_failed
+                    }
+                    Text(stringResource(status) + (if (ui.avatarStatus in listOf("failed", "clear_failed", "clear_save_failed") && ui.avatarDetail != null) ": ${ui.avatarDetail}" else ""),
+                        fontSize = 13.sp, lineHeight = 17.sp, color = if (ui.avatarStatus in listOf("failed", "clear_failed", "clear_save_failed")) Palette.disconnect else Palette.muted)
+                }
+            }
             SettingSwitch(stringResource(R.string.settings_microphone), !ui.microphoneMuted, !ui.deafened) { enabled ->
                 if (enabled && !ClientSession.microphonePermission) requestPermissions()
                 else ClientSession.setAudio(inputMuted = !enabled)
@@ -870,9 +930,9 @@ private fun ChatScreen(target: ChatTarget, ui: SessionUiState, active: Boolean, 
 }
 
 @Composable
-private fun RowScope.NavigationItem(label: String, icon: androidx.compose.ui.graphics.vector.ImageVector, selected: Boolean, unread: Int, onClick: () -> Unit) {
+internal fun RowScope.NavigationItem(label: String, icon: androidx.compose.ui.graphics.vector.ImageVector, selected: Boolean, unread: Int, onClick: () -> Unit) {
     val color = if (selected) Palette.accent else Palette.muted
-    Column(Modifier.weight(1f).heightIn(min = 44.dp).selectable(selected, role = Role.Tab, onClick = onClick), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(5.dp)) {
+    Column(Modifier.weight(1f).heightIn(min = 44.dp).selectable(selected, interactionSource = null, indication = null, role = Role.Tab, onClick = onClick), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(5.dp)) {
         Box {
             Icon(icon, null, Modifier.size(22.dp), tint = color)
             UnreadBadge(unread, Modifier.align(Alignment.TopEnd).offset(x = 8.dp, y = (-7).dp))
@@ -923,9 +983,9 @@ private fun BadgeView(badge: Badge) {
 }
 
 @Composable
-private fun LocalImage(path: String?, modifier: Modifier, description: String? = null) {
+private fun LocalImage(path: String?, modifier: Modifier, description: String? = null, revision: Long = 0) {
     if (path == null) return
-    val bitmap by produceState<ImageBitmap?>(null, path) {
+    val bitmap by produceState<ImageBitmap?>(null, path, revision) {
         value = withContext(Dispatchers.IO) {
             BitmapFactory.decodeFile(path)?.asImageBitmap().also {
                 if (it == null) runCatching { File(path).delete() }

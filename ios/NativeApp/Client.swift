@@ -1,6 +1,7 @@
 import Foundation
 import Combine
 import Security
+import UIKit
 
 struct Channel: Decodable, Identifiable, Equatable {
     enum SpacerAlignment: Equatable { case left, center, right, repeatFill }
@@ -154,6 +155,14 @@ private func coreChanged(_ context: Int) {
     let handle: UnsafeMutableRawPointer
     @Published var state = Snapshot()
     @Published var error: String?
+    @Published private(set) var avatarPreview: UIImage?
+    @Published private(set) var avatarStatus = "idle"
+    @Published private(set) var avatarDetail: String?
+    @Published private(set) var avatarIntent = "unset"
+    @Published private(set) var avatarClearingLocally = false
+    @Published private(set) var avatarCleanupDetail: String?
+    private var avatarSelection = 0
+    private var avatarRoot: URL?
     @Published private(set) var microphoneMuted = false
     @Published private(set) var deafened = false
     @Published private(set) var noiseSuppression = NoiseSuppressionMode.stored(in: .standard)
@@ -301,6 +310,16 @@ private func coreChanged(_ context: Int) {
             let root = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
                 .appendingPathComponent("MobileSpeak", isDirectory: true)
             try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+            avatarRoot = root
+            let upload = root.appendingPathComponent("default-avatar-upload.jpg")
+            let preview = root.appendingPathComponent("default-avatar-preview.jpg")
+            if let directory = currentAvatarDirectory(in: root) {
+                avatarPreview = UIImage(contentsOfFile: directory.appendingPathComponent("preview.jpg").path)
+            } else if !FileManager.default.fileExists(atPath: root.appendingPathComponent("default-avatar-current").path), FileManager.default.fileExists(atPath: upload.path), FileManager.default.fileExists(atPath: preview.path) {
+                let uploadDate = (try? upload.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+                let previewDate = (try? preview.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+                avatarPreview = UIImage(contentsOfFile: (previewDate > uploadDate ? upload : preview).path)
+            }
             try send(["type": "configure", "storage": root.path])
         } catch { self.error = L10n.withDetail("error_cache_prepare", error.localizedDescription) }
         do { try send(["type": "set_noise_suppression", "mode": noiseSuppression.rawValue]) }
@@ -310,6 +329,75 @@ private func coreChanged(_ context: Int) {
         let data = try JSONSerialization.data(withJSONObject: command)
         let result = String(decoding: data, as: UTF8.self).withCString { ts_command(handle, $0) }
         if result != 0 { throw NSError(domain: "MobileSpeak", code: Int(result), userInfo: [NSLocalizedDescriptionKey: L10n.string("error_operation_submit")]) }
+    }
+    func beginAvatarSelection() -> Int {
+        avatarSelection += 1
+        try? send(["type": "avatar_select", "selection": avatarSelection])
+        return avatarSelection
+    }
+    func isCurrentAvatarSelection(_ selection: Int) -> Bool { selection == avatarSelection }
+    func cancelAvatarSelection(_ selection: Int) { if selection == avatarSelection { _ = beginAvatarSelection() } }
+    private func currentAvatarDirectory(in root: URL) -> URL? {
+        guard let id = try? String(contentsOf: root.appendingPathComponent("default-avatar-current"), encoding: .utf8),
+              !id.isEmpty, id.count <= 64, id.allSatisfy({ $0.isHexDigit || $0 == "-" }) else { return nil }
+        return root.appendingPathComponent("avatars/\(id)", isDirectory: true)
+    }
+    @discardableResult func saveAvatar(preview: Data, uploads: [Data], selection: Int) async -> Bool {
+        guard selection == avatarSelection, let root = avatarRoot else { return false }
+        guard uploads.count == 3, let image = UIImage(data: preview) else { avatarImageFailed(selection: selection); return false }
+        let id = UUID().uuidString
+        let directory = root.appendingPathComponent("avatars/\(id)", isDirectory: true)
+        let prepared = await Task.detached(priority: .userInitiated) {
+            do {
+                try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+                try preview.write(to: directory.appendingPathComponent("preview.jpg"), options: .atomic)
+                for (index, bytes) in uploads.enumerated() {
+                    try bytes.write(to: directory.appendingPathComponent("upload-\(index).jpg"), options: .atomic)
+                }
+                return true
+            } catch { return false }
+        }.value
+        guard prepared, selection == avatarSelection else {
+            Task.detached { try? FileManager.default.removeItem(at: directory) }
+            if selection == avatarSelection { avatarImageFailed(selection: selection) }
+            return false
+        }
+        let published = await publishAvatar(image: id, selection: selection)
+        guard published else {
+            Task.detached { try? FileManager.default.removeItem(at: directory) }
+            avatarImageFailed(selection: selection)
+            return false
+        }
+        // Core owns the durable reference and old-file cleanup. A stale callback
+        // must not change UI, nor remove a version the core already committed.
+        guard selection == avatarSelection else { return false }
+        avatarPreview = image
+        avatarIntent = "image"
+        return true
+    }
+    private func publishAvatar(image: String?, selection: Int) async -> Bool {
+        guard let data = try? JSONSerialization.data(withJSONObject: ["type": "avatar_set", "selection": selection, "image": image as Any? ?? NSNull()]) else { return false }
+        let address = UInt(bitPattern: handle)
+        return await Task.detached(priority: .userInitiated) {
+            String(decoding: data, as: UTF8.self).withCString { ts_command(UnsafeMutableRawPointer(bitPattern: address), $0) == 0 }
+        }.value
+    }
+    func clearAvatar() {
+        guard !avatarClearingLocally else { return }
+        let selection = beginAvatarSelection()
+        avatarClearingLocally = true
+        Task {
+            let saved = await publishAvatar(image: nil, selection: selection)
+            avatarClearingLocally = false
+            guard selection == avatarSelection else { return }
+            if saved { avatarPreview = nil; avatarIntent = "clear" }
+            else { avatarStatus = "clear_save_failed"; avatarDetail = nil }
+        }
+    }
+    func avatarImageFailed(selection: Int? = nil) {
+        if let selection, selection != avatarSelection { return }
+        avatarStatus = "failed"
+        avatarDetail = L10n.string("avatar_image_error")
     }
     func receive() {
         guard let pointer = ts_poll(handle) else { return }
@@ -329,6 +417,20 @@ private func coreChanged(_ context: Int) {
                         microphoneMuted = true
                         audio.stopCapture()
                         try? send(["type": "mute", "input": true, "output": deafened])
+                    }
+                } else if event["type"] as? String == "avatar_local" {
+                    avatarIntent = event["intent"] as? String ?? "unset"
+                    if avatarIntent == "clear" { avatarPreview = nil }
+                    else if let path = event["preview"] as? String { avatarPreview = UIImage(contentsOfFile: path) }
+                    avatarCleanupDetail = nil
+                } else if event["type"] as? String == "avatar_cleanup_failed" {
+                    avatarCleanupDetail = L10n.withDetail("avatar_cleanup_error", event["detail"] as? String)
+                } else if event["type"] as? String == "avatar_sync" {
+                    avatarStatus = event["status"] as? String ?? "idle"
+                    avatarDetail = event["detail"] as? String
+                    if ["failed", "clear_failed", "clear_save_failed"].contains(avatarStatus), let phase = event["phase"] as? String,
+                       ["local_read", "server_self", "upload_connection", "upload_write", "hash_command", "server_hash", "verify_connection", "verify_file", "synced", "delete_command", "clear_hash", "cleared", "previous_transfer_query", "previous_transfer_stop"].contains(phase) {
+                        avatarDetail = L10n.withDetail("avatar_stage_\(phase)", avatarDetail)
                     }
                 }
             }
