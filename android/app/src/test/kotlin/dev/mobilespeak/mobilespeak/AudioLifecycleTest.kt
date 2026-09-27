@@ -8,6 +8,23 @@ import org.junit.Test
 
 class AudioLifecycleTest {
     @Test
+    fun audioIntentWaitsForOwnMemberAndResetsOnReconnect() {
+        val own = Member(7, 1, null, "", null, emptyList(), emptyList(), null,
+            muted = true, deafened = false, speaking = false)
+        val initial = Snapshot(status = "connected", ownClient = 7)
+        assertFalse(initial.canApplyAudioState())
+        assertFalse(initial.copy(clients = listOf(own.copy(id = 8))).canApplyAudioState())
+        val ready = initial.copy(clients = listOf(own))
+        // canSend is still false because we have not applied the user's unmute yet.
+        assertFalse(ready.canSend)
+        assertTrue(ready.canApplyAudioState())
+        assertTrue(ready.copy(clients = listOf(own.copy(channel = 2))).canApplyAudioState())
+        assertFalse(ready.copy(status = "reconnecting").canApplyAudioState())
+        assertFalse(initial.canApplyAudioState())
+        assertTrue(ready.canApplyAudioState())
+    }
+
+    @Test
     fun backgroundDoesNotDisablePreparedMicrophone() {
         assertTrue(wantsForegroundMicrophone(true, true, false, false))
         assertTrue(allowsMicrophoneCapture(true, true, false, false, true))

@@ -213,7 +213,7 @@ internal object ClientSession {
             return
         }
         mutableState.update { it.copy(microphoneMuted = nextInput, deafened = nextOutput) }
-        if (old.snapshot.status == "connected") {
+        if (old.snapshot.canApplyAudioState()) {
             send(JSONObject().put("type", "mute").put("input", nextInput || nextOutput).put("output", nextOutput))
         }
     }
@@ -341,7 +341,7 @@ internal object ClientSession {
     }
 
     private fun applyEnvelope(envelope: JSONObject) {
-        val wasConnected = state.value.snapshot.status == "connected"
+        val wasAudioReady = state.value.snapshot.canApplyAudioState()
         var eventError: String? = null
         var audioMuted = false
         val events = envelope.getJSONArray("events")
@@ -403,7 +403,7 @@ internal object ClientSession {
         }
         if (nextSnapshot.status == "connected") {
             updateAutomaticTitle(nextSnapshot.server)
-            if (!wasConnected) {
+            if (!wasAudioReady && nextSnapshot.canApplyAudioState()) {
                 val audio = state.value
                 setAudio(inputMuted = audio.microphoneMuted, deafened = audio.deafened)
             }
@@ -456,3 +456,8 @@ private fun JSONObject?.toIntMap(): Map<String, Int> {
     if (this == null) return emptyMap()
     return keys().asSequence().associateWith { getInt(it) }
 }
+
+// A connected snapshot can precede our initial member record. Applying mute then
+// lets that record restore the old input-muted value inside tsclientlib.
+internal fun Snapshot.canApplyAudioState() =
+    status == "connected" && ownClient != null && clients.any { it.id == ownClient }
