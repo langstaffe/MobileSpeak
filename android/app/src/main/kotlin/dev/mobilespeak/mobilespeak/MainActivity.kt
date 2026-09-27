@@ -82,7 +82,6 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.Dispatchers
@@ -91,6 +90,14 @@ import java.io.File
 import java.util.UUID
 
 class MainActivity : AppCompatActivity() {
+    private var openAbout by mutableStateOf(false)
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (intent.getBooleanExtra("show_about", false)) openAbout = true
+    }
+
     private val permissionRequest = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
     ) { result ->
@@ -99,6 +106,8 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        openAbout = savedInstanceState == null && intent.getBooleanExtra("show_about", false)
+        AppUpdates.initialize(applicationContext)
         ClientSession.initialize(applicationContext)
         ClientSession.setMicrophonePermission(
             checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED,
@@ -119,7 +128,7 @@ class MainActivity : AppCompatActivity() {
             ) {
                 Surface(Modifier.fillMaxSize(), color = Palette.background) {
                     ProvideTextStyle(androidx.compose.ui.text.TextStyle(fontSize = 17.sp, lineHeight = 20.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.SansSerif)) {
-                        MobileSpeakApp(::requestVoicePermissions)
+                        MobileSpeakApp(::requestVoicePermissions, openAbout) { openAbout = false; intent.removeExtra("show_about") }
                     }
                 }
             }
@@ -134,6 +143,16 @@ class MainActivity : AppCompatActivity() {
     override fun onStop() {
         ClientSession.setAppActive(false)
         super.onStop()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        AppUpdates.onForeground()
+    }
+
+    override fun onPause() {
+        AppUpdates.onBackground()
+        super.onPause()
     }
 
     private fun requestVoicePermissions() {
@@ -158,10 +177,14 @@ internal object Palette {
     val disconnect = Color(0xFFC83F4A)
 }
 
+private data class PageTarget(val chat: ChatTarget? = null, val settings: String? = null) {
+    val key: String get() = chat?.conversation ?: settings ?: "home"
+}
+
 private data class ChatTarget(val conversation: String, val title: String, val channel: Channel? = null, val member: Member? = null)
 
 @Composable
-private fun MobileSpeakApp(requestPermissions: () -> Unit) {
+internal fun MobileSpeakApp(requestPermissions: () -> Unit, openAbout: Boolean = false, consumedAbout: () -> Unit = {}) {
     val ui by ClientSession.state.collectAsStateWithLifecycle()
     var tab by androidx.compose.runtime.saveable.rememberSaveable { mutableIntStateOf(0) }
     var editingBookmark by remember { mutableStateOf<Bookmark?>(null) }
@@ -179,7 +202,10 @@ private fun MobileSpeakApp(requestPermissions: () -> Unit) {
         ),
     ) { mutableStateOf<ChatTarget?>(null) }
 
-    val navigation = updateTransition(chat, label = "Chat navigation")
+    var settingsPage by rememberSaveable { mutableStateOf<String?>(null) }
+    var settingsModal by remember { mutableStateOf(false) }
+    val page = PageTarget(chat, settingsPage)
+    val navigation = updateTransition(page, label = "Page navigation")
     val homeState = rememberSaveableStateHolder()
     val focusManager = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
@@ -191,8 +217,13 @@ private fun MobileSpeakApp(requestPermissions: () -> Unit) {
         }
     }
 
-    BackHandler(enabled = navigation.isRunning || chat != null || selectedChannel != null || editingBookmark != null || showNewBookmark) {
+    LaunchedEffect(openAbout) {
+        if (openAbout) { closeChat(); tab = 2; settingsPage = "about"; consumedAbout() }
+    }
+
+    BackHandler(enabled = navigation.isRunning || settingsPage != null || chat != null || selectedChannel != null || editingBookmark != null || showNewBookmark) {
         when {
+            settingsPage != null -> settingsPage = null
             chat != null -> closeChat()
             navigation.isRunning -> Unit
             selectedChannel != null -> selectedChannel = null
@@ -217,10 +248,10 @@ private fun MobileSpeakApp(requestPermissions: () -> Unit) {
                     while (true) awaitPointerEvent(PointerEventPass.Initial).changes.forEach { it.consume() }
                 }
             },
-        contentKey = { it?.conversation ?: "home" },
+        contentKey = { it.key },
         transitionSpec = {
             val timing = tween<androidx.compose.ui.unit.IntOffset>(350, easing = FastOutSlowInEasing)
-            if (targetState != null) {
+            if (targetState.key != "home") {
                 (slideInHorizontally(timing) { it } togetherWith
                     slideOutHorizontally(timing) { -(it * .28f).toInt() })
                     .apply { targetContentZIndex = 1f }.using(null)
@@ -232,10 +263,12 @@ private fun MobileSpeakApp(requestPermissions: () -> Unit) {
         },
     ) { target ->
         Box(Modifier.fillMaxSize().then(
-            if (target?.conversation != chat?.conversation) Modifier.clearAndSetSemantics {} else Modifier,
+            if (target.key != page.key) Modifier.clearAndSetSemantics {} else Modifier,
         )) {
-            if (target != null) {
-                ChatScreen(target, ui, active = chat?.conversation == target.conversation, onBack = closeChat)
+            if (target.settings != null) {
+                SettingsDetailPage(target.settings, onBack = { settingsPage = null }, onModal = { settingsModal = it })
+            } else if (target.chat != null) {
+                ChatScreen(target.chat, ui, active = chat?.conversation == target.chat.conversation, onBack = closeChat)
             } else homeState.SaveableStateProvider("home") {
                 Scaffold(
                     containerColor = Palette.background,
@@ -264,7 +297,7 @@ private fun MobileSpeakApp(requestPermissions: () -> Unit) {
                             }
                         }
                         when {
-                            tab == 2 -> SettingsScreen(ui, requestPermissions)
+                            tab == 2 -> SettingsScreen(ui, requestPermissions, onPage = { settingsPage = it })
                             ui.snapshot.status in setOf("connecting", "reconnecting") -> BusyScreen(ui.snapshot.status)
                             ui.snapshot.status != "connected" -> BookmarkScreen(
                                 ui,
@@ -286,6 +319,8 @@ private fun MobileSpeakApp(requestPermissions: () -> Unit) {
             }
         }
     }
+
+    UpdatePrompt(suitable = !settingsModal && chat == null && !navigation.isRunning && editingBookmark == null && !showNewBookmark && deletingBookmark == null && selectedChannel == null && (tab != 2 || settingsPage == "about"), manualSuitable = settingsPage == "about")
 
     if (showNewBookmark || editingBookmark != null) {
         val existing = editingBookmark
@@ -650,7 +685,7 @@ private fun MemberRow(member: Member, modifier: Modifier = Modifier, unread: Int
 }
 
 @Composable
-private fun SettingsScreen(ui: SessionUiState, requestPermissions: () -> Unit) {
+internal fun SettingsScreen(ui: SessionUiState, requestPermissions: () -> Unit, onPage: (String) -> Unit) {
     val haptic = LocalHapticFeedback.current
     var avatarClearPresented by rememberSaveable { mutableStateOf(false) }
     var avatarUri by rememberSaveable { mutableStateOf<String?>(null) }
@@ -674,7 +709,6 @@ private fun SettingsScreen(ui: SessionUiState, requestPermissions: () -> Unit) {
         containerColor = Palette.card, titleContentColor = Palette.text, textContentColor = Palette.text,
     )
     val selectedLanguage = AppLanguage.selected()
-    var languageMenuExpanded by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(top = pageTitleInset, bottom = 20.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
         PageTitle(stringResource(R.string.tab_settings), Modifier.padding(horizontal = pageTitleInset))
         Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
@@ -740,55 +774,9 @@ private fun SettingsScreen(ui: SessionUiState, requestPermissions: () -> Unit) {
                     }
                 }
             }
-            val languageTitle = stringResource(R.string.settings_language)
-            val currentLanguage = stringResource(selectedLanguage.title)
-            val chooseLanguage = stringResource(R.string.accessibility_choose_language)
-            Box(Modifier.fillMaxWidth()) {
-                Row(
-                    Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Palette.card)
-                        .clickable(role = Role.Button, onClickLabel = chooseLanguage) { languageMenuExpanded = true }
-                        .clearAndSetSemantics {
-                            contentDescription = languageTitle
-                            stateDescription = currentLanguage
-                            onClick(chooseLanguage) { languageMenuExpanded = true; true }
-                        }
-                        .heightIn(min = 56.dp).padding(horizontal = 16.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    Text(languageTitle, Modifier.weight(1f), fontSize = 17.sp, lineHeight = 20.sp, maxLines = 1)
-                    Text(currentLanguage, fontSize = 17.sp, lineHeight = 20.sp, color = Palette.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Icon(UiIcons.Back, null, Modifier.size(16.dp).rotate(-90f), tint = Palette.muted)
-                }
-                Box(Modifier.matchParentSize(), contentAlignment = Alignment.BottomEnd) {
-                    Box(Modifier.size(1.dp)) {
-                        DropdownMenu(
-                            expanded = languageMenuExpanded,
-                            onDismissRequest = { languageMenuExpanded = false },
-                            offset = DpOffset(0.dp, 24.dp),
-                            containerColor = Palette.card,
-                        ) {
-                            AppLanguage.entries.forEach { language ->
-                                val selected = selectedLanguage == language
-                                val selectionState = stringResource(if (selected) R.string.selection_selected else R.string.selection_not_selected)
-                                DropdownMenuItem(
-                                    text = { Text(stringResource(language.title)) },
-                                    onClick = {
-                                        languageMenuExpanded = false
-                                        if (AppLanguage.select(language)) {
-                                            haptic.performHapticFeedback(HapticFeedbackType.SegmentTick)
-                                        }
-                                    },
-                                    trailingIcon = {
-                                        if (selected) Icon(UiIcons.Check, null, Modifier.size(18.dp), tint = Palette.accent)
-                                    },
-                                    modifier = Modifier.semantics { stateDescription = selectionState },
-                                )
-                            }
-                        }
-                    }
-                }
-            }
+            SettingsEntry(stringResource(R.string.settings_language), stringResource(selectedLanguage.title), stringResource(R.string.accessibility_choose_language)) { onPage("language") }
+            SettingsEntry(stringResource(R.string.settings_about)) { onPage("about") }
+
         }
     }
 }

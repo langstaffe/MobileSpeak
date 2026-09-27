@@ -1,7 +1,14 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
 }
+
+val mobileVersion = Properties().apply {
+    rootProject.file("../AppVersion.xcconfig").inputStream().use { load(it) }
+}.getProperty("MOBILE_SPEAK_VERSION").trim()
+check(Regex("[0-9]+\\.[0-9]+\\.[0-9]+").matches(mobileVersion))
 
 android {
     namespace = "dev.mobilespeak.mobilespeak"
@@ -12,8 +19,8 @@ android {
         applicationId = "dev.mobilespeak.mobilespeak"
         minSdk = 24
         targetSdk = 36
-        versionCode = 2
-        versionName = "0.2.0"
+        versionCode = 3
+        versionName = mobileVersion
         ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

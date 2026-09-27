@@ -7,6 +7,155 @@ import Combine
 @testable import MobileSpeak
 
 final class ClientTests: XCTestCase {
+    @MainActor func testAuthorizedSettingsPagesKeepLiveConnectionForOneMinute() async throws {
+        let root = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("MobileSpeak")
+        let marker = root.appendingPathComponent("settings-live-acceptance-authorized")
+        guard FileManager.default.fileExists(atPath: marker.path) else { throw XCTSkip("Explicit existing test server/identity required") }
+        defer { try? FileManager.default.removeItem(at: marker) }
+        let scope = try String(contentsOf: marker, encoding: .utf8).split(separator: "\n").map(String.init)
+        XCTAssertEqual(scope.count, 2)
+        let client = Client.shared
+        guard !client.connected, scope.count == 2 else { throw XCTSkip("Do not replace an existing voice connection") }
+        guard let bookmark = client.bookmarks.first(where: { $0.address == scope[0] && $0.nickname == scope[1] }) else { throw XCTSkip("The authorized existing bookmark is unavailable; never create another test identity") }
+        let original = UserDefaults.standard.object(forKey: AppLanguage.preferenceKey)
+        let language = LanguageSettings()
+        defer {
+            client.disconnect()
+            if let original { UserDefaults.standard.set(original, forKey: AppLanguage.preferenceKey) }
+            else { UserDefaults.standard.removeObject(forKey: AppLanguage.preferenceKey) }
+        }
+        client.connectBookmark(bookmark)
+        try await waitForAvatar { client.connected }
+        let handle = client.handle
+        let audio = client.audio
+        let muted = client.microphoneMuted
+        let deafened = client.deafened
+        let trigger = PassthroughSubject<SettingsPage?, Never>()
+        let host = UIHostingController(rootView: SettingsNavigationFixture(trigger: trigger).environmentObject(language))
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let window = UIWindow(windowScene: scene)
+        window.rootViewController = host; window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+        try await Task.sleep(nanoseconds: 100_000_000)
+        func navigation(_ controller: UIViewController) -> UINavigationController? {
+            if let navigation = controller as? UINavigationController { return navigation }
+            return controller.children.lazy.compactMap { navigation($0) }.first
+        }
+        let stack = try XCTUnwrap(navigation(host))
+        trigger.send(.language)
+        try await Task.sleep(nanoseconds: 500_000_000)
+        let page = stack.topViewController
+        language.select(.english); language.select(.simplifiedChinese)
+        XCTAssertTrue(stack.topViewController === page)
+        for _ in 0..<6 {
+            try await Task.sleep(nanoseconds: 10_000_000_000)
+            XCTAssertTrue(client.connected)
+            XCTAssertTrue(client.audio === audio)
+            XCTAssertTrue(audio.isRunning)
+            XCTAssertEqual(client.handle, handle)
+            XCTAssertEqual(client.microphoneMuted, muted)
+            XCTAssertEqual(client.deafened, deafened)
+        }
+        trigger.send(nil)
+        try await Task.sleep(nanoseconds: 500_000_000)
+        trigger.send(.about)
+        try await Task.sleep(nanoseconds: 500_000_000)
+        let about = stack.topViewController
+        client.disconnect()
+        try await Task.sleep(nanoseconds: 100_000_000)
+        XCTAssertTrue(stack.topViewController === about)
+        XCTAssertEqual(stack.viewControllers.count, 2)
+    }
+
+    @MainActor func testNativeSettingsNavigationKeepsPageWhenLanguageChangesAndCanReturn() async throws {
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let stored = UserDefaults.standard.object(forKey: AppLanguage.preferenceKey)
+        defer {
+            if let stored { UserDefaults.standard.set(stored, forKey: AppLanguage.preferenceKey) }
+            else { UserDefaults.standard.removeObject(forKey: AppLanguage.preferenceKey) }
+        }
+        let language = LanguageSettings()
+        let trigger = PassthroughSubject<SettingsPage?, Never>()
+        let host = UIHostingController(rootView: SettingsNavigationFixture(trigger: trigger).environmentObject(language))
+        let window = UIWindow(windowScene: scene)
+        window.rootViewController = host; window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+        func navigation(_ controller: UIViewController) -> UINavigationController? {
+            if let navigation = controller as? UINavigationController { return navigation }
+            return controller.children.lazy.compactMap { navigation($0) }.first
+        }
+        try await Task.sleep(nanoseconds: 100_000_000)
+        let stack = try XCTUnwrap(navigation(host))
+        let home = try XCTUnwrap(stack.topViewController)
+        trigger.send(.language)
+        try await Task.sleep(nanoseconds: 500_000_000)
+        XCTAssertEqual(stack.viewControllers.count, 2)
+        let page = try XCTUnwrap(stack.topViewController)
+        language.select(.english)
+        try await Task.sleep(nanoseconds: 100_000_000)
+        XCTAssertTrue(stack.topViewController === page)
+        XCTAssertEqual(stack.viewControllers.count, 2)
+        language.select(.simplifiedChinese)
+        try await Task.sleep(nanoseconds: 100_000_000)
+        XCTAssertTrue(stack.topViewController === page)
+        stack.popViewController(animated: false) // The same native pop used by Back/swipe.
+        try await Task.sleep(nanoseconds: 100_000_000)
+        XCTAssertTrue(stack.topViewController === home)
+        trigger.send(.about)
+        try await Task.sleep(nanoseconds: 500_000_000)
+        XCTAssertEqual(stack.viewControllers.count, 2)
+        trigger.send(nil)
+        try await Task.sleep(nanoseconds: 500_000_000)
+        XCTAssertTrue(stack.topViewController === home)
+    }
+
+    @MainActor func testSettingsDetailPagesUseInstalledVersionAndKeepClientAcrossLanguageChanges() async throws {
+        XCTAssertEqual(SettingsDetailPage.installedVersion, "0.3.0")
+        let client = Client.shared
+        let handle = client.handle
+        let audio = client.audio
+        let muted = client.microphoneMuted
+        let deafened = client.deafened
+        let stored = UserDefaults.standard.object(forKey: AppLanguage.preferenceKey)
+        defer {
+            if let stored { UserDefaults.standard.set(stored, forKey: AppLanguage.preferenceKey) }
+            else { UserDefaults.standard.removeObject(forKey: AppLanguage.preferenceKey) }
+        }
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        for option in [AppLanguage.english, .simplifiedChinese] {
+            let language = LanguageSettings()
+            language.select(option)
+            for page in [SettingsPage.language, .about] {
+                for size in [CGSize(width: 393, height: 852), CGSize(width: 320, height: 568), CGSize(width: 844, height: 390)] {
+                    let root = NavigationView { SettingsDetailPage(page: page) }.navigationViewStyle(.stack)
+                        .environmentObject(language).environment(\.locale, language.locale)
+                        .dynamicTypeSize(.accessibility3).preferredColorScheme(.dark).tint(Palette.accent)
+                    let host = UIHostingController(rootView: root)
+                    let window = UIWindow(windowScene: scene)
+                    let container = UIViewController()
+                    window.rootViewController = container
+                    container.addChild(host); container.view.addSubview(host.view)
+                    host.view.frame = CGRect(origin: .zero, size: size); host.didMove(toParent: container)
+                    window.isHidden = false
+                    defer { window.isHidden = true }
+                    try await Task.sleep(nanoseconds: 100_000_000)
+                    host.view.layoutIfNeeded()
+                    let image = UIGraphicsImageRenderer(size: size).image { _ in host.view.drawHierarchy(in: host.view.bounds, afterScreenUpdates: true) }
+                    let attachment = XCTAttachment(image: image)
+                    attachment.name = "Settings \(page) \(option.rawValue) \(Int(size.width))x\(Int(size.height)) large text"
+                    attachment.lifetime = .keepAlways; add(attachment)
+                    try image.pngData()?.write(to: FileManager.default.temporaryDirectory.appendingPathComponent("secondary-\(page)-\(option.rawValue)-\(Int(size.width)).png"))
+                    XCTAssertEqual(host.view.bounds.size, size)
+                    XCTAssertFalse(language.select(option))
+                }
+            }
+        }
+        XCTAssertEqual(client.handle, handle)
+        XCTAssertTrue(client.audio === audio)
+        XCTAssertEqual(client.microphoneMuted, muted)
+        XCTAssertEqual(client.deafened, deafened)
+    }
+
     @MainActor func testFirstAvatarPickerPresentationLoadsCropAndCanCancelThenReopen() async throws {
         let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.first as? UIWindowScene)
         let trigger = PassthroughSubject<Void, Never>()
@@ -709,5 +858,26 @@ private struct FirstAvatarPickerFixture: View {
         Color.clear
             .onReceive(trigger) { selection = AvatarSelectionRequest(id: Client.shared.beginAvatarSelection()) }
             .avatarSelectionSheet(selection: $selection)
+    }
+}
+
+private struct SettingsNavigationFixture: View {
+    let trigger: PassthroughSubject<SettingsPage?, Never>
+    @EnvironmentObject private var language: LanguageSettings
+    @State private var page: SettingsPage?
+    var body: some View {
+        NavigationView {
+            ScrollView {
+                VStack {
+                    NavigationLink(destination: SettingsDetailPage(page: .language), isActive: Binding(get: { page == .language }, set: { if !$0 { page = nil } })) {
+                        SettingsEntry(title: L10n.string("settings_language"), value: L10n.string(language.selection.titleKey))
+                    }
+                    NavigationLink(destination: SettingsDetailPage(page: .about), isActive: Binding(get: { page == .about }, set: { if !$0 { page = nil } })) {
+                        SettingsEntry(title: L10n.string("settings_about"))
+                    }
+                }.padding(20)
+            }.navigationTitle(L10n.string("tab_settings")).navigationBarHidden(true)
+                .onReceive(trigger) { page = $0 }
+        }.navigationViewStyle(.stack)
     }
 }

@@ -293,19 +293,18 @@ private extension View {
         if #available(iOS 16.0, *) { presentationDetents([.height(height)]) }
         else { self }
     }
-    @ViewBuilder func compactPopover() -> some View {
-        if #available(iOS 16.4, *) { presentationCompactAdaptation(.popover) }
-        else { self }
-    }
+
 }
 @main struct MobileSpeakApp: App {
     @StateObject private var client = Client.shared
     @StateObject private var language = LanguageSettings()
     @Environment(\.scenePhase) private var phase
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var body: some Scene {
         WindowGroup {
             NavigationView { HomeView(client: client) }
                 .navigationViewStyle(.stack)
+                .transaction { if reduceMotion { $0.disablesAnimations = true } }
                 .environmentObject(language)
                 .environment(\.locale, language.locale)
                 .preferredColorScheme(.dark)
@@ -468,7 +467,6 @@ struct HomeView: View {
     @State private var showConnect = false
     @State private var editingBookmark: Bookmark?
     @State private var deletingBookmark: Bookmark?
-    @State private var languageMenuPresented = false
     @State private var avatarClearPresented = false
     @State private var avatarSelection: AvatarSelectionRequest?
     @State private var channelSheet = ChannelSheetState()
@@ -522,6 +520,7 @@ struct HomeView: View {
                 .onAppear { viewportHeight = proxy.size.height }
                 .onChange(of: proxy.size.height) { viewportHeight = $0 }
         })
+        .navigationTitle(tab == 2 ? L10n.string("tab_settings") : "")
         .navigationBarHidden(true)
         .sheet(isPresented: $showConnect) { ConnectView(client: client) }
         .sheet(item: $editingBookmark) { bookmark in ConnectView(client: client, bookmark: bookmark) }
@@ -809,58 +808,16 @@ struct HomeView: View {
                         .background(Palette.card)
                         .clipShape(RoundedRectangle(cornerRadius: 14))
                     }
-                    Button { languageMenuPresented = true } label: {
-                        HStack(spacing: 12) {
-                            Text(L10n.string("settings_language"))
-                                .lineLimit(1)
-                                .layoutPriority(1)
-                            Spacer(minLength: 0)
-                            Text(L10n.string(language.selection.titleKey))
-                                .foregroundStyle(Palette.muted)
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.75)
-                            Image(systemName: "chevron.down")
-                                .font(.caption.bold())
-                                .foregroundStyle(Palette.muted)
-                                .accessibilityHidden(true)
-                        }
-                        .frame(maxWidth: .infinity, minHeight: 56)
-                        .padding(.horizontal, 16)
-                        .contentShape(Rectangle())
-                        .background(Palette.card)
-                        .clipShape(RoundedRectangle(cornerRadius: 14))
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityLabel(L10n.string("settings_language"))
-                    .accessibilityValue(L10n.string(language.selection.titleKey))
-                    .accessibilityHint(L10n.string("accessibility_choose_language"))
-                    .popover(isPresented: $languageMenuPresented, attachmentAnchor: .point(.topTrailing), arrowEdge: .bottom) {
-                        VStack(spacing: 0) {
-                            ForEach(AppLanguage.allCases) { option in
-                                Button {
-                                    languageMenuPresented = false
-                                    guard language.select(option) else { return }
-                                    UISelectionFeedbackGenerator().selectionChanged()
-                                } label: {
-                                    HStack(spacing: 12) {
-                                        Image(systemName: "checkmark")
-                                            .opacity(language.selection == option ? 1 : 0)
-                                            .accessibilityHidden(true)
-                                        Text(L10n.string(option.titleKey))
-                                        Spacer(minLength: 0)
-                                    }
-                                    .frame(minWidth: 170, minHeight: 44, alignment: .leading)
-                                    .padding(.horizontal, 16)
-                                    .contentShape(Rectangle())
-                                }
-                                .buttonStyle(.plain)
-                                .accessibilityValue(L10n.string(language.selection == option ? "selection_selected" : "selection_not_selected"))
-                            }
-                        }
-                        .padding(.vertical, 8)
-                        .compactPopover()
-                    }
+                    NavigationLink(destination: SettingsDetailPage(page: .language)) {
+                        SettingsEntry(title: L10n.string("settings_language"), value: L10n.string(language.selection.titleKey))
+                    }.buttonStyle(.plain)
+                        .accessibilityLabel(L10n.string("settings_language"))
+                        .accessibilityValue(L10n.string(language.selection.titleKey))
+                        .accessibilityHint(L10n.string("accessibility_choose_language"))
+                    NavigationLink(destination: SettingsDetailPage(page: .about)) {
+                        SettingsEntry(title: L10n.string("settings_about"))
+                    }.buttonStyle(.plain)
+
                 }.padding(.horizontal, 20)
             }.padding(.top, PageTitle.inset).padding(.bottom, 20)
         }
@@ -1089,5 +1046,63 @@ struct ConnectView: View {
             do { password = try bookmark.map { try client.bookmarkPassword($0) } ?? ""; passwordLoaded = true }
             catch { formError = error.localizedDescription }
         }
+    }
+}
+
+// Native NavigationView keeps the home scroll view alive, just as it does for chat.
+enum SettingsPage { case language, about }
+
+struct SettingsEntry: View {
+    let title: String
+    var value: String? = nil
+    var body: some View {
+        HStack(spacing: 12) {
+            Text(title).fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+            if let value { Text(value).foregroundStyle(Palette.muted).fixedSize(horizontal: false, vertical: true) }
+            Image(systemName: "chevron.right").font(.caption.bold()).foregroundStyle(Palette.muted).accessibilityHidden(true)
+        }.frame(maxWidth: .infinity, minHeight: 56).padding(.horizontal, 16).padding(.vertical, 4)
+            .contentShape(Rectangle()).background(Palette.card).clipShape(RoundedRectangle(cornerRadius: 14))
+    }
+}
+
+struct SettingsDetailPage: View {
+    let page: SettingsPage
+    @EnvironmentObject private var language: LanguageSettings
+    static var installedVersion: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—" }
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                if page == .language {
+                    VStack(spacing: 0) {
+                        ForEach(AppLanguage.allCases) { option in
+                            if option != AppLanguage.allCases.first { Divider().padding(.leading, 16) }
+                            Button {
+                                if language.select(option) { UISelectionFeedbackGenerator().selectionChanged() }
+                            } label: {
+                                HStack {
+                                    Text(L10n.string(option.titleKey))
+                                    Spacer()
+                                    if language.selection == option { Image(systemName: "checkmark").foregroundStyle(Palette.accent).accessibilityHidden(true) }
+                                }.frame(maxWidth: .infinity, minHeight: 56).padding(.horizontal, 16).padding(.vertical, 4).contentShape(Rectangle())
+                            }.buttonStyle(.plain)
+                                .accessibilityValue(L10n.string(language.selection == option ? "selection_selected" : "selection_not_selected"))
+                                .accessibilityAddTraits(language.selection == option ? .isSelected : [])
+                        }
+                    }.background(Palette.card).clipShape(RoundedRectangle(cornerRadius: 14))
+                } else {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text(L10n.string("about_project"))
+                        Link("https://github.com/langstaffe/MobileSpeak", destination: URL(string: "https://github.com/langstaffe/MobileSpeak")!)
+                            .font(.callout).fixedSize(horizontal: false, vertical: true)
+                            .accessibilityHint(L10n.string("about_browser"))
+                    }.padding(16).frame(maxWidth: .infinity, alignment: .leading).background(Palette.card).clipShape(RoundedRectangle(cornerRadius: 14))
+                    HStack { Text(L10n.string("about_version")); Spacer(); Text("v" + Self.installedVersion).foregroundStyle(Palette.muted) }
+                        .frame(minHeight: 56).padding(.horizontal, 16).background(Palette.card).clipShape(RoundedRectangle(cornerRadius: 14))
+                }
+            }.padding(20)
+        }.foregroundStyle(Color(hex: 0xF2F3F5)).background(Palette.background.ignoresSafeArea())
+            .navigationBarHidden(false).navigationBarTitleDisplayMode(.inline)
+            .navigationTitle(L10n.string(page == .language ? "settings_language" : "settings_about"))
     }
 }

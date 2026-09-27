@@ -1,7 +1,10 @@
 package dev.mobilespeak.mobilespeak
 
 import android.media.AudioDeviceInfo
+import android.media.AudioAttributes
+import android.media.AudioFormat
 import android.media.AudioManager
+import android.media.AudioTrack
 import android.os.ParcelFileDescriptor
 import android.os.SystemClock
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -9,6 +12,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Assume.assumeTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.util.concurrent.CountDownLatch
@@ -17,10 +21,13 @@ import java.util.concurrent.TimeUnit
 @RunWith(AndroidJUnit4::class)
 class NativeCoreTest {
     @Suppress("DEPRECATION")
+    @androidx.test.filters.SdkSuppress(maxSdkVersion = 30)
     @Test
     fun legacyEngineRestoresSpeakerAndReleasesItsRoute() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val manager = context.getSystemService(AudioManager::class.java)
+        assumeTrue("Phone speaker test requires no external headset", manager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+            .none { communicationDevicePriority(it.type) < communicationDevicePriority(AudioDeviceInfo.TYPE_BUILTIN_SPEAKER) })
         val speakerBefore = manager.isSpeakerphoneOn
         val engine = AudioEngine(context)
         val connected = SessionUiState(
@@ -37,6 +44,28 @@ class NativeCoreTest {
             assertEquals(1, workerCount("MobileSpeakPlayback"))
             assertEquals(1, workerCount("MobileSpeakCapture"))
 
+            // A slow HAL create/release must not prevent SCO/device callbacks from updating the route.
+            val streams = AudioEngine::class.java.getDeclaredField("streamLock").apply { isAccessible = true }.get(engine)
+            val locked = CountDownLatch(1)
+            val unlock = CountDownLatch(1)
+            val routeUpdated = CountDownLatch(1)
+            val slowHal = Thread {
+                synchronized(streams) { locked.countDown(); unlock.await(2, TimeUnit.SECONDS) }
+            }.apply { start() }
+            val route = Thread {
+                engine.update(connected, allowCapture = false, reapplyRoute = true)
+                routeUpdated.countDown()
+            }
+            try {
+                assertTrue(locked.await(1, TimeUnit.SECONDS))
+                route.start()
+                assertTrue("Route policy must proceed while the stream lock is held", routeUpdated.await(1, TimeUnit.SECONDS))
+            } finally {
+                unlock.countDown()
+                slowHal.join(2_000)
+                route.join(2_000)
+            }
+
             manager.isSpeakerphoneOn = false
             engine.update(connected, allowCapture = false, reapplyRoute = true)
             assertTrue(waitUntil { manager.isSpeakerphoneOn })
@@ -45,9 +74,11 @@ class NativeCoreTest {
             assertTrue(connected.deafened)
 
             engine.update(SessionUiState(), allowCapture = false)
-            assertTrue(waitUntil { manager.mode == AudioManager.MODE_NORMAL && manager.isSpeakerphoneOn == speakerBefore })
+            // Restore the state observed before this app's last forced-speaker request.
+            assertTrue(waitUntil { manager.mode == AudioManager.MODE_NORMAL && !manager.isSpeakerphoneOn })
         } finally {
             engine.stop()
+            manager.isSpeakerphoneOn = speakerBefore
         }
         assertTrue(waitUntil { workerCount("MobileSpeakPlayback") == 0 && workerCount("MobileSpeakCapture") == 0 })
     }
@@ -62,7 +93,58 @@ class NativeCoreTest {
                 it == AudioDeviceInfo.TYPE_BUILTIN_EARPIECE || it == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER
             }
         assertTrue(AudioDeviceInfo.TYPE_BUILTIN_SPEAKER in builtInTypes)
-        assertEquals(CommunicationRouteTarget.SPEAKER, communicationRouteTarget(true, builtInTypes))
+        assertEquals(AudioDeviceInfo.TYPE_BUILTIN_SPEAKER, preferredCommunicationDevice(true, builtInTypes))
+    }
+
+    @Test fun voiceOutputUsesActualSinkMinimumAfterMediaPlaybackAndReconnect() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val engine = AudioEngine(context)
+        val field = AudioEngine::class.java.getDeclaredField("track").apply { isAccessible = true }
+        val policy = SessionUiState(snapshot = Snapshot(status = "connected"), microphoneMuted = true)
+        try {
+            engine.start()
+            repeat(2) {
+                engine.update(policy, allowCapture = false)
+                assertTrue(waitUntil { (field.get(engine) as? AudioTrack)?.routedDevice != null })
+                val output = field.get(engine) as AudioTrack
+                val reference = AudioTrack.Builder()
+                    .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
+                    .setAudioFormat(AudioFormat.Builder().setSampleRate(48_000).setEncoding(AudioFormat.ENCODING_PCM_FLOAT)
+                        .setChannelMask(if (output.channelCount == 1) AudioFormat.CHANNEL_OUT_MONO else AudioFormat.CHANNEL_OUT_STEREO).build())
+                    // The platform selects the minimum for these voice attributes, not STREAM_DEFAULT.
+                    .build()
+                try {
+                    assertEquals(48_000, output.sampleRate)
+                    assertTrue("Do not copy a larger media/A2DP estimate into the voice stream",
+                        output.bufferCapacityInFrames <= maxOf(reference.bufferCapacityInFrames, 1_920))
+                } finally { reference.release() }
+                engine.update(SessionUiState(), allowCapture = false)
+                assertTrue(waitUntil { field.get(engine) == null })
+            }
+        } finally { engine.stop() }
+        assertTrue(waitUntil { workerCount("MobileSpeakPlayback") == 0 && workerCount("MobileSpeakCapture") == 0 })
+    }
+
+    @androidx.test.filters.SdkSuppress(minSdkVersion = 31)
+    @Test fun modernEngineSelectsActualCommunicationSpeakerAndReleasesSession() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val manager = context.getSystemService(AudioManager::class.java)
+        assumeTrue("Phone route test requires no external communication device", manager.availableCommunicationDevices
+            .none { communicationDevicePriority(it.type) < communicationDevicePriority(AudioDeviceInfo.TYPE_BUILTIN_SPEAKER) })
+        val engine = AudioEngine(context)
+        try {
+            engine.start()
+            val policy = SessionUiState(snapshot = Snapshot(status = "connected"), microphoneMuted = true, deafened = true)
+            engine.update(policy, allowCapture = false)
+            assertTrue(waitUntil { manager.communicationDevice?.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER })
+            repeat(3) { engine.update(policy, allowCapture = false, reapplyRoute = true) }
+            assertEquals(1, workerCount("MobileSpeakPlayback"))
+            assertEquals(1, workerCount("MobileSpeakCapture"))
+            engine.update(SessionUiState(), allowCapture = false)
+            assertTrue(waitUntil { manager.mode == AudioManager.MODE_NORMAL })
+        } finally { engine.stop() }
+        assertTrue(waitUntil { workerCount("MobileSpeakPlayback") == 0 && workerCount("MobileSpeakCapture") == 0 })
     }
 
     @Test

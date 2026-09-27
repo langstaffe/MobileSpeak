@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="ios/NativeApp/Assets.xcassets/AppIcon.appiconset/AppIcon.png" alt="MobileSpeak" width="200">
+  <img src="docs/images/mobilespeak-readme-icon.png" alt="MobileSpeak" width="160">
   <h1>MobileSpeak</h1>
 </div>
 

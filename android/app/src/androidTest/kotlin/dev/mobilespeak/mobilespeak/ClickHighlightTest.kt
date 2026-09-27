@@ -63,7 +63,7 @@ class ClickHighlightTest {
                                     "bookmark", "bookmark_add" -> BookmarkScreen(ui,
                                         { clicks.incrementAndGet() }, {}, {}, { clicks.incrementAndGet() })
                                     else -> Row(Modifier.fillMaxWidth()) {
-                                        NavigationItem(label, UiIcons.People, selected = true, unread = 3) { clicks.incrementAndGet() }
+                                        NavigationItem(label, UiIcons.People, selected = false, unread = 3) { clicks.incrementAndGet() }
                                     }
                                 }
                             }
@@ -78,12 +78,21 @@ class ClickHighlightTest {
                     SystemClock.sleep(50)
                 }
                 assertEquals("The test must inspect MobileSpeak, not another app", context.packageName, foreground)
+                // Accessibility can expose the new composition before its first frame is committed.
+                val frame = java.util.concurrent.CountDownLatch(1)
+                scenario.onActivity { activity ->
+                    val view = activity.window.decorView
+                    if (android.os.Build.VERSION.SDK_INT >= 29) view.viewTreeObserver.registerFrameCommitCallback { frame.countDown() }
+                    else view.postOnAnimation { view.postOnAnimation { frame.countDown() } }
+                    view.invalidate()
+                }
+                assertTrue("Fixture frame must be drawn before the baseline screenshot", frame.await(3, java.util.concurrent.TimeUnit.SECONDS))
                 val node = waitForClickable(label)
                 assertTrue("$mode must remain keyboard focusable", node.isFocusable)
                 assertTrue("$mode must retain TalkBack click", node.actionList.any { it.id == AccessibilityNodeInfo.ACTION_CLICK })
-                if (mode == "navigation") assertTrue("selected tab state must remain", node.isSelected)
+                if (mode == "navigation") assertTrue("unselected tab state must remain", !node.isSelected)
                 val bounds = Rect().also(node::getBoundsInScreen)
-                val before = instrumentation.uiAutomation.takeScreenshot()
+                val before = stableScreenshot(bounds)
                 val x = bounds.centerX().toFloat()
                 val y = bounds.centerY().toFloat()
                 val down = SystemClock.uptimeMillis()
@@ -92,6 +101,8 @@ class ClickHighlightTest {
                 val pressed = instrumentation.uiAutomation.takeScreenshot()
                 instrumentation.sendPointerSync(MotionEvent.obtain(down, SystemClock.uptimeMillis(), MotionEvent.ACTION_UP, x, y, 0))
                 instrumentation.waitForIdleSync()
+                java.io.File(context.cacheDir, "highlight-$mode-before.png").outputStream().use { before.compress(Bitmap.CompressFormat.PNG, 100, it) }
+                java.io.File(context.cacheDir, "highlight-$mode-pressed.png").outputStream().use { pressed.compress(Bitmap.CompressFormat.PNG, 100, it) }
                 assertNoPressedRectangle(mode, before, pressed, bounds)
                 before.recycle(); pressed.recycle()
                 assertEquals("$mode must still handle a physical tap", 1, clicks.get())
@@ -103,6 +114,16 @@ class ClickHighlightTest {
                 instrumentation.sendKeySync(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DPAD_CENTER))
                 instrumentation.waitForIdleSync()
                 assertEquals("$mode must respond to keyboard activation", 3, clicks.get())
+                if (mode == "navigation") {
+                    scenario.onActivity { activity -> activity.setContent {
+                        MaterialTheme { Row(Modifier.fillMaxWidth()) { NavigationItem(label, UiIcons.People, selected = true, unread = 3) {} } }
+                    } }
+                    instrumentation.waitForIdleSync()
+                    repeat(30) {
+                        if (!waitForClickable(label).isSelected) SystemClock.sleep(50)
+                    }
+                    assertTrue("Selected tabs must still expose their state", waitForClickable(label).isSelected)
+                }
             }
         }
     }
@@ -112,7 +133,7 @@ class ClickHighlightTest {
             if (node == null) return null
             if (node.isVisibleToUser && (node.text?.toString()?.contains(label) == true ||
                         node.contentDescription?.toString()?.contains(label) == true)) {
-                generateSequence(node) { it.parent }.firstOrNull { it.isClickable }?.let { return it }
+                generateSequence(node) { it.parent }.firstOrNull { it.isClickable || it.isSelected }?.let { return it }
             }
             for (index in 0 until node.childCount) find(node.getChild(index))?.let { return it }
             return null
@@ -122,6 +143,29 @@ class ClickHighlightTest {
             SystemClock.sleep(50)
         }
         error("No clickable accessibility node for $label")
+    }
+
+    private fun stableScreenshot(area: Rect): Bitmap {
+        val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
+        var previous = automation.takeScreenshot()
+        var stableFrames = 0
+        repeat(20) {
+            SystemClock.sleep(100)
+            val next = automation.takeScreenshot()
+            var changed = 0
+            var sampled = 0
+            for (y in area.top.coerceAtLeast(0) until area.bottom.coerceAtMost(next.height) step 8) {
+                for (x in area.left.coerceAtLeast(0) until area.right.coerceAtMost(next.width) step 8) {
+                    sampled++
+                    if (previous.getPixel(x, y) != next.getPixel(x, y)) changed++
+                }
+            }
+            previous.recycle(); previous = next
+            stableFrames = if (sampled > 0 && changed * 50 < sampled) stableFrames + 1 else 0
+            if (stableFrames == 2) return previous // Include the system Activity fade, outside Compose's first committed frame.
+        }
+        previous.recycle()
+        error("Fixture pixels did not settle")
     }
 
     private fun assertNoPressedRectangle(mode: String, before: Bitmap, pressed: Bitmap, area: Rect) {
