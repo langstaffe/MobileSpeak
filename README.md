@@ -3,7 +3,7 @@
   <h1>MobileSpeak</h1>
 </div>
 
-<h2 align="left">界面预览</h2>
+<h2 align="center">界面预览</h2>
 
 <div align="center">
   <img src="docs/images/screenshot-1.png" alt="MobileSpeak 主界面" width="32%">
@@ -11,7 +11,7 @@
   <img src="docs/images/screenshot-3.png" alt="MobileSpeak 设置界面" width="32%">
 </div>
 
-<h2 align="left">目前已实现的功能</h2>
+<h2 align="center">目前已实现的功能</h2>
 
 <table align="center">
   <thead>
