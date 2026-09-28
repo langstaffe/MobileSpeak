@@ -14,7 +14,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -35,7 +34,7 @@ internal fun SettingsEntry(title: String, value: String? = null, onClickLabel: S
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(title, Modifier.weight(1f), fontSize = 17.sp, lineHeight = 22.sp)
         if (value != null) Text(value, Modifier.weight(1f), color = Palette.muted, fontSize = 17.sp, lineHeight = 22.sp, textAlign = TextAlign.End)
-        Icon(UiIcons.Back, null, Modifier.size(16.dp).rotate(180f), tint = Palette.muted)
+        Icon(UiIcons.ChevronRight, null, Modifier.size(16.dp), tint = Palette.muted)
     }
 }
 

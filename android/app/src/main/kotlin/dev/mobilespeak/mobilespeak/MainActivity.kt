@@ -385,9 +385,7 @@ private fun Header(ui: SessionUiState) {
                 Modifier.size(44.dp).semantics { contentDescription = disconnectLabel }.clickable { ClientSession.disconnect() },
                 contentAlignment = Alignment.Center,
             ) {
-                Box(Modifier.size(34.dp).clip(CircleShape).background(Palette.disconnect), contentAlignment = Alignment.Center) {
-                    Text(stringResource(R.string.disconnect_badge), fontSize = 10.sp, lineHeight = 12.sp, fontWeight = FontWeight.Black)
-                }
+                Image(painterResource(R.drawable.ic_off), contentDescription = null, modifier = Modifier.size(34.dp))
             }
         }
     }
@@ -448,8 +446,10 @@ internal fun BookmarkScreen(
                 Box {
                     IconButton(onClick = { menu = true }, modifier = Modifier.size(44.dp)) { Icon(UiIcons.More, stringResource(R.string.bookmark_manage, bookmark.title), tint = Palette.text) }
                     DropdownMenu(expanded = menu, onDismissRequest = { menu = false }, containerColor = Palette.card) {
-                        DropdownMenuItem(text = { Text(stringResource(R.string.action_edit)) }, onClick = { menu = false; onEdit(bookmark) })
-                        DropdownMenuItem(text = { Text(stringResource(R.string.action_delete), color = Palette.disconnect) }, onClick = { menu = false; onDelete(bookmark) })
+                        DropdownMenuItem(text = { Text(stringResource(R.string.action_edit)) },
+                            leadingIcon = { Icon(UiIcons.Pencil, null, Modifier.size(24.dp), tint = Palette.accent) }, onClick = { menu = false; onEdit(bookmark) })
+                        DropdownMenuItem(text = { Text(stringResource(R.string.action_delete), color = Palette.disconnect) },
+                            leadingIcon = { Icon(UiIcons.Trash, null, Modifier.size(24.dp), tint = Palette.disconnect) }, onClick = { menu = false; onDelete(bookmark) })
                     }
                 }
             }
@@ -835,7 +835,7 @@ private fun VoiceBar(ui: SessionUiState, requestPermissions: () -> Unit) {
             haptic.performHapticFeedback(toggleHapticType(ui.deafened))
             ClientSession.setAudio(deafened = !ui.deafened)
         }, modifier = Modifier.size(44.dp, 48.dp)) {
-            Icon(if (ui.deafened) UiIcons.SpeakerOff else UiIcons.Speaker, stringResource(if (ui.deafened) R.string.voice_enable_listening else R.string.voice_disable_listening), Modifier.size(22.dp), tint = Palette.text)
+            Icon(if (ui.deafened) UiIcons.SpeakerOff else UiIcons.Speaker, stringResource(if (ui.deafened) R.string.voice_enable_listening else R.string.voice_disable_listening), Modifier.size(22.dp), tint = if (ui.deafened) Palette.muted else Palette.text)
         }
     }
 }

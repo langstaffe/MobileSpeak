@@ -15,6 +15,40 @@ enum Palette {
     static let accent = Color(hex: 0x5865F2)
     static let green = Color(hex: 0x23A559)
     static let disconnect = Color(hex: 0xC83F4A)
+    static var menuDestructive: UIColor {
+        // ponytail: measured for the dark iOS 26 Menu; recheck if its native palette changes.
+        // Its destructive text is lighter than systemRed.
+        if #available(iOS 26.0, *) { return UIColor(red: 1, green: 85 / 255, blue: 90 / 255, alpha: 1) }
+        return .systemRed
+    }
+}
+
+// PDF templates inherit the surrounding state color. Explicit sizes stay fixed;
+// otherwise follow the body text size, as the former unconfigured symbols did.
+private struct AppIcon: View {
+    let name: String
+    var size: CGFloat? = nil
+    var originalTint: UIColor?
+    @ScaledMetric private var bodySize: CGFloat
+
+    init(name: String, size: CGFloat? = nil, scaledSize: CGFloat = 17, relativeTo: Font.TextStyle = .body, originalTint: UIColor? = nil) {
+        self.name = name
+        self.size = size
+        self.originalTint = originalTint
+        _bodySize = ScaledMetric(wrappedValue: scaledSize, relativeTo: relativeTo)
+    }
+
+    private var image: Image {
+        if let originalTint, let source = UIImage(named: "Icon-" + name) {
+            return Image(uiImage: source.withTintColor(originalTint, renderingMode: .alwaysOriginal))
+        }
+        return Image(decorative: "Icon-" + name).renderingMode(.template)
+    }
+
+    var body: some View {
+        image.resizable().scaledToFit()
+            .frame(width: size ?? bodySize, height: size ?? bodySize)
+    }
 }
 
 struct AvatarSelectionRequest: Identifiable {
@@ -395,7 +429,7 @@ struct GroupIconImage: View {
                 LocalImage(path: path)
             } else if let label = icon.builtinLabel {
                 ZStack(alignment: .bottomTrailing) {
-                    Image(systemName: "person.fill")
+                    Image("Icon-avatar-placeholder").renderingMode(.template)
                         .resizable().scaledToFit().foregroundStyle(Palette.muted)
                         .frame(width: 17, height: 17)
                     Text(label).font(.system(size: 9, weight: .black))
@@ -413,7 +447,7 @@ struct ChannelIcon: View {
     var size: CGFloat = 21
     var body: some View {
         ZStack {
-            Image(systemName: channel.password ? "lock" : "number")
+            AppIcon(name: channel.password ? "lock" : "channels", size: size)
             if let path = channel.iconPath { LocalImage(path: path) }
         }.frame(width: size, height: size).clipShape(RoundedRectangle(cornerRadius: 4))
     }
@@ -486,8 +520,8 @@ struct HomeView: View {
                 Spacer(minLength: 0)
                 if client.connected || client.busy {
                     Button { client.disconnect() } label: {
-                        Text(L10n.string("disconnect_badge")).font(.system(size: 10, weight: .heavy))
-                            .frame(width: 34, height: 34).background(Palette.disconnect).clipShape(Circle())
+                        Image("Icon-off").renderingMode(.original).resizable().scaledToFit()
+                            .frame(width: 34, height: 34)
                             .frame(width: 44, height: 44)
                     }.buttonStyle(.plain).accessibilityLabel(L10n.string("action_disconnect"))
                 }
@@ -508,9 +542,9 @@ struct HomeView: View {
             }.frame(maxWidth: .infinity, maxHeight: .infinity)
             voiceBar
             HStack {
-                navigation(L10n.string("tab_channels"), "number", 0)
-                navigation(L10n.string("tab_members"), "person.2", 1)
-                navigation(L10n.string("tab_settings"), "gearshape", 2)
+                navigation(L10n.string("tab_channels"), "channels", 0)
+                navigation(L10n.string("tab_members"), "members", 1)
+                navigation(L10n.string("tab_settings"), "settings", 2)
             }.padding(.top, 10).padding(.bottom, 8).background(Palette.bottom)
         }
         .foregroundStyle(Color(hex: 0xF2F3F5))
@@ -591,22 +625,26 @@ struct HomeView: View {
                             }.frame(minHeight: 64).contentShape(Rectangle())
                         }.buttonStyle(.plain).disabled(client.connected || client.busy)
                         Menu {
-                            Button(L10n.string("action_edit"), systemImage: "pencil") { editingBookmark = bookmark }
-                            Button(L10n.string("action_delete"), systemImage: "trash", role: .destructive) { deletingBookmark = bookmark }
-                        } label: { Image(systemName: "ellipsis").frame(width: 44, height: 44) }.accessibilityLabel(L10n.format("bookmark_manage", bookmark.title))
+                            Button { editingBookmark = bookmark } label: {
+                                Label { Text(L10n.string("action_edit")) } icon: { AppIcon(name: "pencil") }
+                            }
+                            Button(role: .destructive) { deletingBookmark = bookmark } label: {
+                                Label { Text(L10n.string("action_delete")) } icon: { AppIcon(name: "trash", originalTint: Palette.menuDestructive) }
+                            }
+                        } label: { AppIcon(name: "more").frame(width: 44, height: 44) }.accessibilityLabel(L10n.format("bookmark_manage", bookmark.title))
                     }.padding(12).background(Palette.card).clipShape(RoundedRectangle(cornerRadius: 14))
                 }
-                Button { showConnect = true } label: { Label(L10n.string("bookmark_add_server"), systemImage: "plus") }.padding(.vertical, 12)
+                Button { showConnect = true } label: { Label { Text(L10n.string("bookmark_add_server")) } icon: { AppIcon(name: "plus") } }.padding(.vertical, 12)
                 if client.connected { Text(L10n.string("bookmark_disconnect_first")).font(.footnote).foregroundStyle(Palette.muted) }
             }.padding(16)
         }.background(Palette.background)
     }
     private var empty: some View {
         VStack(spacing: 16) {
-            Image(systemName: "headphones").font(.system(size: 52)).foregroundStyle(Palette.muted)
+            AppIcon(name: "headphones", size: 52).foregroundStyle(Palette.muted)
             Text(L10n.string("empty_title")).font(.system(size: 20, weight: .heavy))
             Text(L10n.string("empty_message")).font(.subheadline).foregroundStyle(Palette.muted).multilineTextAlignment(.center)
-            Button { showConnect = true } label: { Label(L10n.string("action_connect_server"), systemImage: "plus").padding(.vertical, 5) }
+            Button { showConnect = true } label: { Label { Text(L10n.string("action_connect_server")) } icon: { AppIcon(name: "plus") }.padding(.vertical, 5) }
                 .buttonStyle(.borderedProminent).clipShape(Capsule()).padding(.top, 8)
         }.padding(24).frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -650,10 +688,7 @@ struct HomeView: View {
                                 }.contentShape(Rectangle())
                             }.buttonStyle(.plain)
                             NavigationLink(destination: ChannelChatView(client: client, channel: channel)) {
-                                ZStack {
-                                    Image(systemName: "bubble.left.fill").font(.system(size: 18)).offset(x: -4, y: -3)
-                                    Image(systemName: "bubble.right.fill").font(.system(size: 12)).offset(x: 6, y: 6)
-                                }.frame(width: 48, height: 48)
+                                AppIcon(name: "channel-chat", size: 28).frame(width: 48, height: 48)
                                     .background(Palette.bottom).clipShape(RoundedRectangle(cornerRadius: 10))
                                     .foregroundStyle(selected ? Color.white : Palette.muted.opacity(0.45))
                                     .overlay(alignment: .topTrailing) {
@@ -711,7 +746,7 @@ struct HomeView: View {
                     if let channelGroupIcon { GroupIconImage(icon: channelGroupIcon) }
                 }.fixedSize()
             }
-            Image(systemName: m.deafened ? "speaker.slash.fill" : m.muted ? "mic.slash.fill" : "mic.fill")
+            AppIcon(name: m.deafened ? "speaker-off" : m.muted ? "mic-off" : "mic-on")
                 .foregroundStyle(m.speaking ? Palette.green : Palette.muted)
                 .frame(width: 20)
                 .accessibilityLabel(L10n.string(m.deafened ? "member_listening_off" : m.muted ? "member_muted" : m.speaking ? "member_speaking" : "member_microphone_on"))
@@ -730,7 +765,7 @@ struct HomeView: View {
                                 if let preview = client.avatarPreview {
                                     Image(uiImage: preview).resizable().scaledToFill()
                                 } else {
-                                    Image(systemName: "person.fill").foregroundStyle(Palette.muted)
+                                    AppIcon(name: "avatar-placeholder", size: 28).foregroundStyle(Palette.muted)
                                 }
                             }
                             .frame(width: 64, height: 64)
@@ -824,27 +859,27 @@ struct HomeView: View {
     }
     private var voiceBar: some View {
         HStack(spacing: 8) {
-            Image(systemName: "waveform").foregroundStyle(client.connected ? Palette.green : Palette.muted)
+            AppIcon(name: "waveform").foregroundStyle(client.connected ? Palette.green : Palette.muted)
             Text(client.connected ? L10n.format("status_connected_to_channel", client.state.channels.first { $0.id == client.currentChannel }?.name ?? "") : client.busy ? L10n.string("status_connecting") : L10n.string("status_disconnected")).font(.system(size: 12, weight: .semibold)).lineLimit(1)
             Spacer(minLength: 0)
             Button {
                 UISelectionFeedbackGenerator().selectionChanged()
                 Task { await client.setAudio(input: !client.microphoneMuted) }
             } label: {
-                Image(systemName: client.muted ? "mic.slash.fill" : "mic.fill").foregroundStyle(client.muted ? Palette.muted : Palette.green).frame(width: 44, height: 48)
+                AppIcon(name: client.muted ? "mic-off" : "mic-on").foregroundStyle(client.muted ? Palette.muted : Palette.green).frame(width: 44, height: 48)
             }.accessibilityLabel(L10n.string(client.microphoneMuted ? "voice_enable_microphone" : "voice_mute")).disabled(client.audioBusy || client.deafened)
             Button {
                 UISelectionFeedbackGenerator().selectionChanged()
                 Task { await client.setAudio(output: !client.deafened) }
             } label: {
-                Image(systemName: client.deafened ? "speaker.slash.fill" : "speaker.wave.2.fill").frame(width: 44, height: 48)
+                AppIcon(name: client.deafened ? "speaker-off" : "speaker-on").foregroundStyle(client.deafened ? Palette.muted : Color(hex: 0xF2F3F5)).frame(width: 44, height: 48)
             }.accessibilityLabel(L10n.string(client.deafened ? "voice_enable_listening" : "voice_disable_listening")).disabled(client.audioBusy)
         }.padding(.leading, 12).padding(.trailing, 8).background(Palette.bottom)
     }
     private func navigation(_ title: String, _ icon: String, _ index: Int) -> some View {
         Button { tab = index } label: {
             VStack(spacing: 5) {
-                Image(systemName: icon).font(.system(size: 22))
+                AppIcon(name: icon, size: 22)
                     .overlay(alignment: .topTrailing) {
                         UnreadBadge(count: index == 0 ? client.currentChannelUnread : index == 1 ? client.privateUnreadTotal : 0)
                             .offset(x: 8, y: -7)
@@ -923,7 +958,7 @@ struct ChatView: View {
                 TextField(L10n.string("chat_input_placeholder"), text: $text)
                     .textFieldStyle(.roundedBorder)
                     .onSubmit(send)
-                Button(action: send) { Image(systemName: "paperplane.fill").frame(width: 38, height: 38) }
+                Button(action: send) { AppIcon(name: "send", size: 22).frame(width: 38, height: 38) }
                     .disabled(!available || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     .accessibilityLabel(L10n.string("action_send"))
             }.padding(10).background(Palette.bottom)
@@ -989,7 +1024,7 @@ struct ChatView: View {
                     HStack(spacing: 4) {
                         if message.status == .pending { ProgressView().scaleEffect(0.65) }
                         if message.status == .failed {
-                            Image(systemName: "exclamationmark.circle.fill").foregroundStyle(.red)
+                            AppIcon(name: "error", scaledSize: 11, relativeTo: .caption2).foregroundStyle(.red)
                             Text(message.error.map { L10n.coreError($0, detail: "") } ?? L10n.string("chat_send_failed")).foregroundStyle(.red)
                         }
                     }.font(.caption2)
@@ -1060,7 +1095,7 @@ struct SettingsEntry: View {
             Text(title).fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
             if let value { Text(value).foregroundStyle(Palette.muted).fixedSize(horizontal: false, vertical: true) }
-            Image(systemName: "chevron.right").font(.caption.bold()).foregroundStyle(Palette.muted).accessibilityHidden(true)
+            AppIcon(name: "chevron-right", scaledSize: 12, relativeTo: .caption).foregroundStyle(Palette.muted).accessibilityHidden(true)
         }.frame(maxWidth: .infinity, minHeight: 56).padding(.horizontal, 16).padding(.vertical, 4)
             .contentShape(Rectangle()).background(Palette.card).clipShape(RoundedRectangle(cornerRadius: 14))
     }
@@ -1083,7 +1118,7 @@ struct SettingsDetailPage: View {
                                 HStack {
                                     Text(L10n.string(option.titleKey))
                                     Spacer()
-                                    if language.selection == option { Image(systemName: "checkmark").foregroundStyle(Palette.accent).accessibilityHidden(true) }
+                                    if language.selection == option { AppIcon(name: "checkmark").foregroundStyle(Palette.accent).accessibilityHidden(true) }
                                 }.frame(maxWidth: .infinity, minHeight: 56).padding(.horizontal, 16).padding(.vertical, 4).contentShape(Rectangle())
                             }.buttonStyle(.plain)
                                 .accessibilityValue(L10n.string(language.selection == option ? "selection_selected" : "selection_not_selected"))

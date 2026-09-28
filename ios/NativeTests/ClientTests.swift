@@ -7,6 +7,47 @@ import Combine
 @testable import MobileSpeak
 
 final class ClientTests: XCTestCase {
+    @MainActor func testIconAssetsKeepTemplateTintAndOffOriginalColors() throws {
+        let names = "avatar-placeholder channel-chat channels checkmark chevron-right error headphones lock members mic-off mic-on more off pencil plus trash send settings speaker-off speaker-on waveform".split(separator: " ")
+        for name in names {
+            let image = try XCTUnwrap(UIImage(named: "Icon-" + name))
+            let off = name == "off"
+            let side: CGFloat = off ? 34 : 24
+            XCTAssertEqual(image.size, CGSize(width: side, height: side), String(name))
+            XCTAssertEqual(image.renderingMode, off ? .alwaysOriginal : .alwaysTemplate, String(name))
+            let format = UIGraphicsImageRendererFormat()
+            format.scale = 4
+            let rendered = UIGraphicsImageRenderer(size: image.size, format: format).image { _ in
+                // Explicit original rendering exercises the PDF geometry and its source colors.
+                image.withRenderingMode(.alwaysOriginal).draw(at: .zero)
+            }
+            let cgImage = try XCTUnwrap(rendered.cgImage)
+            let width = cgImage.width, height = cgImage.height
+            var bytes = [UInt8](repeating: 0, count: width * height * 4)
+            let context = try XCTUnwrap(CGContext(data: &bytes, width: width, height: height,
+                bitsPerComponent: 8, bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+            context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+            let solid = stride(from: 0, to: bytes.count, by: 4).filter { bytes[$0 + 3] == 255 }
+            XCTAssertFalse(solid.isEmpty, String(name))
+            XCTAssertEqual(bytes[3], 0, String(name))
+            if off {
+                XCTAssertTrue(solid.contains { bytes[$0] == 200 && bytes[$0 + 1] == 63 && bytes[$0 + 2] == 74 })
+                XCTAssertTrue(solid.contains { bytes[$0] == 242 && bytes[$0 + 1] == 243 && bytes[$0 + 2] == 245 })
+            } else {
+                XCTAssertTrue(solid.allSatisfy { bytes[$0] == 0 && bytes[$0 + 1] == 0 && bytes[$0 + 2] == 0 }, String(name))
+                for x in 0..<width {
+                    XCTAssertEqual(bytes[x * 4 + 3], 0, String(name))
+                    XCTAssertEqual(bytes[((height - 1) * width + x) * 4 + 3], 0, String(name))
+                }
+                for y in 0..<height {
+                    XCTAssertEqual(bytes[y * width * 4 + 3], 0, String(name))
+                    XCTAssertEqual(bytes[(y * width + width - 1) * 4 + 3], 0, String(name))
+                }
+            }
+        }
+    }
+
     @MainActor func testAuthorizedSettingsPagesKeepLiveConnectionForOneMinute() async throws {
         let root = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("MobileSpeak")
         let marker = root.appendingPathComponent("settings-live-acceptance-authorized")
