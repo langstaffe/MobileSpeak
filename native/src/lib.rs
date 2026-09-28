@@ -22,8 +22,9 @@ use std::{
 use tokio::{io::AsyncReadExt, sync::mpsc};
 use tsclientlib::prelude::*;
 use tsclientlib::{
-    audio::AudioHandler, events::Event, ChannelId, ChannelType, Connection, DisconnectOptions,
-    FiletransferHandle, Identity, MessageHandle, MessageTarget, OutCommandExt, StreamItem,
+    audio::AudioHandler, events::Event, ChannelId, ChannelType, CodecEncryptionMode, Connection,
+    DisconnectOptions, FiletransferHandle, Identity, MessageHandle, MessageTarget, OutCommandExt,
+    StreamItem,
 };
 use tsproto_packets::packets::{AudioData, CodecType, OutAudio};
 
@@ -537,11 +538,32 @@ fn chat_path(root: &Path, server: &str) -> PathBuf {
 fn path_if_cached(path: PathBuf) -> Option<String> {
     path.is_file().then(|| path.to_string_lossy().into_owned())
 }
+fn voice_encryption(mode: CodecEncryptionMode, is_unencrypted: Option<bool>) -> bool {
+    match mode {
+        CodecEncryptionMode::ForcedOn => true,
+        CodecEncryptionMode::ForcedOff => false,
+        // Send plaintext only when the channel explicitly allows it.
+        CodecEncryptionMode::PerChannel => is_unencrypted != Some(true),
+    }
+}
 fn send_voice(
     con: &mut Connection,
     codec: CodecType,
     data: &[u8],
 ) -> Result<(), Box<dyn std::error::Error>> {
+    // Read the server-confirmed state for every packet, including the end marker.
+    let state = con.get_state()?;
+    let is_unencrypted = state
+        .clients
+        .get(&state.own_client)
+        .and_then(|me| state.channels.get(&me.channel))
+        .and_then(|channel| channel.is_unencrypted);
+    let encrypt = voice_encryption(state.server.codec_encryption_mode, is_unencrypted);
+    con.get_tsproto_client_mut()?
+        .params
+        .as_mut()
+        .ok_or(tsclientlib::Error::InitserverParamsMissing)?
+        .voice_encryption = encrypt;
     con.send_audio(OutAudio::new(&AudioData::C2S { id: 0, codec, data }))?;
     Ok(())
 }
@@ -1782,6 +1804,28 @@ pub unsafe extern "C" fn ts_playback(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn voice_encryption_follows_server_mode_and_known_channel_setting() {
+        for is_unencrypted in [None, Some(false), Some(true)] {
+            assert!(voice_encryption(
+                CodecEncryptionMode::ForcedOn,
+                is_unencrypted
+            ));
+            assert!(!voice_encryption(
+                CodecEncryptionMode::ForcedOff,
+                is_unencrypted
+            ));
+        }
+        assert!(voice_encryption(CodecEncryptionMode::PerChannel, None));
+        assert!(voice_encryption(
+            CodecEncryptionMode::PerChannel,
+            Some(false)
+        ));
+        assert!(!voice_encryption(
+            CodecEncryptionMode::PerChannel,
+            Some(true)
+        ));
+    }
     #[test]
     fn rnnoise_processes_each_twenty_ms_packet_as_two_ten_ms_frames() {
         let samples: [i16; 960] = std::array::from_fn(|index| {
