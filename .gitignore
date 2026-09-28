@@ -18,6 +18,14 @@
 
 # Logs and local caches
 *.log
+*.out
+*.trace
+*.jsonl
+*.pcap
+*.pcapng
+*.har
+*.xcactivitylog
+*.xcresult/
 *.pyc
 *.db
 *.sqlite*
@@ -42,6 +50,7 @@
 **/externalNativeBuild/
 local.properties
 *.apk
+*.ipa
 *.aab
 *.apks
 *.idsig
@@ -96,3 +105,34 @@ credentials/
 .ssh/
 .netrc
 .npmrc
+
+# Public repository roots: source, resources, build files and attribution
+/*
+!/.gitignore
+!/AppVersion.xcconfig
+!/README.md
+!/THIRD_PARTY_NOTICES.md
+!/android/
+!/assets/
+!/docs/
+!/ios/
+!/licenses/
+!/native/
+!/tool/
+
+# Development and validation documents stay local
+*.md
+*.markdown
+*.rst
+*.adoc
+!/README.md
+!/THIRD_PARTY_NOTICES.md
+
+# Only the existing README images are published from docs
+/docs/*
+!/docs/images/
+/docs/images/*
+!/docs/images/mobilespeak-readme-icon.png
+!/docs/images/screenshot-1.png
+!/docs/images/screenshot-2.png
+!/docs/images/screenshot-3.png
