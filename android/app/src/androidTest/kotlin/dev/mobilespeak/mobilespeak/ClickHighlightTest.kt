@@ -14,8 +14,13 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.hapticfeedback.HapticFeedback
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -28,6 +33,139 @@ import java.util.concurrent.atomic.AtomicInteger
 
 @RunWith(AndroidJUnit4::class)
 class ClickHighlightTest {
+    @Test fun headerAndSettingsKeepPressSemanticsAndSingleAvatarFeedback() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val context = instrumentation.targetContext
+        assumeTrue("Unlock the Android device before testing pressed pixels",
+            !context.getSystemService(KeyguardManager::class.java).isKeyguardLocked)
+        ClientSession.initialize(context)
+        assumeTrue("UI checks must not use a live connection",
+            !ClientSession.shouldRunService() && ClientSession.state.value.snapshot.status == "disconnected")
+        val saved = ClientSession.state.value
+        val permission = ClientSession.microphonePermission
+        val launches = AtomicInteger()
+        val permissions = AtomicInteger()
+        val feedback = java.util.concurrent.ConcurrentLinkedQueue<HapticFeedbackType>()
+        val haptic = object : HapticFeedback {
+            override fun performHapticFeedback(hapticFeedbackType: HapticFeedbackType) { feedback.add(hapticFeedbackType) }
+        }
+        val preview = java.io.File(context.cacheDir, "highlight-avatar.jpg")
+        preview.outputStream().use { Bitmap.createBitmap(64, 64, Bitmap.Config.ARGB_8888).apply {
+            compress(Bitmap.CompressFormat.JPEG, 90, it); recycle()
+        } }
+        androidx.test.runner.intent.IntentStubberRegistry.load(object : androidx.test.runner.intent.IntentStubber {
+            override fun getActivityResultForIntent(intent: android.content.Intent): android.app.Instrumentation.ActivityResult? {
+                if (intent.type != "image/*") return null
+                assertEquals("Feedback must precede each picker launch", launches.incrementAndGet(), feedback.size)
+                return android.app.Instrumentation.ActivityResult(android.app.Activity.RESULT_CANCELED, null)
+            }
+        })
+        try {
+            ClientSession.setMicrophonePermission(false)
+            ClientSession.setAudio(inputMuted = true, deafened = false)
+            ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+                for ((mode, resource) in listOf("off" to R.string.action_disconnect,
+                    "choose" to R.string.avatar_choose, "change" to R.string.avatar_change,
+                    "clear" to R.string.avatar_remove, "microphone" to R.string.settings_microphone,
+                    "listening" to R.string.settings_listening)) {
+                    feedback.clear(); launches.set(0); permissions.set(0)
+                    scenario.onActivity { activity -> activity.setContent {
+                        MaterialTheme {
+                            CompositionLocalProvider(LocalHapticFeedback provides haptic) {
+                                Box(Modifier.fillMaxSize().background(Palette.background)) {
+                                    if (mode == "off") Header(saved.copy(snapshot = Snapshot(status = "connected")))
+                                    else SettingsScreen(ClientSession.state.collectAsState().value.copy(
+                                        avatarPreviewPath = if (mode == "change") preview.absolutePath else saved.avatarPreviewPath,
+                                    ).let { if (mode == "choose") it.copy(avatarPreviewPath = null) else it },
+                                        { permissions.incrementAndGet() }, {})
+                                }
+                            }
+                        }
+                    } }
+                    instrumentation.waitForIdleSync()
+                    assertEquals("Composition must not generate feedback", 0, feedback.size)
+                    val label = context.localized(resource)
+                    val node = waitForClickable(label)
+                    assertTrue(node.isFocusable)
+                    assertTrue(node.actionList.any { it.id == AccessibilityNodeInfo.ACTION_CLICK })
+                    if (mode in listOf("microphone", "listening")) assertTrue(node.isCheckable)
+                    val bounds = Rect().also(node::getBoundsInScreen)
+                    val before = stableScreenshot(bounds)
+                    val down = SystemClock.uptimeMillis()
+                    instrumentation.sendPointerSync(MotionEvent.obtain(down, down, MotionEvent.ACTION_DOWN,
+                        bounds.exactCenterX(), bounds.exactCenterY(), 0))
+                    SystemClock.sleep(250)
+                    val pressed = instrumentation.uiAutomation.takeScreenshot()
+                    assertEquals("Press alone must not activate feedback", 0, feedback.size)
+                    instrumentation.sendPointerSync(MotionEvent.obtain(down, SystemClock.uptimeMillis(), MotionEvent.ACTION_UP,
+                        bounds.exactCenterX(), bounds.exactCenterY(), 0))
+                    instrumentation.waitForIdleSync()
+                    for ((suffix, shot) in listOf("before" to before, "pressed" to pressed)) {
+                        java.io.File(context.cacheDir, "highlight-$mode-$suffix.png").outputStream().use { shot.compress(Bitmap.CompressFormat.PNG, 100, it) }
+                    }
+                    assertNoPressedRectangle(mode, before, pressed, bounds)
+                    before.recycle(); pressed.recycle()
+                    fun afterActivation(count: Int) {
+                        assertEquals("$mode must generate one feedback per activation", if (mode == "off") 0 else count, feedback.size)
+                        if (mode in listOf("choose", "change", "clear")) assertTrue(feedback.all { it == HapticFeedbackType.SegmentTick })
+                        if (mode in listOf("choose", "change")) assertEquals(count, launches.get())
+                        if (mode == "microphone") assertEquals("Microphone enable must request permission", count, permissions.get())
+                        if (mode == "clear") {
+                            assertTrue(waitForClickable(context.localized(R.string.action_cancel)).performAction(AccessibilityNodeInfo.ACTION_CLICK))
+                            instrumentation.waitForIdleSync()
+                            SystemClock.sleep(250)
+                            assertEquals(saved.avatarPreviewPath, ClientSession.state.value.avatarPreviewPath)
+                            assertEquals(saved.avatarRevision, ClientSession.state.value.avatarRevision)
+                            assertEquals("Cancel must not generate extra feedback", count, feedback.size)
+                        }
+                    }
+                    afterActivation(1)
+                    assertTrue(waitForClickable(label).performAction(AccessibilityNodeInfo.ACTION_CLICK))
+                    instrumentation.waitForIdleSync(); afterActivation(2)
+                    assertTrue(waitForClickable(label).performAction(AccessibilityNodeInfo.ACTION_FOCUS))
+                    instrumentation.sendKeySync(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DPAD_CENTER))
+                    instrumentation.sendKeySync(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DPAD_CENTER))
+                    instrumentation.waitForIdleSync(); afterActivation(3)
+                    if (mode in listOf("microphone", "listening")) {
+                        for ((index, x) in listOf(bounds.left + 12f, bounds.right - 12f).withIndex()) {
+                            val time = SystemClock.uptimeMillis()
+                            instrumentation.sendPointerSync(MotionEvent.obtain(time, time, MotionEvent.ACTION_DOWN, x, bounds.exactCenterY(), 0))
+                            instrumentation.sendPointerSync(MotionEvent.obtain(time, SystemClock.uptimeMillis(), MotionEvent.ACTION_UP, x, bounds.exactCenterY(), 0))
+                            instrumentation.waitForIdleSync(); afterActivation(4 + index)
+                        }
+                    }
+                    if (mode == "listening") {
+                        assertTrue(ClientSession.state.value.deafened)
+                        val microphone = waitForClickable(context.localized(R.string.settings_microphone))
+                        assertTrue("Microphone must be disabled when listening is off", !microphone.isEnabled)
+                        microphone.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                        instrumentation.waitForIdleSync()
+                        assertEquals(5, feedback.size)
+                        assertEquals(0, permissions.get())
+                    }
+                }
+                for (busy in listOf(saved.copy(avatarClearingLocally = true), saved.copy(avatarStatus = "clearing"))) {
+                    scenario.onActivity { activity -> activity.setContent {
+                        MaterialTheme { CompositionLocalProvider(LocalHapticFeedback provides haptic) { SettingsScreen(busy, {}, {}) } }
+                    } }
+                    instrumentation.waitForIdleSync()
+                    val count = feedback.size
+                    repeat(30) { if (waitForClickable(context.localized(R.string.avatar_remove)).isEnabled) SystemClock.sleep(50) }
+                    val clear = waitForClickable(context.localized(R.string.avatar_remove))
+                    assertTrue(!clear.isEnabled)
+                    clear.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                    instrumentation.waitForIdleSync()
+                    assertEquals("Disabled clear must not trigger feedback", count, feedback.size)
+                }
+            }
+        } finally {
+            androidx.test.runner.intent.IntentStubberRegistry.reset()
+            ClientSession.setMicrophonePermission(permission)
+            ClientSession.setAudio(inputMuted = saved.microphoneMuted, deafened = saved.deafened)
+            preview.delete()
+        }
+    }
+
     @Test fun realListAndNavigationComposablesKeepTouchAndAccessibilityWithoutRectangle() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext

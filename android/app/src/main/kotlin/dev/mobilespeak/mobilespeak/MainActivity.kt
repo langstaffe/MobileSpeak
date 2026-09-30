@@ -52,6 +52,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableIntStateOf
@@ -362,7 +363,7 @@ internal fun MobileSpeakApp(requestPermissions: () -> Unit, openAbout: Boolean =
 }
 
 @Composable
-private fun Header(ui: SessionUiState) {
+internal fun Header(ui: SessionUiState) {
     val disconnectLabel = stringResource(R.string.action_disconnect)
     Column {
     Row(
@@ -383,7 +384,7 @@ private fun Header(ui: SessionUiState) {
         Text(server ?: "MobileSpeak", Modifier.weight(1f), fontSize = 16.sp, lineHeight = 19.sp, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.ExtraBold, maxLines = 1)
         if (ui.snapshot.status != "disconnected") {
             Box(
-                Modifier.size(44.dp).semantics { contentDescription = disconnectLabel }.clickable { ClientSession.disconnect() },
+                Modifier.size(44.dp).semantics { contentDescription = disconnectLabel }.clickable(interactionSource = null, indication = null) { ClientSession.disconnect() },
                 contentAlignment = Alignment.Center,
             ) {
                 Image(painterResource(R.drawable.ic_off), contentDescription = null, modifier = Modifier.size(34.dp))
@@ -686,6 +687,7 @@ private fun MemberRow(member: Member, modifier: Modifier = Modifier, unread: Int
 }
 
 @Composable
+@OptIn(ExperimentalMaterial3Api::class)
 internal fun SettingsScreen(ui: SessionUiState, requestPermissions: () -> Unit, onPage: (String) -> Unit) {
     val haptic = LocalHapticFeedback.current
     var avatarClearPresented by rememberSaveable { mutableStateOf(false) }
@@ -726,15 +728,25 @@ internal fun SettingsScreen(ui: SessionUiState, requestPermissions: () -> Unit, 
                         Text(stringResource(if (ui.avatarIntent == "clear") R.string.avatar_cleared_local else if (ui.avatarPreviewPath == null) R.string.avatar_none else R.string.avatar_local),
                             fontSize = 13.sp, lineHeight = 17.sp, color = Palette.muted)
                     }
-                    TextButton(onClick = { avatarSelection = ClientSession.beginAvatarSelection(); avatarPicker.launch(
-                        androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                    ) }) { Text(stringResource(if (ui.avatarPreviewPath == null) R.string.avatar_choose else R.string.avatar_change)) }
+                    CompositionLocalProvider(LocalRippleConfiguration provides null) {
+                        TextButton(onClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.SegmentTick)
+                            avatarSelection = ClientSession.beginAvatarSelection(); avatarPicker.launch(
+                                androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                            )
+                        }) { Text(stringResource(if (ui.avatarPreviewPath == null) R.string.avatar_choose else R.string.avatar_change)) }
+                    }
                 }
-                TextButton(onClick = { avatarClearPresented = true }, enabled = !ui.avatarClearingLocally && ui.avatarStatus != "clearing",
-                    modifier = Modifier.align(Alignment.End).heightIn(min = 48.dp),
-                    contentPadding = PaddingValues(0.dp),
-                    colors = ButtonDefaults.textButtonColors(contentColor = Palette.disconnect)) {
-                    Text(stringResource(R.string.avatar_remove), fontSize = 17.sp, lineHeight = 22.sp, fontWeight = FontWeight.Normal)
+                CompositionLocalProvider(LocalRippleConfiguration provides null) {
+                    TextButton(onClick = {
+                        haptic.performHapticFeedback(HapticFeedbackType.SegmentTick)
+                        avatarClearPresented = true
+                    }, enabled = !ui.avatarClearingLocally && ui.avatarStatus != "clearing",
+                        modifier = Modifier.align(Alignment.End).heightIn(min = 48.dp),
+                        contentPadding = PaddingValues(0.dp),
+                        colors = ButtonDefaults.textButtonColors(contentColor = Palette.disconnect)) {
+                        Text(stringResource(R.string.avatar_remove), fontSize = 17.sp, lineHeight = 22.sp, fontWeight = FontWeight.Normal)
+                    }
                 }
                 ui.avatarCleanupDetail?.let { Text(it, fontSize = 13.sp, color = Palette.disconnect) }
                 if (ui.avatarStatus in listOf("checking", "uploading", "clearing", "failed", "clear_failed", "clear_save_failed")) {
@@ -798,7 +810,7 @@ private fun SelectionCircle(selected: Boolean) {
 private fun SettingSwitch(title: String, checked: Boolean, enabled: Boolean = true, onChange: (Boolean) -> Unit) {
     val haptic = LocalHapticFeedback.current
     val position by animateFloatAsState(if (checked) 1f else 0f, label = "switch")
-    Row(Modifier.fillMaxWidth().heightIn(min = 28.dp).toggleable(checked, enabled = enabled, role = Role.Switch) {
+    Row(Modifier.fillMaxWidth().heightIn(min = 28.dp).toggleable(checked, interactionSource = null, indication = null, enabled = enabled, role = Role.Switch) {
         haptic.performHapticFeedback(toggleHapticType(it))
         onChange(it)
     }, verticalAlignment = Alignment.CenterVertically) {

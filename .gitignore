@@ -68,6 +68,10 @@ android/app/src/main/jniLibs/
 android/icon-source/
 ios/NATIVE_VALIDATION.md
 native/examples/
+/local-validation/
+/android/app/src/androidTest/kotlin/dev/mobilespeak/mobilespeak/VoiceEncryptionValidationTest.kt
+/native/src/audio_validation.rs
+/native/src/voice_validation.rs
 
 # Local configuration and secrets
 .env*

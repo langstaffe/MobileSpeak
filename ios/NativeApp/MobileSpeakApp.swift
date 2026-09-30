@@ -779,6 +779,7 @@ struct HomeView: View {
                             }
                             Spacer(minLength: 0)
                             Button(L10n.string(client.avatarPreview == nil ? "avatar_choose" : "avatar_change")) {
+                                UISelectionFeedbackGenerator().selectionChanged()
                                 avatarSelection = AvatarSelectionRequest(id: client.beginAvatarSelection())
                             }
                             .buttonStyle(.plain).foregroundStyle(Palette.accent)
@@ -788,7 +789,10 @@ struct HomeView: View {
                         .padding(16)
                         .background(Palette.card)
                         .clipShape(RoundedRectangle(cornerRadius: 14))
-                        Button(role: .destructive) { avatarClearPresented = true } label: {
+                        Button(role: .destructive) {
+                            UISelectionFeedbackGenerator().selectionChanged()
+                            avatarClearPresented = true
+                        } label: {
                             Text(L10n.string("avatar_remove"))
                                 .font(.body)
                                 .frame(minWidth: 48, minHeight: 48, alignment: .trailing)
