@@ -1,41 +1,41 @@
 //! Shared transmit activity. Capture/AEC keep running while this gate is closed.
-use crate::{denoise_packet, NoiseSuppressionMode};
+use crate::audio_models::Frame;
 use audiopus::{
     coder::{Encoder, GenericCtl},
     Application, Channels, SampleRate,
 };
-use nnnoiseless::DenoiseState;
 use std::{
     collections::VecDeque,
-    panic::{catch_unwind, AssertUnwindSafe},
     time::{Duration, Instant},
 };
 use tsproto_packets::packets::CodecType;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 const HOLD: Duration = Duration::from_millis(200);
-// Five 20ms frames, including the trigger frame, preserve onset and RNNoise's
-// overlap delay without adding a delay to an already active stream.
+const HOLD_SAMPLES: u64 = 9600; // 200ms of the 48k sending timeline.
+                                // Five 20ms frames, including the trigger frame, preserve onset and RNNoise's
+                                // overlap delay without adding a delay to an already active stream.
 const PRE_ROLL: usize = 5;
 
 pub(crate) struct VoiceSender {
-    detector: Box<DenoiseState<'static>>,
     encoder: Encoder,
     pending: VecDeque<[i16; 960]>,
     last_voice: Option<Instant>,
     last_frame: Option<Instant>,
-    attack: u8,
+    last_voice_sample: Option<u64>,
+    last_frame_sample: Option<u64>,
+    attack: usize,
     codec: Option<CodecType>,
 }
 impl VoiceSender {
     pub fn new() -> Result<Self> {
         Ok(Self {
-            detector: catch_unwind(DenoiseState::new)
-                .map_err(|_| "Voice detector initialization failed")?,
             encoder: Encoder::new(SampleRate::Hz48000, Channels::Mono, Application::Voip)?,
             pending: VecDeque::with_capacity(PRE_ROLL),
             last_voice: None,
             last_frame: None,
+            last_voice_sample: None,
+            last_frame_sample: None,
             attack: 0,
             codec: None,
         })
@@ -46,64 +46,53 @@ impl VoiceSender {
 
     pub fn process(
         &mut self,
-        samples: &[i16],
-        mode: NoiseSuppressionMode,
-        codec: CodecType,
-        now: Instant,
-        send: impl FnMut(CodecType, &[u8]) -> Result<()>,
-    ) -> Result<()> {
-        // Detection is always enabled, even when the user chooses unprocessed audio.
-        let (clean, probability) = catch_unwind(AssertUnwindSafe(|| {
-            denoise_packet(samples, &mut self.detector)
-        }))
-        .map_err(|_| "Voice detector processing failed")?
-        .ok_or("Invalid voice detector output")?;
-        let frame = if mode == NoiseSuppressionMode::Rnnoise {
-            clean
-        } else {
-            samples.try_into()?
-        };
-        self.process_detected(frame, probability, codec, now, send)
-    }
-
-    fn process_detected(
-        &mut self,
-        frame: [i16; 960],
-        probability: f32,
+        detected: Frame,
         codec: CodecType,
         now: Instant,
         mut send: impl FnMut(CodecType, &[u8]) -> Result<()>,
     ) -> Result<()> {
+        debug_assert!(detected.probability.is_finite());
         self.expire(now, &mut send)?;
+        if self
+            .last_voice_sample
+            .is_some_and(|last| detected.start.saturating_sub(last) >= HOLD_SAMPLES)
+        {
+            self.finish(&mut send)?;
+        }
         if !self.speaking()
             && self
                 .last_frame
                 .is_some_and(|last| now.saturating_duration_since(last) >= HOLD)
+            || (!self.speaking()
+                && self
+                    .last_frame_sample
+                    .is_some_and(|last| detected.start.saturating_sub(last) >= HOLD_SAMPLES))
         {
             self.attack = 0;
             self.pending.clear();
         }
         self.last_frame = Some(now);
-        // Require 40ms of confident recurrent/spectral evidence to reject noise
-        // transients. The pre-roll recovers onset; hysteresis preserves weak tails.
+        self.last_frame_sample = Some(detected.start);
         if self.speaking() {
-            if probability >= 0.65 {
+            if detected.sustain {
                 self.last_voice = Some(now);
+                self.last_voice_sample = Some(detected.start);
             }
         } else {
-            self.attack = if probability >= 0.85 {
-                self.attack + 1
+            self.attack = if detected.onset_samples > 0 {
+                self.attack + detected.onset_samples
             } else {
                 0
             };
-            if self.attack >= 2 {
+            if self.attack >= detected.attack_samples {
                 self.last_voice = Some(now);
+                self.last_voice_sample = Some(detected.start);
             }
         }
         if self.pending.len() == PRE_ROLL {
             self.pending.pop_front();
         }
-        self.pending.push_back(frame);
+        self.pending.push_back(detected.samples);
         if self.last_voice.is_none() {
             return Ok(());
         }
@@ -137,6 +126,8 @@ impl VoiceSender {
     fn finish(&mut self, mut send: impl FnMut(CodecType, &[u8]) -> Result<()>) -> Result<()> {
         self.last_voice = None;
         self.last_frame = None;
+        self.last_voice_sample = None;
+        self.last_frame_sample = None;
         self.attack = 0;
         self.pending.clear();
         // Take first: even on a transport error we never keep a stale green ring
@@ -147,10 +138,37 @@ impl VoiceSender {
         Ok(())
     }
 
+    #[cfg(test)]
+    fn process_detected(
+        &mut self,
+        samples: [i16; 960],
+        probability: f32,
+        codec: CodecType,
+        now: Instant,
+        send: impl FnMut(CodecType, &[u8]) -> Result<()>,
+    ) -> Result<()> {
+        self.process(
+            Frame {
+                start: 0,
+                samples,
+                onset_samples: if probability >= 0.85 { 960 } else { 0 },
+                sustain: probability >= 0.65,
+                attack_samples: 1920,
+                probability,
+            },
+            codec,
+            now,
+            send,
+        )
+    }
+
+    pub fn switched(&mut self) {
+        self.pending.clear();
+        self.attack = 0;
+    }
+
     pub fn interrupt(&mut self, send: impl FnMut(CodecType, &[u8]) -> Result<()>) -> Result<()> {
         let result = self.finish(send);
-        self.detector =
-            catch_unwind(DenoiseState::new).map_err(|_| "Voice detector initialization failed")?;
         result
     }
 }
@@ -158,6 +176,16 @@ impl VoiceSender {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn frame(start: u64, onset: usize, sustain: bool) -> Frame {
+        Frame {
+            start,
+            samples: [100; 960],
+            onset_samples: onset,
+            sustain,
+            attack_samples: 768,
+            probability: 0.9,
+        }
+    }
     #[test]
     fn silence_onset_short_pause_tail_and_single_end() {
         let mut sender = VoiceSender::new().unwrap();
@@ -271,80 +299,6 @@ mod tests {
             })
             .unwrap();
         assert_eq!(ends, 1);
-    }
-    #[test]
-    fn real_classifier_silence_noise_and_weak_speech_in_both_modes() {
-        let source: Vec<i16> = include_bytes!("../tests/fixtures/speech.pcm")
-            .chunks_exact(2)
-            .map(|s| i16::from_le_bytes([s[0], s[1]]))
-            .collect();
-        for mode in [NoiseSuppressionMode::Rnnoise, NoiseSuppressionMode::None] {
-            for gain in [1.0, 0.1] {
-                let mut sender = VoiceSender::new().unwrap();
-                let start = Instant::now();
-                let mut ms = 0;
-                let mut packets = Vec::new();
-                let mut process = |sender: &mut VoiceSender, frame: &[i16]| {
-                    sender
-                        .process(
-                            frame,
-                            mode,
-                            CodecType::OpusVoice,
-                            start + Duration::from_millis(ms),
-                            |_, data| {
-                                packets.push((ms, data.to_vec()));
-                                Ok(())
-                            },
-                        )
-                        .unwrap();
-                    ms += 20;
-                };
-                for _ in 0..50 {
-                    process(&mut sender, &[0; 960]);
-                    assert!(!sender.speaking());
-                }
-                // Seeded broadband background, not an all-zero shortcut.
-                let mut seed = 7u32;
-                for _ in 0..100 {
-                    let noise = std::array::from_fn::<_, 960, _>(|_| {
-                        seed = seed.wrapping_mul(1664525).wrapping_add(1013904223);
-                        (seed >> 16) as i16 / 32
-                    });
-                    process(&mut sender, &noise);
-                    assert!(!sender.speaking(), "noise opened gate: {mode:?}");
-                }
-                let mut active = 0;
-                for chunk in source.as_chunks::<960>().0 {
-                    let frame: Vec<i16> = chunk.iter().map(|v| (*v as f32 * gain) as i16).collect();
-                    process(&mut sender, &frame);
-                    if sender.speaking() {
-                        active += 1;
-                    }
-                }
-                // Background after speech must also close the hysteresis gate.
-                for _ in 0..100 {
-                    let noise = std::array::from_fn::<_, 960, _>(|_| {
-                        seed = seed.wrapping_mul(1664525).wrapping_add(1013904223);
-                        (seed >> 16) as i16 / 32
-                    });
-                    process(&mut sender, &noise);
-                }
-                assert!(!sender.speaking(), "background held gate open: {mode:?}");
-                for _ in 0..50 {
-                    process(&mut sender, &[0; 960]);
-                }
-                assert!(!sender.speaking());
-                assert!(
-                    active > 30,
-                    "weak speech missed: {mode:?} gain={gain}, frames={active}"
-                );
-                assert!(packets.iter().any(|(_, p)| p.is_empty()));
-                eprintln!(
-                    "VAD fixture {mode:?} gain={gain}: active={active}, first_packet={}ms",
-                    packets[0].0 as i64 - 3000
-                );
-            }
-        }
     }
     #[test]
     fn long_pause_starts_a_new_stream_and_failed_end_is_not_retried() {
@@ -488,5 +442,119 @@ mod tests {
             )
             .is_err());
         assert!(!sender.speaking());
+    }
+    #[test]
+    fn onset_preroll_pause_hold_single_end_and_failed_send() {
+        let mut sender = VoiceSender::new().unwrap();
+        let start = Instant::now();
+        let mut packets = Vec::new();
+        for i in 0..15 {
+            let f = frame(i * 960, if i == 4 { 768 } else { 0 }, i == 4 || i == 10);
+            sender
+                .process(
+                    f,
+                    CodecType::OpusVoice,
+                    start + Duration::from_millis(i * 20),
+                    |_, data| {
+                        packets.push(data.to_vec());
+                        Ok(())
+                    },
+                )
+                .unwrap();
+            assert_eq!(sender.speaking(), i >= 4);
+        }
+        assert_eq!(packets.len(), 15); // exactly five pre-roll and ten subsequent packets
+        sender
+            .expire(start + Duration::from_millis(399), |_, _| {
+                panic!("early end")
+            })
+            .unwrap();
+        sender
+            .expire(start + Duration::from_millis(400), |_, p| {
+                assert!(p.is_empty());
+                packets.push(p.to_vec());
+                Ok(())
+            })
+            .unwrap();
+        sender
+            .expire(start + Duration::from_millis(450), |_, _| {
+                panic!("end repeated")
+            })
+            .unwrap();
+        assert!(!sender.speaking());
+        sender
+            .process(
+                frame(0, 768, true),
+                CodecType::OpusVoice,
+                start + Duration::from_secs(1),
+                |_, _| Err("blocked".into()),
+            )
+            .unwrap_err();
+        assert!(!sender.speaking());
+        sender
+            .interrupt(|_, _| panic!("failed start claimed speech"))
+            .unwrap();
+    }
+    #[test]
+    fn tail_uses_audio_duration_even_when_frames_arrive_in_a_batch() {
+        let mut sender = VoiceSender::new().unwrap();
+        let now = Instant::now();
+        let mut real = 0;
+        let mut ends = 0;
+        for i in 0..14 {
+            sender
+                .process(
+                    frame(i * 960, if i == 0 { 768 } else { 0 }, i == 0),
+                    CodecType::OpusVoice,
+                    now,
+                    |_, p| {
+                        if p.is_empty() {
+                            ends += 1;
+                        } else {
+                            real += 1;
+                        }
+                        Ok(())
+                    },
+                )
+                .unwrap();
+            assert_eq!(sender.speaking(), i < 10);
+        }
+        assert_eq!(real, 10);
+        assert_eq!(ends, 1);
+    }
+    #[test]
+    fn switching_preserves_activity_but_drops_unsent_preroll() {
+        let mut sender = VoiceSender::new().unwrap();
+        let now = Instant::now();
+        sender
+            .process(
+                frame(0, 768, true),
+                CodecType::OpusVoice,
+                now,
+                |_, _| Ok(()),
+            )
+            .unwrap();
+        assert!(sender.speaking());
+        sender.switched();
+        assert!(sender.speaking());
+        sender
+            .process(
+                frame(960, 0, true),
+                CodecType::OpusVoice,
+                now + Duration::from_millis(20),
+                |_, p| {
+                    assert!(!p.is_empty());
+                    Ok(())
+                },
+            )
+            .unwrap();
+        sender
+            .interrupt(|_, p| {
+                assert!(p.is_empty());
+                Err("disconnected".into())
+            })
+            .unwrap_err();
+        assert!(!sender.speaking());
+        sender.interrupt(|_, _| panic!("repeated end")).unwrap();
     }
 }

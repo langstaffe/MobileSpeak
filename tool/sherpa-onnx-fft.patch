@@ -1,0 +1,103 @@
+--- a/sherpa-onnx/csrc/online-speech-denoiser-stft-impl.h
++++ b/sherpa-onnx/csrc/online-speech-denoiser-stft-impl.h
+@@ -5,6 +5,7 @@
+ #ifndef SHERPA_ONNX_CSRC_ONLINE_SPEECH_DENOISER_STFT_IMPL_H_
+ #define SHERPA_ONNX_CSRC_ONLINE_SPEECH_DENOISER_STFT_IMPL_H_
+ 
++#include "kaldi-native-fbank/csrc/rfft.h"
+ #include <algorithm>
+ #include <cmath>
+ #include <cstdint>
+@@ -47,73 +48,31 @@
+   return knf::GetWindow(window_type, window_length);
+ }
+ 
++// Reuse the existing kaldi-native-fbank/KissFFT implementation. The original
++// quadratic DFT misses the 48 kHz real-time budget on older mobile CPUs.
+ class StreamingDft {
+  public:
+   explicit StreamingDft(int32_t n_fft)
+-      : n_fft_(n_fft),
+-        num_bins_(n_fft / 2 + 1),
+-        cos_f_(num_bins_ * n_fft_),
+-        sin_f_(num_bins_ * n_fft_),
+-        cos_i_(n_fft_ * num_bins_),
+-        sin_i_(n_fft_ * num_bins_) {
+-    constexpr double kPi = 3.14159265358979323846;
+-    for (int32_t k = 0; k < num_bins_; ++k) {
+-      for (int32_t n = 0; n < n_fft_; ++n) {
+-        double angle = 2.0 * kPi * k * n / n_fft_;
+-        double c = std::cos(angle);
+-        double s = std::sin(angle);
+-
+-        cos_f_[k * n_fft_ + n] = c;
+-        sin_f_[k * n_fft_ + n] = s;
+-
+-        cos_i_[n * num_bins_ + k] = c;
+-        sin_i_[n * num_bins_ + k] = s;
+-      }
+-    }
+-  }
+-
++      : n_fft_(n_fft), forward_(n_fft), inverse_(n_fft, true), buffer_(n_fft) {}
+   void Forward(const float *input, float *output) const {
+-    for (int32_t k = 0; k != num_bins_; ++k) {
+-      double real = 0;
+-      double imag = 0;
+-      const double *p_cos = cos_f_.data() + k * n_fft_;
+-      const double *p_sin = sin_f_.data() + k * n_fft_;
+-      for (int32_t n = 0; n != n_fft_; ++n) {
+-        double v = input[n];
+-        real += v * p_cos[n];
+-        imag -= v * p_sin[n];
+-      }
+-      output[2 * k] = static_cast<float>(real);
+-      output[2 * k + 1] = static_cast<float>(imag);
+-    }
+-  }
+-
++    std::copy(input, input+n_fft_, buffer_.begin());
++    forward_.Compute(buffer_.data());
++    output[0]=buffer_[0]; output[1]=0;
++    for (int32_t k=1;k<n_fft_/2;++k) {
++      output[2*k]=buffer_[2*k]; output[2*k+1]=buffer_[2*k+1];
++    }
++    output[n_fft_]=buffer_[1]; output[n_fft_+1]=0;
++  }
+   void Inverse(const float *input, float *output) const {
+-    for (int32_t n = 0; n != n_fft_; ++n) {
+-      double sum = input[0];
+-      if (n_fft_ % 2 == 0) {
+-        sum += input[2 * (num_bins_ - 1)] * ((n & 1) ? -1.0 : 1.0);
+-      }
+-
+-      const double *p_cos = cos_i_.data() + n * num_bins_;
+-      const double *p_sin = sin_i_.data() + n * num_bins_;
+-      for (int32_t k = 1; k != num_bins_ - 1; ++k) {
+-        double real = input[2 * k];
+-        double imag = input[2 * k + 1];
+-        sum += 2.0 * (real * p_cos[k] - imag * p_sin[k]);
+-      }
+-
+-      output[n] = static_cast<float>(sum / n_fft_);
+-    }
+-  }
+-
++    buffer_[0]=input[0]; buffer_[1]=input[n_fft_];
++    std::copy(input+2,input+n_fft_,buffer_.begin()+2);
++    inverse_.Compute(buffer_.data());
++    for (int32_t n=0;n<n_fft_;++n) output[n]=buffer_[n]/n_fft_;
++  }
+  private:
+-  int32_t n_fft_ = 0;
+-  int32_t num_bins_ = 0;
+-  std::vector<double> cos_f_;
+-  std::vector<double> sin_f_;
+-  std::vector<double> cos_i_;
+-  std::vector<double> sin_i_;
++  int32_t n_fft_;
++  mutable knf::Rfft forward_,inverse_;
++  mutable std::vector<float> buffer_;
+ };
+ 
+ class OnlineSpeechDenoiserStftImpl {

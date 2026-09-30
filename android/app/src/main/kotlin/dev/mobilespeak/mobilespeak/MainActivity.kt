@@ -74,6 +74,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -758,7 +759,7 @@ internal fun SettingsScreen(ui: SessionUiState, requestPermissions: () -> Unit, 
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(stringResource(R.string.settings_noise_suppression), fontSize = 17.sp, lineHeight = 20.sp)
                 Column(Modifier.clip(RoundedCornerShape(14.dp)).background(Palette.card)) {
-                    listOf("rnnoise" to "RNNoise", "none" to stringResource(R.string.settings_noise_none)).forEachIndexed { index, (mode, label) ->
+                    listOf("dpdfnet2" to "DPDFNet2", "rnnoise" to "RNNoise", "none" to stringResource(R.string.settings_noise_none)).forEachIndexed { index, (mode, label) ->
                         if (index > 0) HorizontalDivider(Modifier.padding(start = 16.dp), color = Palette.border)
                         val selected = ui.noiseSuppression == mode
                         val selectionState = stringResource(if (selected) R.string.selection_selected else R.string.selection_not_selected)
@@ -773,6 +774,9 @@ internal fun SettingsScreen(ui: SessionUiState, requestPermissions: () -> Unit, 
                         }
                     }
                 }
+                if (ui.audioProcessingStatus == "switching") Text(stringResource(R.string.settings_audio_switching), color = Palette.muted)
+                ui.audioProcessingError?.let { Text(it, fontSize = 13.sp, color = Palette.disconnect,
+                    modifier = Modifier.semantics { liveRegion = androidx.compose.ui.semantics.LiveRegionMode.Polite }) }
             }
             SettingsEntry(stringResource(R.string.settings_language), stringResource(selectedLanguage.title), stringResource(R.string.accessibility_choose_language)) { onPage("language") }
             SettingsEntry(stringResource(R.string.settings_about)) { onPage("about") }

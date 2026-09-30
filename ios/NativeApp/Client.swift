@@ -98,12 +98,15 @@ struct UnreadSnapshot: Decodable, Equatable {
 }
 
 enum NoiseSuppressionMode: String, CaseIterable {
-    case rnnoise, none
+    case dpdfnet2, rnnoise, none
     static let preferenceKey = "mobilespeak.audio.noiseSuppression"
     static func stored(in defaults: UserDefaults) -> Self {
-        Self(rawValue: defaults.string(forKey: preferenceKey) ?? "") ?? .rnnoise
+        let mode = Self(rawValue: defaults.string(forKey: preferenceKey) ?? "") ?? .rnnoise
+        defaults.set(mode.rawValue, forKey: preferenceKey)
+        defaults.removeObject(forKey: "mobilespeak.audio.vad")
+        return mode
     }
-    var title: String { self == .rnnoise ? "RNNoise" : L10n.string("settings_noise_none") }
+    var title: String { switch self { case .dpdfnet2: return "DPDFNet2"; case .rnnoise: return "RNNoise"; case .none: return L10n.string("settings_noise_none") } }
 }
 
 struct Bookmark: Codable, Identifiable {
@@ -166,6 +169,10 @@ private func coreChanged(_ context: Int) {
     @Published private(set) var microphoneMuted = false
     @Published private(set) var deafened = false
     @Published private(set) var noiseSuppression = NoiseSuppressionMode.stored(in: .standard)
+    @Published private(set) var appliedNoise = NoiseSuppressionMode.rnnoise
+    @Published private(set) var audioProcessingStatus = "switching"
+    @Published private(set) var audioProcessingError: String?
+    private var audioRequest = 1
     @Published var audioBusy = false
     @Published var messages: [ChatMessage] = []
     @Published private(set) var unread = UnreadSnapshot()
@@ -322,8 +329,8 @@ private func coreChanged(_ context: Int) {
             }
             try send(["type": "configure", "storage": root.path])
         } catch { self.error = L10n.withDetail("error_cache_prepare", error.localizedDescription) }
-        do { try send(["type": "set_noise_suppression", "mode": noiseSuppression.rawValue]) }
-        catch { self.error = L10n.withDetail("error_noise_suppression", error.localizedDescription) }
+        do { try send(["type": "set_noise_suppression", "mode": noiseSuppression.rawValue, "request_id": audioRequest]) }
+        catch { self.audioProcessingError = L10n.withDetail("error_noise_suppression", error.localizedDescription) }
     }
     func send(_ command: [String: Any]) throws {
         let data = try JSONSerialization.data(withJSONObject: command)
@@ -411,6 +418,17 @@ private func coreChanged(_ context: Int) {
                     catch { self.error = error.localizedDescription }
                 } else if event["type"] as? String == "error" {
                     error = L10n.coreError(event["code"] as? String, detail: event["detail"] as? String ?? event["message"] as? String)
+                } else if event["type"] as? String == "audio_processing",
+                          let applied = event["applied"] as? [String: String],
+                          let requested = event["requested"] as? [String: String] {
+                    if (event["requestId"] as? Int ?? 0) < audioRequest { continue }
+                    appliedNoise = NoiseSuppressionMode(rawValue: applied["noise"] ?? "") ?? .rnnoise
+                    noiseSuppression = NoiseSuppressionMode(rawValue: requested["noise"] ?? "") ?? appliedNoise
+                    audioProcessingStatus = event["status"] as? String ?? "failed"
+                    if audioProcessingStatus != "switching" {
+                        UserDefaults.standard.set(appliedNoise.rawValue, forKey: NoiseSuppressionMode.preferenceKey)
+                    }
+                    audioProcessingError = audioProcessingStatus == "failed" ? L10n.withDetail("error_noise_suppression", event["detail"] as? String) : nil
                 } else if event["type"] as? String == "audio_muted" {
                     error = L10n.coreError(event["code"] as? String, detail: event["detail"] as? String ?? event["message"] as? String)
                     if !muted {
@@ -510,12 +528,11 @@ private func coreChanged(_ context: Int) {
         catch { self.error = error.localizedDescription }
     }
     func setNoiseSuppression(_ mode: NoiseSuppressionMode) {
-        guard mode != noiseSuppression else { return }
+        audioRequest += 1
         do {
-            try send(["type": "set_noise_suppression", "mode": mode.rawValue])
-            UserDefaults.standard.set(mode.rawValue, forKey: NoiseSuppressionMode.preferenceKey)
-            noiseSuppression = mode
-        } catch { self.error = L10n.withDetail("error_noise_suppression", error.localizedDescription) }
+            try send(["type": "set_noise_suppression", "mode": mode.rawValue, "request_id": audioRequest])
+            noiseSuppression = mode; audioProcessingStatus = "switching"; audioProcessingError = nil
+        } catch { audioProcessingError = L10n.withDetail("error_noise_suppression", error.localizedDescription) }
     }
     @discardableResult func sendChannelMessage(_ text: String, channel: Channel) -> Bool {
         do {

@@ -1,0 +1,49 @@
+{
+  "sherpa_onnx": "1.13.8",
+  "onnxruntime": "1.28.2",
+  "earshot": "1.2.2",
+  "models": [
+    {
+      "file": "dpdfnet2_48khz_hr.onnx",
+      "url": "https://huggingface.co/Ceva-IP/DPDFNet/resolve/dd6818d00f50c836fed43a6243ebe49116de5964/onnx/dpdfnet2_48khz_hr.onnx",
+      "sha256": "7f0575a5cec0ba4ffd8f8bd657e06d007e4ccdd955d76faab922b9d3291dc14b",
+      "sample_rate": 48000
+    }
+  ],
+  "runtimes": [
+    {
+      "platform": "macos",
+      "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.8/sherpa-onnx-v1.13.8-osx-arm64-shared-no-tts-lib.tar.bz2",
+      "sha256": "f3e0cbd86cc3f38dad30c97921b40e9a8bcc6f2c943777eb76ad77176993e417",
+      "format": "tar",
+      "dest": "macos"
+    },
+    {
+      "platform": "android",
+      "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.8/sherpa-onnx-v1.13.8-android.tar.bz2",
+      "sha256": "2ff63469a71cb6009aa2e3ed5f4a670f8abdcbe4bb9ffd23776afc792a6b4f44",
+      "format": "tar",
+      "dest": ""
+    },
+    {
+      "platform": "ios",
+      "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/xcframework/sherpa-onnx-v1.13.8-ios-shared.xcframework.zip",
+      "sha256": "449fd0d139ef1efc11f8a202cd47bd6cff448ada1ba289210946bc3f2d65a689",
+      "format": "zip",
+      "dest": "ios-shared"
+    },
+    {
+      "platform": "ios",
+      "url": "https://github.com/csukuangfj/onnxruntime-libs/releases/download/v1.28.2/onnxruntime-ios-shared-xcframework-1.28.2.xcframework.zip",
+      "sha256": "d955b44322de53cc0be60e4939c89e46c2ba9dc0e9eef7f25ec8c73427ac6546",
+      "format": "zip",
+      "dest": "ios-shared"
+    }
+  ],
+  "sherpa_source": {
+    "url": "https://github.com/k2-fsa/sherpa-onnx/archive/refs/tags/v1.13.8.tar.gz",
+    "sha256": "b0374cc56dbc186d442ae73d5de743bb092470b640c4c50ce7b029044c0c4fa8",
+    "patch": "tool/sherpa-onnx-fft.patch",
+    "patch_sha256": "92f36d230d6e6cd252cccb3dc2dd4fb61fbd96249945328598ef176731629f61"
+  }
+}

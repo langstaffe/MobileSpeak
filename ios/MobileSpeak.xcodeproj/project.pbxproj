@@ -21,6 +21,8 @@
 		F0F027B943F2BA8C6AAD170D /* Security.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = D9C5768651749D5AF5081293 /* Security.framework */; };
 		F466C91B6C090487C9883AA8 /* PhoneAudio.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8BD3729E0DF38C8A25D988B4 /* PhoneAudio.swift */; };
 		FD3E56D5F39FC4FD67695DDB /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 23B2A010392BFAE0468B4830 /* Foundation.framework */; };
+        A00000000000000000000001 /* SherpaOnnxC in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = A00000000000000000000003; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+        A00000000000000000000002 /* onnxruntime in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = A00000000000000000000004; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -33,6 +35,9 @@
 		};
 /* End PBXContainerItemProxy section */
 
+/* Begin PBXCopyFilesBuildPhase section */
+        A00000000000000000000005 = {isa = PBXCopyFilesBuildPhase; buildActionMask = 2147483647; dstPath = ""; dstSubfolderSpec = 10; files = (A00000000000000000000001, A00000000000000000000002, ); name = "Embed Audio Runtimes"; runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXCopyFilesBuildPhase section */
 /* Begin PBXFileReference section */
 		1C1AAF64A80E5FFD5457D916 /* Assets.xcassets */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		23B2A010392BFAE0468B4830 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS18.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
@@ -52,6 +57,8 @@
 		D9C5768651749D5AF5081293 /* Security.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Security.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS18.0.sdk/System/Library/Frameworks/Security.framework; sourceTree = DEVELOPER_DIR; };
 		EBD6B0F41E0754DEC66A1A5D /* AVFoundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AVFoundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS18.0.sdk/System/Library/Frameworks/AVFoundation.framework; sourceTree = DEVELOPER_DIR; };
 		ED2CB517EC35367D879FD831 /* Core.h */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.h; path = Core.h; sourceTree = "<group>"; };
+        A00000000000000000000003 = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = sherpa-onnx.xcframework; path = ../native/vendor/ios-shared/sherpa-onnx.xcframework; sourceTree = "<group>"; };
+        A00000000000000000000004 = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = onnxruntime.xcframework; path = ../native/vendor/ios-shared/onnxruntime.xcframework; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -94,6 +101,8 @@
 				17A036C748F456FDCA5E10AD /* Frameworks */,
 				C3F2CF49A9C0067B9EDE303B /* NativeApp */,
 				306CA6145F660C9BE190E8E4 /* TeamSpeakCore.xcframework */,
+                A00000000000000000000003,
+                A00000000000000000000004,
 				FF857741AB239954E258F3D6 /* NativeTests */,
 			);
 			sourceTree = "<group>";
@@ -152,6 +161,7 @@
 				27CAD4737276FFAAE33AA99C /* Sources */,
 				F7D3E293066E90BE40B40D5B /* Frameworks */,
 				D874450ECF958A72230D08B8 /* Resources */,
+                A00000000000000000000005,
 			);
 			buildRules = (
 			);
@@ -349,7 +359,7 @@
 				CLANG_ENABLE_OBJC_WEAK = NO;
 				CODE_SIGN_ENTITLEMENTS = NativeApp/MobileSpeak.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 3;
+				CURRENT_PROJECT_VERSION = 4;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = NativeApp/Info.plist;
@@ -465,7 +475,7 @@
 				CLANG_ENABLE_OBJC_WEAK = NO;
 				CODE_SIGN_ENTITLEMENTS = NativeApp/MobileSpeak.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 3;
+				CURRENT_PROJECT_VERSION = 4;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = NativeApp/Info.plist;

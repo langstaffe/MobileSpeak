@@ -1,6 +1,8 @@
 //! Mobile-only C ABI. TeamSpeak protocol state, chat and file transfers live on one Rust worker.
 #[cfg(target_os = "android")]
 mod android_jni;
+mod audio_models;
+mod audio_processing;
 mod avatar;
 mod badges;
 mod voice;
@@ -55,8 +57,12 @@ pub enum Command {
         output: bool,
     },
     CaptureStopped,
+    #[serde(alias = "set_audio_processing")]
     SetNoiseSuppression {
+        #[serde(alias = "noise")]
         mode: NoiseSuppressionMode,
+        #[serde(default)]
+        request_id: u64,
     },
     SendChannelMessage {
         request_id: String,
@@ -89,10 +95,12 @@ pub enum Command {
     Disconnect,
     Shutdown,
 }
-#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum NoiseSuppressionMode {
+    Dpdfnet2,
     #[default]
+    #[serde(alias = "dpdfnet8")] // Migrate the retired experimental setting.
     Rnnoise,
     None,
 }
@@ -545,6 +553,15 @@ fn voice_encryption(mode: CodecEncryptionMode, is_unencrypted: Option<bool>) -> 
         // Send plaintext only when the channel explicitly allows it.
         CodecEncryptionMode::PerChannel => is_unencrypted != Some(true),
     }
+}
+fn audio_send_allowed(
+    input_muted: bool,
+    output_muted: bool,
+    subscribed: bool,
+    can_send: bool,
+    joining: bool,
+) -> bool {
+    !input_muted && !output_muted && subscribed && can_send && !joining
 }
 fn send_voice(
     con: &mut Connection,
@@ -1122,6 +1139,58 @@ fn received_messages(events: Vec<Event>, con: &Connection) -> Vec<ChatMessage> {
     result
 }
 
+#[derive(Default)]
+struct AudioProcessingState {
+    requested: audio_models::Selection,
+    applied: audio_models::Selection,
+    generation: u64,
+    active_generation: u64,
+    request_id: u64,
+}
+impl AudioProcessingState {
+    fn publish(&self, out: &Arc<Mutex<Output>>, status: &str, detail: Option<String>) {
+        out.lock().unwrap().event(json!({"type":"audio_processing","status":status,"requested":self.requested,"applied":self.applied,"generation":self.generation,"requestId":self.request_id,"detail":detail}));
+    }
+    fn request(&mut self, processor: &audio_processing::Processor, out: &Arc<Mutex<Output>>) {
+        self.generation = processor.request(self.requested);
+        self.publish(out, "switching", None);
+    }
+    fn completed(&mut self, event: audio_processing::Event, out: &Arc<Mutex<Output>>) {
+        match event {
+            audio_processing::Event::Applied {
+                generation,
+                selection,
+                elapsed_ms,
+            } => {
+                self.active_generation = generation;
+                self.applied = selection;
+                self.publish(
+                    out,
+                    if generation == self.generation {
+                        "ready"
+                    } else {
+                        "switching"
+                    },
+                    None,
+                );
+                #[cfg(debug_assertions)]
+                eprintln!("Audio processing applied {selection:?} in {elapsed_ms}ms");
+                let _ = elapsed_ms;
+            }
+            audio_processing::Event::Failed {
+                generation,
+                selection,
+                error,
+            } if generation == self.generation => {
+                self.applied = selection;
+                self.requested = selection;
+                self.publish(out, "failed", Some(error));
+            }
+            _ => {}
+        }
+    }
+}
+
 async fn session(
     first: Command,
     rx: &mut mpsc::Receiver<Command>,
@@ -1130,7 +1199,8 @@ async fn session(
     storage: Option<PathBuf>,
     persist_tx: &std_mpsc::Sender<PersistJob>,
     app_active: &mut bool,
-    noise_suppression: &mut NoiseSuppressionMode,
+    processing: &mut AudioProcessingState,
+    processor: &mut audio_processing::Processor,
     avatar_store: &Arc<avatar::Store>,
 ) -> Result<bool, Box<dyn std::error::Error>> {
     let Command::Connect {
@@ -1167,6 +1237,7 @@ async fn session(
         .output_hardware_enabled(true)
         .connect()?;
     let mut audio = AudioHandler::new();
+    processor.invalidate();
     let mut voice = voice::VoiceSender::new()?;
     let mut voice_channel = None;
     let mut input_muted = true;
@@ -1199,7 +1270,7 @@ async fn session(
                 Some(Ok(StreamItem::BookEvents(events))) => {
                     let channel = con.get_state().ok().and_then(|state| state.clients.get(&state.own_client).map(|me| (me.channel, state.channels.get(&me.channel).map(|channel| channel.codec))));
                     if channel != voice_channel || !con.can_send_audio() {
-                        let _ = voice.interrupt(|codec, data| send_voice(&mut con, codec, data));
+                        processor.invalidate(); let _ = voice.interrupt(|codec, data| send_voice(&mut con, codec, data));
                         while pcm.try_recv().is_ok() {}
                         voice_channel = channel;
                     }
@@ -1264,7 +1335,7 @@ async fn session(
                 Some(Ok(StreamItem::AudioChange(change))) => {
                     match change {
                         tsclientlib::AudioEvent::CanSendAudio(false) => {
-                            let _ = voice.interrupt(|codec, data| send_voice(&mut con, codec, data));
+                            processor.invalidate(); let _ = voice.interrupt(|codec, data| send_voice(&mut con, codec, data));
                             while pcm.try_recv().is_ok() {}
                         },
                         tsclientlib::AudioEvent::CanReceiveAudio(false) => { audio.reset(); out.lock().unwrap().audio.clear(); },
@@ -1377,7 +1448,7 @@ async fn session(
                     media_failed.clear();
                     transfers.clear();
                     audio.reset();
-                    let _ = voice.interrupt(|_, _| Ok(()));
+                    processor.invalidate(); let _ = voice.interrupt(|_, _| Ok(()));
                     voice_channel = None;
                     while pcm.try_recv().is_ok() {}
                     out.lock().unwrap().status("reconnecting");
@@ -1406,13 +1477,13 @@ async fn session(
             received = rx.recv() => match received {
                 Some(Command::Disconnect) | None => {
                     avatar.disconnected();
-                    let _ = voice.interrupt(|codec, data| send_voice(&mut con, codec, data));
+                    processor.invalidate(); let _ = voice.interrupt(|codec, data| send_voice(&mut con, codec, data));
                     out.lock().unwrap().status("disconnected");
                     con.disconnect(DisconnectOptions::new())?;
                     let _ = tokio::time::timeout(Duration::from_secs(2), async { while con.events().next().await.is_some() {} }).await;
                     return Ok(false);
                 },
-                Some(Command::Shutdown) => { avatar.disconnected(); let _ = voice.interrupt(|codec, data| send_voice(&mut con, codec, data)); out.lock().unwrap().status("disconnected"); let _ = con.disconnect(DisconnectOptions::new()); return Ok(true); },
+                Some(Command::Shutdown) => { avatar.disconnected(); processor.invalidate(); let _ = voice.interrupt(|codec, data| send_voice(&mut con, codec, data)); out.lock().unwrap().status("disconnected"); let _ = con.disconnect(DisconnectOptions::new()); return Ok(true); },
                 Some(Command::Connect { .. }) => report_code(out, "disconnect_before_connect", None),
                 Some(Command::AvatarSelect { .. } | Command::AvatarSet { .. }) => unreachable!("avatar storage commands are handled by Bridge::send"),
                 Some(Command::Configure { .. }) => report_code(out, "storage_change_while_connected", None),
@@ -1435,7 +1506,7 @@ async fn session(
                     if state.clients.get(&state.own_client).is_some_and(|client| client.channel.0 == channel) { continue; }
                     let Some(me) = state.clients.get(&state.own_client) else { report_code(out, "client_state_unavailable", None); continue; };
                     let request = me.client_move(ChannelId(channel)).set_password(&password).to_packet();
-                    let _ = voice.interrupt(|codec, data| send_voice(&mut con, codec, data));
+                    processor.invalidate(); let _ = voice.interrupt(|codec, data| send_voice(&mut con, codec, data));
                     while pcm.try_recv().is_ok() {}
                     audio.reset(); out.lock().unwrap().audio.clear();
                     snapshot(&con, out, &audio, false, storage.as_deref());
@@ -1443,7 +1514,7 @@ async fn session(
                     operations.insert(handle, PendingOperation::Other("join_channel_failed"));
                 },
                 Some(Command::Mute { input, output }) => {
-                    if input || output { let _ = voice.interrupt(|codec, data| send_voice(&mut con, codec, data)); }
+                    if input || output { processor.invalidate(); let _ = voice.interrupt(|codec, data| send_voice(&mut con, codec, data)); }
                     input_muted = input; output_muted = output;
                     if output { audio.reset(); out.lock().unwrap().audio.clear(); }
                     while pcm.try_recv().is_ok() {}
@@ -1459,15 +1530,11 @@ async fn session(
                     }
                 },
                 Some(Command::CaptureStopped) => {
-                    let _ = voice.interrupt(|codec, data| send_voice(&mut con, codec, data));
+                    processor.invalidate(); let _ = voice.interrupt(|codec, data| send_voice(&mut con, codec, data));
                     while pcm.try_recv().is_ok() {}
                     snapshot(&con, out, &audio, false, storage.as_deref());
                 },
-                Some(Command::SetNoiseSuppression { mode }) => {
-                    if *noise_suppression != mode {
-                        *noise_suppression = mode;
-                    }
-                },
+                Some(Command::SetNoiseSuppression { mode, request_id }) => { processing.request_id=request_id; processing.requested.noise=mode; processing.request(processor,out); },
                 Some(Command::SendChannelMessage { request_id, channel, message }) => {
                     let target = MessageTarget::Channel;
                     match outgoing_message(&con, request_id.clone(), target, Some(channel), None, message.clone()) {
@@ -1530,24 +1597,37 @@ async fn session(
                 },
             },
             Some(samples) = pcm.recv() => {
-                if !input_muted && !output_muted && con.can_send_audio()
-                    && !operations.values().any(|op| matches!(op, PendingOperation::Other("join_channel_failed"))) {
-                    let state = con.get_state()?;
-                    let codec = state.clients.get(&state.own_client)
-                        .and_then(|me| state.channels.get(&me.channel)).map(|channel| channel.codec);
-                    let codec = match codec {
-                        Some(tsclientlib::Codec::OpusVoice) => CodecType::OpusVoice,
-                        Some(tsclientlib::Codec::OpusMusic) => CodecType::OpusMusic,
-                        _ => {
-                            let _ = voice.interrupt(|codec, data| send_voice(&mut con, codec, data));
-                            input_muted = true;
-                            snapshot(&con, out, &audio, false, storage.as_deref());
-                            report_audio_muted(out, "legacy_codec", None); continue;
-                        }
-                    };
-                    let speaking = voice.speaking();
-                    voice.process(&samples, *noise_suppression, codec, Instant::now(), |codec, data| send_voice(&mut con, codec, data))?;
-                    if speaking != voice.speaking() { snapshot(&con, out, &audio, voice.speaking(), storage.as_deref()); }
+                if audio_send_allowed(input_muted, output_muted, subscribed, con.can_send_audio(),
+                    operations.values().any(|op| matches!(op, PendingOperation::Other("join_channel_failed")))) {
+                    processor.capture(&samples);
+                }
+            },
+            Some(event) = processor.events.recv() => {
+                match event {
+                    audio_processing::Event::Audio { generation, epoch, frame } => {
+                        if epoch!=processor.epoch() || generation!=processing.active_generation || !audio_send_allowed(input_muted, output_muted, subscribed, con.can_send_audio(),
+                            operations.values().any(|op| matches!(op, PendingOperation::Other("join_channel_failed")))) {continue}
+                        // Resolve current channel/codec/permissions at consumption; no connection state leaves this loop.
+                        let state=con.get_state()?;
+                        let codec=state.clients.get(&state.own_client).and_then(|me|state.channels.get(&me.channel)).map(|c|c.codec);
+                        let codec=match codec {
+                            Some(tsclientlib::Codec::OpusVoice)=>CodecType::OpusVoice,
+                            Some(tsclientlib::Codec::OpusMusic)=>CodecType::OpusMusic,
+                            _=>{
+                                processor.invalidate(); let _=voice.interrupt(|codec,data|send_voice(&mut con,codec,data));
+                                input_muted=true;snapshot(&con,out,&audio,false,storage.as_deref());report_audio_muted(out,"legacy_codec",None);continue
+                            }
+                        };
+                        let speaking=voice.speaking();
+                        voice.process(frame,codec,Instant::now(),|codec,data|send_voice(&mut con,codec,data))?;
+                        if speaking!=voice.speaking(){snapshot(&con,out,&audio,voice.speaking(),storage.as_deref());}
+                    },
+                    audio_processing::Event::Gap{epoch}=>{
+                        if epoch!=processor.epoch(){continue}
+                        let _=voice.interrupt(|codec,data|send_voice(&mut con,codec,data));
+                        snapshot(&con,out,&audio,false,storage.as_deref());
+                    },
+                    event=>{if matches!(event,audio_processing::Event::Applied{..}){voice.switched();}processing.completed(event,out);},
                 }
             },
             _ = clock.tick() => {
@@ -1612,13 +1692,20 @@ impl Bridge {
             runtime.block_on(async {
                 let mut storage: Option<PathBuf> = None;
                 let mut app_active = false;
-                let mut noise_suppression = NoiseSuppressionMode::default();
-                while let Some(request) = rx.recv().await {
+                let mut processing = AudioProcessingState::default();
+                let mut processor = audio_processing::Processor::new();
+                loop {
+                    let request = tokio::select! {
+                        event=processor.events.recv()=>{if let Some(event)=event{processing.completed(event,&worker_output);}continue},
+                        request=rx.recv()=>match request{Some(r)=>r,None=>break},
+                    };
                     match request {
                         Command::Shutdown => break,
                         Command::SetAppActive { active } => app_active = active,
-                        Command::SetNoiseSuppression { mode } => noise_suppression = mode,
+                        Command::SetNoiseSuppression { mode, request_id } => {processing.request_id=request_id;processing.requested.noise=mode;processing.request(&processor,&worker_output);},
                         Command::Configure { storage: value } => {
+                            processor.configure(PathBuf::from(&value));
+                            audio_models::remove_retired_model_cache(Path::new(&value));
                             storage = Some(PathBuf::from(value));
                             avatar::offline(&worker_avatar_store, &worker_output).await;
                         }
@@ -1631,7 +1718,8 @@ impl Bridge {
                                 storage.clone(),
                                 &persist_tx,
                                 &mut app_active,
-                                &mut noise_suppression,
+                                &mut processing,
+                                &mut processor,
                                 &worker_avatar_store,
                             )
                             .await
@@ -1640,6 +1728,7 @@ impl Bridge {
                                 Err(error) => report(&worker_output, error),
                                 _ => {}
                             }
+                            processor.invalidate();
                             worker_output.lock().unwrap().status("disconnected");
                             avatar::offline(&worker_avatar_store, &worker_output).await;
                             worker_output.lock().unwrap().set_chats(json!([]));
@@ -1805,6 +1894,21 @@ pub unsafe extern "C" fn ts_playback(
 mod tests {
     use super::*;
     #[test]
+    fn final_audio_gate_blocks_mute_deafen_permissions_disconnect_and_join() {
+        assert!(audio_send_allowed(false, false, true, true, false));
+        for flags in [
+            (true, false, true, true, false),
+            (false, true, true, true, false),
+            (false, false, false, true, false),
+            (false, false, true, false, false),
+            (false, false, true, true, true),
+        ] {
+            assert!(!audio_send_allowed(
+                flags.0, flags.1, flags.2, flags.3, flags.4
+            ));
+        }
+    }
+    #[test]
     fn voice_encryption_follows_server_mode_and_known_channel_setting() {
         for is_unencrypted in [None, Some(false), Some(true)] {
             assert!(voice_encryption(
@@ -1934,6 +2038,34 @@ mod tests {
         assert_eq!(count.load(Ordering::SeqCst), 1);
         out.event(json!({"type":"error","code":"core_error","detail":"test"}));
         assert_eq!(count.load(Ordering::SeqCst), 2);
+    }
+    #[test]
+    fn retired_audio_settings_migrate_without_changing_other_config() {
+        for (stored, expected) in [
+            ("dpdfnet8", NoiseSuppressionMode::Rnnoise),
+            ("dpdfnet2", NoiseSuppressionMode::Dpdfnet2),
+            ("rnnoise", NoiseSuppressionMode::Rnnoise),
+            ("none", NoiseSuppressionMode::None),
+        ] {
+            let value = json!({"noise": stored, "vad": "silero", "bookmark": "preserved"});
+            let selection: audio_models::Selection = serde_json::from_value(value.clone()).unwrap();
+            assert_eq!(selection.noise, expected);
+            let command: Command = serde_json::from_value(json!({"type":"set_audio_processing", "noise":stored, "vad":"silero", "request_id":9})).unwrap();
+            assert!(
+                matches!(command, Command::SetNoiseSuppression { mode, request_id:9 } if mode == expected)
+            );
+            assert_eq!(
+                serde_json::to_value(selection)
+                    .unwrap()
+                    .as_object()
+                    .unwrap()
+                    .len(),
+                1
+            );
+        }
+        assert!(
+            serde_json::from_value::<Command>(json!({"type":"set_vad","mode":"silero"})).is_err()
+        );
     }
     #[test]
     fn invalid_commands_are_rejected() {

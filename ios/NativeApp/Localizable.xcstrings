@@ -1929,13 +1929,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Noise suppression couldn’t be changed."
+            "value" : "Audio processing switch failed; previous selection retained."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "无法设置噪音抑制。"
+            "value" : "音频处理切换失败，已保留原方案。"
           }
         }
       }
@@ -2735,6 +2735,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "使用浏览器打开"
+          }
+        }
+      }
+    },
+    "settings_audio_switching" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Switching…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在切换…"
           }
         }
       }

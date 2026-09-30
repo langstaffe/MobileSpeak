@@ -196,4 +196,6 @@
     <string name="update_install_permission">若 Android 请求授权，请允许 MobileSpeak 安装未知应用，然后返回再次点击“安装更新”。拒绝授权不会影响正常使用。</string>
     <string name="update_notifications">应用更新</string>
     <string name="update_wrong_abi">此 APK 不支持当前设备的处理器，已阻止安装。</string>
+    <string name="settings_audio_switching">正在切换…</string>
+    <string name="error_noise_suppression">音频处理切换失败，已保留原方案</string>
 </resources>

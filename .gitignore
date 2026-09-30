@@ -136,3 +136,6 @@ credentials/
 !/docs/images/screenshot-1.png
 !/docs/images/screenshot-2.png
 !/docs/images/screenshot-3.png
+
+# Fixed native audio runtimes prepared by tool/prepare_audio_runtime.py
+native/vendor/

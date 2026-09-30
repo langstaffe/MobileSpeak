@@ -19,10 +19,16 @@ android {
         applicationId = "dev.mobilespeak.mobilespeak"
         minSdk = 24
         targetSdk = 36
-        versionCode = 3
+        versionCode = 4
         versionName = mobileVersion
-        ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
+        ndk { abiFilters += "arm64-v8a" }
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    buildTypes {
+        getByName("debug") {
+            ndk { abiFilters += "x86_64" }
+        }
     }
 
     buildFeatures { compose = true }
@@ -55,11 +61,16 @@ dependencies {
     androidTestImplementation("androidx.test.espresso:espresso-core:3.7.0")
 }
 
-val rustCore by tasks.registering(Exec::class) {
-    workingDir(rootProject.projectDir.parentFile)
-    commandLine("bash", "tool/build_android_core.sh")
-    inputs.files(fileTree("../../native/src"), file("../../native/Cargo.toml"), file("../../native/Cargo.lock"),
-        file("../../native/.cargo/config.toml"), file("../../tool/build_android_core.sh"), file("../../tool/android.cmake"))
-    outputs.dir("src/main/jniLibs")
+listOf("arm64-v8a", "x86_64").forEach { abi ->
+    val rustCore = tasks.register<Exec>("rustCore_${abi.replace('-', '_')}") {
+        workingDir(rootProject.projectDir.parentFile)
+        commandLine("bash", "tool/build_android_core.sh", abi)
+        inputs.files(fileTree("../../native/src"), file("../../native/Cargo.toml"), file("../../native/build.rs"), fileTree("../../native/models"), file("../../tool/prepare_audio_runtime.py"), file("../../tool/build_sherpa_fft.py"), file("../../tool/sherpa-onnx-fft.patch"), file("../../native/Cargo.lock"),
+            file("../../native/.cargo/config.toml"), file("../../tool/build_android_core.sh"), file("../../tool/android.cmake"))
+        outputs.dir("src/main/jniLibs/$abi")
+    }
+    val prepareTask = if (abi == "arm64-v8a") "preBuild" else "preDebugBuild"
+    tasks.matching { it.name == prepareTask }.configureEach { dependsOn(rustCore) }
+    // JNI merging reads the shared folder before ABI filtering.
+    tasks.matching { it.name.endsWith("JniLibFolders") }.configureEach { mustRunAfter(rustCore) }
 }
-tasks.named("preBuild") { dependsOn(rustCore) }

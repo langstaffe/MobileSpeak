@@ -36,6 +36,8 @@ internal object ClientSession {
     private lateinit var context: Context
     private lateinit var store: SecureStore
     private var initialized = false
+    private val audioRequest = AtomicLong()
+    private val audioLock = Any()
     private var activeBookmarkId: String? = null
     @Volatile private var acceptingConnection = false
     val appActive = mutableAppActive.asStateFlow()
@@ -48,8 +50,7 @@ internal object ClientSession {
             if (initialized) return
             context = applicationContext.applicationContext
             store = SecureStore(context)
-            val noise = context.getSharedPreferences("mobilespeak.settings", Context.MODE_PRIVATE)
-                .getString("noise", "rnnoise") ?: "rnnoise"
+            val noise = restoreNoiseSuppression(context.getSharedPreferences("mobilespeak.settings", Context.MODE_PRIVATE))
             val root = File(context.filesDir, "core")
             val preview = File(root, AvatarImages.previewName)
             val upload = File(root, AvatarImages.uploadName)
@@ -57,7 +58,7 @@ internal object ClientSession {
             microphonePermission = context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
             mutableState.value = mutableState.value.copy(
                 bookmarks = runCatching { store.bookmarks() }.getOrDefault(emptyList()),
-                noiseSuppression = noise,
+                noiseSuppression = noise, audioProcessingStatus = "switching",
                 microphoneMuted = !microphonePermission,
                 error = store.readError,
                 avatarPreviewPath = if (currentPreview?.isFile == true) currentPreview.absolutePath
@@ -69,7 +70,7 @@ internal object ClientSession {
             scheduleCorePoll()
             root.mkdirs()
             send(JSONObject().put("type", "configure").put("storage", root.absolutePath))
-            send(JSONObject().put("type", "set_noise_suppression").put("mode", noise))
+            setNoiseSuppression(noise)
             initialized = true
         }
     }
@@ -219,11 +220,12 @@ internal object ClientSession {
     }
 
     fun setNoiseSuppression(mode: String) {
-        if (mode !in setOf("rnnoise", "none")) return
-        if (!send(JSONObject().put("type", "set_noise_suppression").put("mode", mode))) return
-        context.getSharedPreferences("mobilespeak.settings", Context.MODE_PRIVATE)
-            .edit { putString("noise", mode) }
-        mutableState.update { it.copy(noiseSuppression = mode) }
+        if (mode !in setOf("dpdfnet2", "rnnoise", "none")) return
+        // Core notifications arrive on another executor, including very fast RNNoise/None loads.
+        synchronized(audioLock) {
+            if (!send(JSONObject().put("type", "set_noise_suppression").put("mode", mode).put("request_id", audioRequest.incrementAndGet()))) return
+            mutableState.update { it.copy(noiseSuppression = mode, audioProcessingStatus = "switching", audioProcessingError = null) }
+        }
     }
 
     fun saveBookmark(id: String?, title: String, host: String, port: String, nickname: String, password: String): Bookmark? {
@@ -360,6 +362,24 @@ internal object ClientSession {
                     event.stringOrNull("code"),
                     event.stringOrNull("detail") ?: event.stringOrNull("message"),
                 )
+                "audio_processing" -> synchronized(audioLock) {
+                    if (event.optLong("requestId") < audioRequest.get()) return@synchronized
+                    val applied = event.getJSONObject("applied")
+                    val requested = event.getJSONObject("requested")
+                    val status = event.getString("status")
+                    mutableState.update { it.copy(
+                        noiseSuppression = requested.getString("noise"),
+                        appliedNoise = applied.getString("noise"),
+                        audioProcessingStatus = status,
+                        audioProcessingError = if (status == "failed") context.localized(R.string.error_with_detail,
+                            context.localized(R.string.error_noise_suppression), event.optString("detail")) else null,
+                    ) }
+                    if (status != "switching") {
+                        context.getSharedPreferences("mobilespeak.settings", Context.MODE_PRIVATE).edit {
+                            putString("noise", applied.getString("noise"))
+                        }
+                    }
+                }
                 "audio_muted" -> {
                     audioMuted = true
                     eventError = context.localizedCoreError(
@@ -461,3 +481,11 @@ private fun JSONObject?.toIntMap(): Map<String, Int> {
 // lets that record restore the old input-muted value inside tsclientlib.
 internal fun Snapshot.canApplyAudioState() =
     status == "connected" && ownClient != null && clients.any { it.id == ownClient }
+
+// Migrate only audio preferences; identity and bookmarks use their existing store.
+internal fun restoreNoiseSuppression(preferences: android.content.SharedPreferences): String {
+    val mode = preferences.getString("noise", "rnnoise")
+        .takeIf { it in setOf("dpdfnet2", "rnnoise", "none") } ?: "rnnoise"
+    preferences.edit { putString("noise", mode); remove("vad") }
+    return mode
+}

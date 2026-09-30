@@ -842,6 +842,8 @@ struct HomeView: View {
                         }
                         .background(Palette.card)
                         .clipShape(RoundedRectangle(cornerRadius: 14))
+                        if client.audioProcessingStatus == "switching" { Text(L10n.string("settings_audio_switching")).foregroundStyle(Palette.muted) }
+                        if let error = client.audioProcessingError { Text(error).font(.footnote).foregroundStyle(Palette.disconnect) }
                     }
                     NavigationLink(destination: SettingsDetailPage(page: .language)) {
                         SettingsEntry(title: L10n.string("settings_language"), value: L10n.string(language.selection.titleKey))

@@ -685,7 +685,7 @@ final class ClientTests: XCTestCase {
         XCTAssertEqual(L10n.coreError("join_channel_failed"), "Couldn’t join the channel.")
         XCTAssertEqual(L10n.coreError("future_code", detail: "safe detail"), "Something went wrong. safe detail")
     }
-    @MainActor func testNoiseSuppressionDefaultsPersistsAndSwitches() throws {
+    @MainActor func testNoiseSuppressionDefaultsPersistsAndSwitches() async throws {
         let suite = "MobileSpeakTests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
@@ -701,9 +701,11 @@ final class ClientTests: XCTestCase {
             else { UserDefaults.standard.removeObject(forKey: NoiseSuppressionMode.preferenceKey) }
         }
         client.setNoiseSuppression(.none)
+        try await waitForAvatar { client.audioProcessingStatus == "ready" }
         XCTAssertEqual(client.noiseSuppression, .none)
         XCTAssertEqual(UserDefaults.standard.string(forKey: NoiseSuppressionMode.preferenceKey), "none")
         client.setNoiseSuppression(.rnnoise)
+        try await waitForAvatar { client.audioProcessingStatus == "ready" }
         XCTAssertEqual(client.noiseSuppression, .rnnoise)
         XCTAssertEqual(UserDefaults.standard.string(forKey: NoiseSuppressionMode.preferenceKey), "rnnoise")
     }
@@ -920,5 +922,24 @@ private struct SettingsNavigationFixture: View {
             }.navigationTitle(L10n.string("tab_settings")).navigationBarHidden(true)
                 .onReceive(trigger) { page = $0 }
         }.navigationViewStyle(.stack)
+    }
+}
+
+extension ClientTests {
+    func testAudioPreferencesMigrateAndPersistWithoutTouchingOtherSettings() throws {
+        let suite = "MobileSpeakAudioMigration.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        for (legacy, expected) in [("dpdfnet8", NoiseSuppressionMode.rnnoise), ("dpdfnet2", .dpdfnet2), ("rnnoise", .rnnoise), ("none", .none), ("unknown", .rnnoise)] {
+            defaults.set(legacy, forKey: NoiseSuppressionMode.preferenceKey)
+            defaults.set("silero", forKey: "mobilespeak.audio.vad")
+            defaults.set("preserved", forKey: "mobilespeak.server.address")
+            XCTAssertEqual(NoiseSuppressionMode.stored(in: defaults), expected)
+            XCTAssertNil(defaults.object(forKey: "mobilespeak.audio.vad"))
+            XCTAssertEqual(defaults.string(forKey: NoiseSuppressionMode.preferenceKey), expected.rawValue)
+            XCTAssertEqual(NoiseSuppressionMode.stored(in: defaults), expected)
+            XCTAssertEqual(defaults.string(forKey: "mobilespeak.server.address"), "preserved")
+        }
+        XCTAssertEqual(NoiseSuppressionMode.allCases, [.dpdfnet2, .rnnoise, .none])
     }
 }

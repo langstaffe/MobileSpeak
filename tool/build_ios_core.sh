@@ -1,7 +1,9 @@
 #!/bin/bash
 set -euo pipefail
 cd "$(dirname "$0")/../native"
+python3 ../tool/prepare_audio_runtime.py ios
 export PATH="$HOME/.cargo/bin:$PATH"
+python3 ../tool/build_sherpa_fft.py ios
 export IPHONEOS_DEPLOYMENT_TARGET=15.0
 for target in aarch64-apple-ios aarch64-apple-ios-sim; do
   rustup target add "$target"
