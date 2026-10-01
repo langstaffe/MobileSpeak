@@ -62,3 +62,7 @@
     <tr><td style="vertical-align: middle; text-align: center;">myTeamSpeak 账户与跨设备同步</td><td style="vertical-align: middle; text-align: center;">✅</td><td style="vertical-align: middle; text-align: center;">❌</td></tr>
   </tbody>
 </table>
+
+<h2 align="center">许可证</h2>
+
+MobileSpeak 的原创内容采用 [MIT 许可证](LICENSE)。第三方代码、模型及资源遵循各自的许可证，详见 [第三方声明](THIRD_PARTY_NOTICES.md) 和 [licenses](licenses/) 目录。

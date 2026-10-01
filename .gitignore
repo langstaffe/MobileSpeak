@@ -115,6 +115,7 @@ credentials/
 !/.gitignore
 !/AppVersion.xcconfig
 !/README.md
+!/LICENSE
 !/THIRD_PARTY_NOTICES.md
 !/android/
 !/assets/
