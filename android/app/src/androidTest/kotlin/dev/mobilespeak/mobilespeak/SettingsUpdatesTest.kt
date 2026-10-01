@@ -1,7 +1,14 @@
 package dev.mobilespeak.mobilespeak
 
 import android.app.KeyguardManager
+import android.app.DownloadManager
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.graphics.Rect
+import android.net.Uri
+import android.os.Build
+import android.os.Environment
 import android.os.SystemClock
 import android.view.accessibility.AccessibilityNodeInfo
 import androidx.activity.compose.setContent
@@ -18,6 +25,8 @@ import org.junit.Assert.*
 import org.junit.Assume.assumeTrue
 import org.junit.Test
 import org.junit.runner.RunWith
+import kotlinx.coroutines.flow.MutableStateFlow
+import java.io.File
 import java.util.Calendar
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -60,8 +69,9 @@ class SettingsUpdatesTest {
                 assertTrue("Settings keeps its previous scroll offset", kotlin.math.abs(oldBounds.top - returned.top) < 80)
                 scrollTo(context.localized(R.string.settings_about))
                 click(context.localized(R.string.settings_about))
-                waitFor { node("v0.3.0", clickable = false) != null }
+                waitFor { node("v" + AppUpdates.installedVersion(), clickable = false) != null }
                 assertNotNull(describeTree(), node("https://github.com/langstaffe/MobileSpeak"))
+                waitFor { !AppUpdates.state.value.checking && node(context.localized(R.string.update_check)) != null }
                 assertNotNull(node(context.localized(R.string.update_check)))
                 click(context.localized(R.string.update_check))
                 waitFor { !AppUpdates.state.value.checking && AppUpdates.state.value.result != null }
@@ -71,7 +81,7 @@ class SettingsUpdatesTest {
                 click("https://github.com/langstaffe/MobileSpeak")
                 waitFor { instrumentation.uiAutomation.rootInActiveWindow?.packageName?.toString() != context.packageName }
                 assertTrue(instrumentation.uiAutomation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK))
-                waitFor { node("v0.3.0", clickable = false) != null }
+                waitFor { node("v" + AppUpdates.installedVersion(), clickable = false) != null }
                 click(context.localized(R.string.action_back))
                 assertNotNull(node(context.localized(R.string.settings_about)))
                 assertSame(core, ClientSession.javaClass.getDeclaredField("handle\$delegate").apply { isAccessible = true }.get(ClientSession))
@@ -109,8 +119,8 @@ class SettingsUpdatesTest {
                             assertNotNull(describeTree(), node("English"))
                         } else {
                             assertNotNull(describeTree(), node("https://github.com/langstaffe/MobileSpeak"))
-                            scrollTo("v0.3.0", clickable = false)
-                            assertNotNull(node("v0.3.0", clickable = false))
+                            scrollTo("v" + AppUpdates.installedVersion(), clickable = false)
+                            assertNotNull(node("v" + AppUpdates.installedVersion(), clickable = false))
                             scrollTo(context.localized(R.string.update_check))
                             assertTrue(node(context.localized(R.string.update_check))!!.actionList.any { it.id == AccessibilityNodeInfo.ACTION_CLICK })
                         }
@@ -212,6 +222,197 @@ class SettingsUpdatesTest {
         } finally { damaged.delete() }
         val missing = java.io.File(context.cacheDir, "missing-fixture.apk")
         assertEquals(R.string.update_file_missing, rejection(missing, asset))
+    }
+
+    @Test fun completedAndOlderUpdatesRemoveBothCopiesAndNotificationWithoutChangingUserData() {
+        unlocked()
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            for (tag in listOf("v" + context.packageManager.getPackageInfo(context.packageName, 0).versionName, "v0.0.1")) {
+                withDownloadRecord(tag) { id, downloaded, installer ->
+                    val kept = File(context.filesDir, "core/update-cleanup-keep.txt")
+                    assertFalse(kept.exists())
+                    kept.parentFile!!.mkdirs(); kept.writeText("user data")
+                    val coreBefore = ClientSession.state.value
+                    val manager = context.getSystemService(NotificationManager::class.java)
+                    if (Build.VERSION.SDK_INT >= 26 && manager.getNotificationChannel("updates") == null)
+                        manager.createNotificationChannel(NotificationChannel("updates", context.localized(R.string.update_notifications), NotificationManager.IMPORTANCE_DEFAULT))
+                    @Suppress("DEPRECATION")
+                    val builder = if (Build.VERSION.SDK_INT >= 26) Notification.Builder(context, "updates") else Notification.Builder(context)
+                    if (manager.areNotificationsEnabled()) manager.notify(300, builder.setSmallIcon(android.R.drawable.stat_sys_download_done).setContentTitle("Update cleanup fixture").build())
+                    try {
+                        instrumentation.runOnMainSync {
+                            updateState.value = updateState.value.copy(result = CheckResult(message = R.string.update_current), download = DownloadStatus.FAILED,
+                                downloadError = R.string.update_wrong_version, detail = "stale error")
+                            AppUpdates.refreshDownload()
+                            assertEquals(DownloadStatus.VERIFYING, AppUpdates.state.value.download)
+                            AppUpdates.refreshDownload() // A late completion requests a refresh during cleanup.
+                        }
+                        waitForRefresh()
+                        assertEquals(DownloadStatus.NONE, AppUpdates.state.value.download)
+                        assertEquals("", AppUpdates.state.value.downloadVersion)
+                        assertEquals("", AppUpdates.state.value.detail)
+                        assertEquals(R.string.update_download_failed, AppUpdates.state.value.downloadError)
+                        assertEquals(R.string.update_current, AppUpdates.state.value.result!!.message)
+                        scenario.onActivity { activity -> activity.setContent { MaterialTheme { SettingsDetailPage("about", {}) } } }
+                        waitFor { node(context.localized(R.string.update_current), clickable = false) != null }
+                        assertNull(node(context.localized(R.string.update_wrong_version), clickable = false))
+                        assertNull(updateField("record").get(AppUpdates))
+                        assertFalse(downloaded.exists()); assertFalse(installer.exists())
+                        val prefs = context.getSharedPreferences("app_updates", 0)
+                        assertFalse(prefs.contains("download")); assertFalse(prefs.contains("notified_download"))
+                        context.getSystemService(DownloadManager::class.java).query(DownloadManager.Query().setFilterById(id)).use { assertFalse(it.moveToFirst()) }
+                        assertFalse(manager.activeNotifications.any { it.id == 300 })
+                        instrumentation.runOnMainSync { AppUpdates.refreshDownload() }
+                        assertEquals(DownloadStatus.NONE, AppUpdates.state.value.download)
+                        assertEquals("user data", kept.readText())
+                        assertEquals(coreBefore, ClientSession.state.value)
+                    } finally { kept.delete() }
+                }
+            }
+        }
+    }
+
+    @Test fun obsoleteUpdateCleanupFailureKeepsRecordAndRetriesWithoutVersionError() {
+        unlocked()
+        ActivityScenario.launch(MainActivity::class.java).use {
+            withDownloadRecord("v" + context.packageManager.getPackageInfo(context.packageName, 0).versionName) { _, downloaded, installer ->
+                assertTrue(installer.delete()); assertTrue(installer.mkdir())
+                val blocked = File(installer, "blocked.txt").apply { writeText("fixture") }
+                instrumentation.runOnMainSync { AppUpdates.refreshDownload() }
+                waitForRefresh()
+                assertEquals(DownloadStatus.FAILED, AppUpdates.state.value.download)
+                assertEquals(R.string.update_storage_failed, AppUpdates.state.value.downloadError)
+                assertNotNull(updateField("record").get(AppUpdates))
+                assertTrue(context.getSharedPreferences("app_updates", 0).contains("download"))
+                assertTrue(blocked.delete())
+                instrumentation.runOnMainSync { AppUpdates.refreshDownload() }
+                waitForRefresh()
+                assertEquals(DownloadStatus.NONE, AppUpdates.state.value.download)
+                assertFalse(downloaded.exists()); assertFalse(installer.exists())
+                assertFalse(context.getSharedPreferences("app_updates", 0).contains("download"))
+            }
+        }
+    }
+
+    @Test fun newerUpdateAndCancelledInstallKeepBothCopies() {
+        unlocked()
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            withDownloadRecord("v9.0.0") { _, downloaded, installer ->
+                instrumentation.runOnMainSync { AppUpdates.refreshDownload() }
+                waitForRefresh()
+                assertNotEquals(DownloadStatus.NONE, AppUpdates.state.value.download)
+                assertTrue(downloaded.isFile); assertTrue(installer.isFile)
+                assertNotNull(updateField("record").get(AppUpdates))
+                scenario.onActivity { activity ->
+                    activity.setContent { MaterialTheme { SettingsDetailPage("about", {}) } }
+                    updateState.value = updateState.value.copy(download = DownloadStatus.READY)
+                }
+                click(context.localized(R.string.update_install))
+                click(context.localized(R.string.action_cancel))
+                assertEquals(DownloadStatus.READY, AppUpdates.state.value.download)
+                assertFalse(AppUpdates.state.value.installing)
+                assertTrue(downloaded.isFile); assertTrue(installer.isFile)
+                instrumentation.runOnMainSync { AppUpdates.onBackground(); AppUpdates.onForeground { null } }
+                waitForRefresh()
+                assertTrue(downloaded.isFile); assertTrue(installer.isFile)
+                assertFalse(AppUpdates.state.value.installing)
+            }
+        }
+    }
+
+    @Test fun replacementIsBlockedDuringInstallAndCleanupFailureKeepsPreviousRecord() {
+        unlocked()
+        ActivityScenario.launch(MainActivity::class.java).use {
+            withDownloadRecord("v9.0.0") { _, downloaded, installer ->
+                val previous = updateField("record").get(AppUpdates)
+                val saved = context.getSharedPreferences("app_updates", 0).getString("download", null)
+                val tag = "v9.0.1"
+                val name = "MobileSpeak-$tag-universal.apk"
+                val asset = ReleaseAsset(name, "https://github.com/langstaffe/MobileSpeak/releases/download/$tag/$name", 100, null, true)
+                val next = CheckResult(AppRelease(tag, AppVersion(9, 0, 1), listOf(asset)), asset, R.string.update_available, "9.0.1")
+                instrumentation.runOnMainSync {
+                    updateState.value = updateState.value.copy(download = DownloadStatus.READY, installing = true)
+                    AppUpdates.download(next)
+                    assertSame(previous, updateField("record").get(AppUpdates))
+                    assertEquals(DownloadStatus.READY, AppUpdates.state.value.download)
+                }
+                assertTrue(downloaded.isFile); assertTrue(installer.isFile)
+                assertTrue(installer.delete()); assertTrue(installer.mkdir())
+                File(installer, "blocked.txt").writeText("fixture")
+                instrumentation.runOnMainSync {
+                    updateState.value = updateState.value.copy(installing = false)
+                    AppUpdates.download(next)
+                }
+                waitFor { AppUpdates.state.value.download == DownloadStatus.FAILED }
+                assertEquals(R.string.update_storage_failed, AppUpdates.state.value.downloadError)
+                assertSame(previous, updateField("record").get(AppUpdates))
+                assertEquals(saved, context.getSharedPreferences("app_updates", 0).getString("download", null))
+            }
+        }
+    }
+
+    private fun updateField(name: String) = AppUpdates.javaClass.getDeclaredField(name).apply { isAccessible = true }
+    @Suppress("UNCHECKED_CAST")
+    private val updateState get() = updateField("mutable").get(AppUpdates) as MutableStateFlow<UpdateState>
+    private fun waitForRefresh() = waitFor { !updateField("refreshing").getBoolean(AppUpdates) && !AppUpdates.state.value.checking }
+
+    private fun withDownloadRecord(tag: String, block: (Long, File, File) -> Unit) {
+        AppUpdates.initialize(context)
+        waitForRefresh()
+        waitFor { ClientSession.state.value.audioProcessingStatus != "switching" }
+        val prefs = context.getSharedPreferences("app_updates", 0)
+        val saved = prefs.getString("download", null)
+        val notified = prefs.getLong("notified_download", -1)
+        val originalRecord = updateField("record").get(AppUpdates)
+        val originalState = AppUpdates.state.value
+        val manager = context.getSystemService(NotificationManager::class.java)
+        val originalNotification = manager.activeNotifications.firstOrNull { it.id == 300 }
+        val name = "MobileSpeak-$tag-universal.apk"
+        val downloaded = File(requireNotNull(context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)), "updates/$name")
+        val installer = File(context.cacheDir, "updates/$name")
+        assertFalse("Fixture must not overwrite an existing download", downloaded.exists())
+        assertFalse("Fixture must not overwrite an existing installer copy", installer.exists())
+        downloaded.parentFile!!.mkdirs(); installer.parentFile!!.mkdirs()
+        val asset = ReleaseAsset(name, "https://github.com/langstaffe/MobileSpeak/releases/download/$tag/$name", 100, null, true)
+        val downloads = context.getSystemService(DownloadManager::class.java)
+        var id = -1L
+        try {
+            downloaded.writeBytes(ByteArray(100)); installer.writeBytes(ByteArray(100))
+            @Suppress("DEPRECATION")
+            val completed = try {
+                downloads.addCompletedDownload(name, "Update cleanup fixture", false, "application/vnd.android.package-archive", downloaded.path, downloaded.length(), true)
+            } catch (error: IllegalStateException) {
+                // Older MIUI providers can insert the row before rejecting their service start.
+                downloads.query(DownloadManager.Query().setFilterByStatus(DownloadManager.STATUS_SUCCESSFUL)).use { cursor ->
+                    var found = -1L
+                    while (cursor.moveToNext()) {
+                        if (cursor.getString(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_LOCAL_URI)) == Uri.fromFile(downloaded).toString())
+                            found = maxOf(found, cursor.getLong(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_ID)))
+                    }
+                    if (found < 0) throw error
+                    found
+                }
+            }
+            id = completed
+            assertTrue(id > 0)
+            assertTrue(prefs.edit().putString("download", JSONObject().put("id", id).put("tag", tag).put("name", name).put("url", asset.url).put("size", 100).put("digest", "").toString()).putLong("notified_download", id).commit())
+            val constructor = Class.forName("dev.mobilespeak.mobilespeak.DownloadRecord").getDeclaredConstructor(Long::class.javaPrimitiveType, String::class.java, ReleaseAsset::class.java).apply { isAccessible = true }
+            instrumentation.runOnMainSync {
+                updateField("record").set(AppUpdates, constructor.newInstance(id, tag, asset))
+                updateState.value = originalState.copy(download = DownloadStatus.DOWNLOADING, downloadVersion = tag.removePrefix("v"), installing = false)
+            }
+            block(id, downloaded, installer)
+        } finally {
+            waitForRefresh()
+            if (id > 0) downloads.remove(id)
+            downloaded.delete(); installer.deleteRecursively()
+            val edit = prefs.edit().putString("download", saved)
+            if (notified == -1L) edit.remove("notified_download") else edit.putLong("notified_download", notified)
+            assertTrue(edit.commit())
+            manager.cancel(300)
+            originalNotification?.let { manager.notify(it.tag, it.id, it.notification) }
+            instrumentation.runOnMainSync { updateField("record").set(AppUpdates, originalRecord); updateState.value = originalState }
+        }
     }
 
     private fun node(text: String, clickable: Boolean = true): AccessibilityNodeInfo? {

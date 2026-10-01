@@ -21,6 +21,15 @@ class UpdatePolicyTest {
         assertEquals(R.string.update_no_release, UpdatePolicy.classify(null, version("0.3.0"), emptyList()).message)
         assertEquals(R.string.update_no_apk, UpdatePolicy.classify(release(assets = emptyList()), version("0.3.0"), emptyList()).message)
     }
+    @Test fun onlyInstalledOrOlderDownloadsAreObsolete() {
+        assertTrue(UpdatePolicy.obsoleteDownload("v0.3.2", "0.3.2"))
+        assertTrue(UpdatePolicy.obsoleteDownload("v0.3.1", "0.3.2"))
+        assertTrue(UpdatePolicy.obsoleteDownload("v0.9.0", "0.10.0"))
+        assertFalse(UpdatePolicy.obsoleteDownload("v0.3.3", "0.3.2"))
+        assertFalse(UpdatePolicy.obsoleteDownload("v0.10.0", "0.9.0"))
+        assertFalse(UpdatePolicy.obsoleteDownload("invalid", "0.3.2"))
+        assertFalse(UpdatePolicy.obsoleteDownload("v0.3.2", "invalid"))
+    }
     @Test fun assetsArePinnedUploadedAndChosenByDeviceCompatibility() {
         val universal = asset()
         val arm = asset(suffix = "arm64-v8a")

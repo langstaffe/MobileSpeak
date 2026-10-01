@@ -66,6 +66,9 @@ internal object UpdatePolicy {
     fun signaturesCompatible(installed: Set<String>, incoming: Set<String>, history: Set<String>): Boolean =
         installed.isNotEmpty() && incoming.isNotEmpty() && if (installed.size > 1 || incoming.size > 1) installed == incoming else installed.single() in history
     fun automaticAllowed(today: String, attemptedDay: String?, checking: Boolean) = !checking && today != attemptedDay
+    fun obsoleteDownload(tag: String, installedVersion: String) = AppVersion.parse(tag)?.let { target ->
+        AppVersion.parse(installedVersion)?.let { target <= it }
+    } == true
     fun downloadAllowed(status: DownloadStatus, currentVersion: String = "", targetVersion: String = "") =
         status in listOf(DownloadStatus.NONE, DownloadStatus.FAILED) || (status == DownloadStatus.READY && targetVersion.isNotEmpty() && targetVersion != currentVersion)
     fun classify(release: AppRelease?, installed: AppVersion, abis: List<String>): CheckResult = when {
@@ -208,7 +211,7 @@ internal object AppUpdates {
     fun download(result: CheckResult) {
         val release = result.release ?: return
         val asset = result.asset ?: return
-        if (!UpdatePolicy.downloadAllowed(mutable.value.download, mutable.value.downloadVersion, release.version.toString()) || !UpdatePolicy.validAsset(asset, release.tag)) return
+        if (mutable.value.installing || !UpdatePolicy.downloadAllowed(mutable.value.download, mutable.value.downloadVersion, release.version.toString()) || !UpdatePolicy.validAsset(asset, release.tag)) return
         val previous = record
         record = null
         dismissPrompt()
@@ -216,7 +219,7 @@ internal object AppUpdates {
         scope.launch {
             try {
                 record = withContext(Dispatchers.IO) {
-                    previous?.let { downloads.remove(it.id) }
+                    previous?.let(::removeDownloadFiles)
                     val file = downloadFile(asset.name)
                     if (file.exists() && !file.delete()) throw UpdateFailure(R.string.update_storage_failed)
                     if (!file.parentFile!!.isDirectory && !file.parentFile!!.mkdirs()) throw UpdateFailure(R.string.update_storage_failed)
@@ -228,7 +231,7 @@ internal object AppUpdates {
                         .setDestinationUri(Uri.fromFile(file))
                     val id = downloads.enqueue(request)
                     val value = DownloadRecord(id, release.tag, asset)
-                    if (!preferences.edit().putString("download", JSONObject().put("id", id).put("tag", release.tag).put("name", asset.name).put("url", asset.url).put("size", asset.size).put("digest", asset.digest ?: "").toString()).commit()) {
+                    if (!preferences.edit().remove("notified_download").putString("download", JSONObject().put("id", id).put("tag", release.tag).put("name", asset.name).put("url", asset.url).put("size", asset.size).put("digest", asset.digest ?: "").toString()).commit()) {
                         downloads.remove(id)
                         throw UpdateFailure(R.string.update_storage_failed)
                     }
@@ -236,6 +239,7 @@ internal object AppUpdates {
                 }
                 refreshDownload() // Handles an unusually fast completion before receiver registration of the ID.
             } catch (error: Exception) {
+                if (record == null) record = previous
                 mutable.value = mutable.value.copy(download = DownloadStatus.FAILED, downloadError = (error as? UpdateFailure)?.messageId ?: R.string.update_download_failed)
             }
         }
@@ -244,15 +248,29 @@ internal object AppUpdates {
         val directory = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: throw UpdateFailure(R.string.update_storage_failed)
         return File(File(directory, "updates"), name)
     }
+    private fun removeDownloadFiles(value: DownloadRecord) {
+        downloads.remove(value.id)
+        for (file in listOf(downloadFile(value.asset.name), File(context.cacheDir, "updates/${value.asset.name}"))) {
+            if (file.exists() && !file.delete()) throw UpdateFailure(R.string.update_storage_failed)
+        }
+        context.getSystemService(NotificationManager::class.java).cancel(300)
+    }
     fun refreshDownload() {
         val value = record ?: return
         if (refreshing) { refreshRequested = true; return }
+        val obsolete = UpdatePolicy.obsoleteDownload(value.tag, installedVersion())
         refreshing = true
         refreshRequested = false
+        // Block replacement/installation while removing a completed upgrade.
+        if (obsolete) mutable.value = mutable.value.copy(download = DownloadStatus.VERIFYING, detail = "")
         scope.launch {
             val result = withContext(Dispatchers.IO) {
                 try {
-                    downloads.query(DownloadManager.Query().setFilterById(value.id)).use { cursor ->
+                    if (obsolete) {
+                        removeDownloadFiles(value)
+                        if (!preferences.edit().remove("download").remove("notified_download").commit()) throw UpdateFailure(R.string.update_storage_failed)
+                        DownloadStatus.NONE
+                    } else downloads.query(DownloadManager.Query().setFilterById(value.id)).use { cursor ->
                         if (!cursor.moveToFirst()) throw UpdateFailure(R.string.update_task_missing)
                         val status = UpdatePolicy.downloadStatus(cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS)))
                         if (status == DownloadStatus.FAILED) {
@@ -267,6 +285,10 @@ internal object AppUpdates {
             }
             if (record?.id == value.id) {
                 mutable.value = when (result) {
+                    DownloadStatus.NONE -> {
+                        record = null
+                        mutable.value.copy(download = DownloadStatus.NONE, downloadVersion = "", downloadError = R.string.update_download_failed, detail = "", installing = false)
+                    }
                     is DownloadStatus -> mutable.value.copy(download = result, downloadVersion = value.tag.removePrefix("v"), detail = "")
                     else -> mutable.value.copy(download = DownloadStatus.FAILED, downloadError = (result as? UpdateFailure)?.messageId ?: R.string.update_download_failed, detail = (result as? UpdateFailure)?.diagnostic.orEmpty())
                 }
@@ -368,8 +390,8 @@ internal object AppUpdates {
                     activity.startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(uri, "application/vnd.android.package-archive").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
                 }
             } catch (error: Exception) {
-                mutable.value = mutable.value.copy(download = DownloadStatus.FAILED, downloadError = (error as? UpdateFailure)?.messageId ?: R.string.update_install_failed)
-            } finally { mutable.value = mutable.value.copy(installing = false) }
+                if (record?.id == value.id) mutable.value = mutable.value.copy(download = DownloadStatus.FAILED, downloadError = (error as? UpdateFailure)?.messageId ?: R.string.update_install_failed)
+            } finally { if (record?.id == value.id) mutable.value = mutable.value.copy(installing = false) }
         }
     }
     private fun java.io.InputStream.readBytesLimited(limit: Int): ByteArray {
