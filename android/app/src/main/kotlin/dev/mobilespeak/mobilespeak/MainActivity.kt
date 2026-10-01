@@ -835,7 +835,8 @@ private fun toggleHapticType(enabled: Boolean) = when {
 private fun VoiceBar(ui: SessionUiState, requestPermissions: () -> Unit) {
     val haptic = LocalHapticFeedback.current
     val connected = ui.snapshot.status == "connected"
-    val channel = ui.snapshot.clients.firstOrNull { it.id == ui.snapshot.ownClient }?.channel
+    val ownClient = ui.snapshot.clients.firstOrNull { it.id == ui.snapshot.ownClient }
+    val channel = ownClient?.channel
     val muted = ui.microphoneMuted || ui.deafened
     Row(Modifier.fillMaxWidth().background(Palette.bottom).padding(start = 12.dp, end = 8.dp).heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Icon(UiIcons.Wave, null, Modifier.size(18.dp), tint = if (connected) Palette.green else Palette.muted)
@@ -845,7 +846,7 @@ private fun VoiceBar(ui: SessionUiState, requestPermissions: () -> Unit) {
             if (ui.microphoneMuted && !ClientSession.microphonePermission) requestPermissions()
             else ClientSession.setAudio(inputMuted = !ui.microphoneMuted)
         }, enabled = !ui.deafened, modifier = Modifier.size(44.dp, 48.dp)) {
-            Icon(if (muted) UiIcons.MicOff else UiIcons.Mic, stringResource(if (muted) R.string.voice_enable_microphone else R.string.voice_mute), Modifier.size(20.dp), tint = if (muted) Palette.muted else Palette.green)
+            Icon(if (muted) UiIcons.MicOff else UiIcons.Mic, stringResource(if (muted) R.string.voice_enable_microphone else R.string.voice_mute), Modifier.size(20.dp), tint = if (muted) Palette.muted else if (connected && ownClient?.speaking == true) Palette.green else Palette.text)
         }
         IconButton(onClick = {
             haptic.performHapticFeedback(toggleHapticType(ui.deafened))

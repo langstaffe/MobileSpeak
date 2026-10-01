@@ -864,7 +864,8 @@ struct HomeView: View {
         }
     }
     private var voiceBar: some View {
-        HStack(spacing: 8) {
+        let speaking = client.connected && client.state.clients.first { $0.id == client.state.ownClient }?.speaking == true
+        return HStack(spacing: 8) {
             AppIcon(name: "waveform").foregroundStyle(client.connected ? Palette.green : Palette.muted)
             Text(client.connected ? L10n.format("status_connected_to_channel", client.state.channels.first { $0.id == client.currentChannel }?.name ?? "") : client.busy ? L10n.string("status_connecting") : L10n.string("status_disconnected")).font(.system(size: 12, weight: .semibold)).lineLimit(1)
             Spacer(minLength: 0)
@@ -872,7 +873,7 @@ struct HomeView: View {
                 UISelectionFeedbackGenerator().selectionChanged()
                 Task { await client.setAudio(input: !client.microphoneMuted) }
             } label: {
-                AppIcon(name: client.muted ? "mic-off" : "mic-on").foregroundStyle(client.muted ? Palette.muted : Palette.green).frame(width: 44, height: 48)
+                AppIcon(name: client.muted ? "mic-off" : "mic-on").foregroundStyle(client.muted ? Palette.muted : speaking ? Palette.green : Color(hex: 0xF2F3F5)).frame(width: 44, height: 48)
             }.accessibilityLabel(L10n.string(client.microphoneMuted ? "voice_enable_microphone" : "voice_mute")).disabled(client.audioBusy || client.deafened)
             Button {
                 UISelectionFeedbackGenerator().selectionChanged()
