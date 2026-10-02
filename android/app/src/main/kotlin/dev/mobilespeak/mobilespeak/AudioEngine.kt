@@ -37,6 +37,7 @@ internal class AudioEngine(private val context: Context) {
     private val streamLock = Any()
     @Suppress("PLATFORM_CLASS_MAPPED_TO_KOTLIN")
     private val signal = Object()
+    private var signalSequence = 0L // Read/changed only under signal, including the wait predicate.
     private val capture = ShortArray(FRAME_SAMPLES)
 
     @Volatile private var connected = false
@@ -45,6 +46,7 @@ internal class AudioEngine(private val context: Context) {
     @Volatile private var connectionVersion = 0L
     @Volatile private var captureVersion = 0L
     @Volatile private var outputDeviceId = 0
+    @Volatile private var outputHandle = 0L // Only the playback management thread opens/closes it.
     @Volatile private var outputChannels = 0
     @Volatile private var outputRevision = 0L
     @Volatile private var record: AudioRecord? = null
@@ -70,7 +72,10 @@ internal class AudioEngine(private val context: Context) {
     private var echoCanceler: AcousticEchoCanceler? = null
     private var noiseSuppressor: NoiseSuppressor? = null
     private val routingListener = AudioRouting.OnRoutingChangedListener { routing ->
-        if (running.get() && connected && routing === record) logActualRoute(routing, "device callback")
+        if (running.get() && connected && routing === record) {
+            logActualRoute(routing, "device callback")
+            wakeWorkers()
+        }
     }
 
     private val deviceCallback = object : AudioDeviceCallback() {
@@ -96,8 +101,9 @@ internal class AudioEngine(private val context: Context) {
         val nextDeafened = ui.deafened
         val nextCaptureRequested = allowCapture && ClientSession.microphonePermission && !ui.microphoneMuted
         val connectionChanged = connected != nextConnected
+        val policyChanged = connectionChanged || deafened != nextDeafened || captureRequested != nextCaptureRequested
         if (connectionChanged) connectionVersion++
-        if (connected != nextConnected || deafened != nextDeafened || captureRequested != nextCaptureRequested) {
+        if (policyChanged) {
             Log.i(TAG, "Audio policy connected=$nextConnected listening=${!nextDeafened} capture=$nextCaptureRequested")
         }
         val captureStopped = captureRequested && !nextCaptureRequested
@@ -115,7 +121,7 @@ internal class AudioEngine(private val context: Context) {
         if (shouldReapplyCommunicationRoute(nextConnected, connectionChanged, reapplyRoute)) {
             refreshCommunicationRoute(if (connectionChanged) "connected" else "app foreground")
         }
-        wakeWorkers()
+        if (policyChanged || reapplyRoute) wakeWorkers()
     }
 
     fun stop() {
@@ -139,44 +145,49 @@ internal class AudioEngine(private val context: Context) {
     }
 
     private fun playbackLoop() {
-        var output = 0L
         var seenConnection = -1L
         var seenRevision = -1L
         var outputCommunication = false
+        val errorNotification = Runnable(::wakeWorkers)
         fun closeOutput() {
+            val output = outputHandle
+            outputHandle = 0L
             if (output != 0L) NativeOutput.close(output)
-            output = 0L
             outputDeviceId = 0
             outputChannels = 0
         }
         try {
             while (running.get()) {
                 try {
+                    // Capture before checking state so a notification during open/check cannot be lost.
+                    val observedSignal = synchronized(signal) { signalSequence }
+                    val failed = outputHandle != 0L && NativeOutput.failed(outputHandle)
+                    if (failed) Log.w(TAG, "Oboe error received; rebuilding on playback manager")
                     if (seenConnection != connectionVersion || seenRevision != outputRevision ||
                         outputChannels != playbackChannels() || outputCommunication != communicationMode || !shouldPlay() ||
-                        (output != 0L && NativeOutput.failed(output))) {
+                        failed) {
                         closeOutput()
                         seenConnection = connectionVersion
                         seenRevision = outputRevision
                     }
                     if (!shouldPlay()) {
-                        await { shouldPlay() }
+                        if (Build.VERSION.SDK_INT < 31) confirmLegacyStreams()
+                        await { signalSequence != observedSignal }
                         continue
                     }
-                    if (output == 0L) {
+                    if (outputHandle == 0L) {
                         val channels = playbackChannels()
                         val communication = communicationMode
-                        output = ClientSession.openOutput(channels, communication)
-                        check(output != 0L) { "Oboe output unavailable" }
+                        outputHandle = ClientSession.openOutput(channels, communication, errorNotification)
+                        check(outputHandle != 0L) { "Oboe output unavailable" }
                         outputChannels = channels
                         outputCommunication = communication
                         Log.i(TAG, "Oboe started usage=${if (communication) "voice-communication" else "media"} channels=$channels sampleRate=$SAMPLE_RATE")
                     }
-                    outputDeviceId = NativeOutput.deviceId(output)
+                    outputDeviceId = NativeOutput.deviceId(outputHandle)
                     if (Build.VERSION.SDK_INT < 31) confirmLegacyStreams()
-                    // Management only: callbacks consume PCM. Check stream errors even
-                    // when Android delivers no device notification after a HAL failure.
-                    awaitRetry(100)
+                    // PCM remains callback-driven; the manager sleeps until policy, route, error or stop.
+                    await { signalSequence != observedSignal }
                 } catch (_: InterruptedException) {
                     // stop() wakes the management thread, whose finally closes Oboe.
                 } catch (error: Throwable) {
@@ -324,6 +335,7 @@ internal class AudioEngine(private val context: Context) {
                 "nsEnabled=${noiseSuppressor?.enabled == true}",
         )
         logActualRoute(input, "started")
+        wakeWorkers()
         input
     }
 
@@ -379,6 +391,7 @@ internal class AudioEngine(private val context: Context) {
         if (Build.VERSION.SDK_INT < 31 || !running.get() || !connected || !communicationMode) return
         // The queued callback's device can already be obsolete. Query the actual current selection.
         observeModernRoute("communication callback")
+        wakeWorkers()
     }
 
     @Synchronized
@@ -493,6 +506,7 @@ internal class AudioEngine(private val context: Context) {
                             routeRequest.devicesReconnected(ids)
                             applyCommunicationRoute("headset profile connected")
                         }
+                        wakeWorkers()
                         return
                     }
                     // registerReceiver already returned the initial state. Its queued sticky delivery may be older than a new request.
@@ -504,6 +518,7 @@ internal class AudioEngine(private val context: Context) {
                     val state = intent.getIntExtra(AudioManager.EXTRA_SCO_AUDIO_STATE, AudioManager.SCO_AUDIO_STATE_ERROR)
                     val previous = scoState
                     scoState = state
+                    wakeWorkers()
                     if (previous != state) Log.i(TAG, "SCO state=$state previous=$previous owned=$legacyScoOwned session=$session")
                     if (!legacyScoOwned) {
                         if (state == AudioManager.SCO_AUDIO_STATE_DISCONNECTED) applyCommunicationRoute("SCO released")
@@ -577,7 +592,10 @@ internal class AudioEngine(private val context: Context) {
         routeTimeout = Runnable {
             synchronized(this) {
                 if (running.get() && connected && communicationMode && routeSession == session && routeRequest.isPending(token)) {
-                    failRoute(token, "communication route timed out")
+                    // Oboe has no standalone routed-device callback. Check the latest stream
+                    // observations once more, including listen-only SCO, before the existing timeout.
+                    if (Build.VERSION.SDK_INT < 31) confirmLegacyStreams()
+                    if (routeRequest.isPending(token)) failRoute(token, "communication route timed out")
                 }
             }
         }.also { routeHandler.postDelayed(it, ROUTE_TIMEOUT_MS) }
@@ -661,7 +679,7 @@ internal class AudioEngine(private val context: Context) {
         if (Build.VERSION.SDK_INT < 31) confirmLegacyStreams()
     }
 
-    private fun wakeWorkers() = synchronized(signal) { signal.notifyAll() }
+    private fun wakeWorkers() = synchronized(signal) { signalSequence++; signal.notifyAll() }
 
     private companion object {
         const val TAG = "MobileSpeakAudio"

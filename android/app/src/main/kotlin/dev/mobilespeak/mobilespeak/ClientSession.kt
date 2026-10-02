@@ -435,7 +435,8 @@ internal object ClientSession {
     fun captureStopped() { if (initialized) send(JSONObject().put("type", "capture_stopped")) }
 
     fun capture(samples: ShortArray): Int = NativeCore.capture(handle, samples)
-    fun openOutput(channels: Int, communication: Boolean): Long = NativeOutput.open(handle, channels, communication)
+    fun openOutput(channels: Int, communication: Boolean, notification: Runnable): Long =
+        NativeOutput.open(handle, channels, communication, notification)
     fun shouldRunService() = acceptingConnection || state.value.snapshot.status in setOf("connected", "connecting", "reconnecting")
 
     private fun send(command: JSONObject): Boolean {

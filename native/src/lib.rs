@@ -1264,6 +1264,7 @@ async fn session(
     let mut operations = HashMap::<MessageHandle, PendingOperation>::new();
     let mut avatar = avatar::AvatarSync::default();
     avatar.ready();
+    avatar.observe(avatar_store, out);
     let (avatar_tx, mut avatar_rx) = mpsc::unbounded_channel::<avatar::Completion>();
     let mut media_active = HashSet::<String>::new();
     let mut media_failed = HashSet::<String>::new();
@@ -1277,9 +1278,11 @@ async fn session(
     let deadline = tokio::time::sleep(Duration::from_secs(30));
     tokio::pin!(deadline);
     let mut voice_timer: Option<std::pin::Pin<Box<tokio::time::Sleep>>> = None;
+    let mut avatar_timer: Option<std::pin::Pin<Box<tokio::time::Sleep>>> = None;
     let mut playback_revision = playback.revision.load(Ordering::Acquire);
     let mut refill_byte = [0u8];
     let mut armed_deadline = None;
+    let mut armed_avatar_deadline = None;
     let mut playback_log_at = Instant::now();
     let mut playback_counts = playback.diagnostics();
     let mut last_refill = Instant::now();
@@ -1303,8 +1306,28 @@ async fn session(
             }
             armed_deadline = voice_deadline;
         }
-        avatar.observe(avatar_store, out);
+        let avatar_deadline = avatar.deadline();
+        if avatar_deadline != armed_avatar_deadline {
+            match avatar_deadline {
+                Some(at) => match avatar_timer.as_mut() {
+                    Some(timer) => timer.as_mut().reset(at),
+                    None => avatar_timer = Some(Box::pin(tokio::time::sleep_until(at))),
+                },
+                None => avatar_timer = None,
+            }
+            armed_avatar_deadline = avatar_deadline;
+        }
         tokio::select! {
+            _ = async {
+                match avatar_timer.as_mut() {
+                    Some(timer) => timer.as_mut().await,
+                    None => std::future::pending::<()>().await,
+                }
+            } => {
+                avatar.observe(avatar_store, out);
+                avatar.expire(out);
+                if subscribed { avatar.check(&mut con, storage.as_deref(), &avatar_tx, &mut operations, out); }
+            },
             _ = async {
                 match voice_timer.as_mut() {
                     Some(timer) => timer.as_mut().await,
@@ -1350,6 +1373,7 @@ async fn session(
             _ = &mut deadline, if first_connection => return Err("Connection timed out after 30 seconds".into()),
             event = async { con.events().next().await } => match event {
                 Some(Ok(StreamItem::BookEvents(events))) => {
+                    avatar.observe(avatar_store, out);
                     let channel = con.get_state().ok().and_then(|state| state.clients.get(&state.own_client).map(|me| (me.channel, state.channels.get(&me.channel).map(|channel| channel.codec))));
                     if channel != voice_channel {
                         audio.reset(); receive_traces.clear(); playback.clear(); playback.request();
@@ -1467,38 +1491,49 @@ async fn session(
                         report_code(out, code, Some(error.to_string()));
                     },
                     Some(PendingOperation::Avatar(generation)) => {
+                        avatar.observe(avatar_store, out);
                         avatar.updated(generation, result.map_err(|error| format!("{:?} (0x{:04x}) missing_permission={:?}", error.error, error.error as u32, error.missing_permission)), out);
                         if subscribed { avatar.check(&mut con, storage.as_deref(), &avatar_tx, &mut operations, out); }
                     },
                     Some(PendingOperation::AvatarDrain(token)) => {
+                        avatar.observe(avatar_store, out);
                         avatar.transfer_list_result(token, result.map_err(|e| format!("{:?} (0x{:04x}) missing_permission={:?}", e.error, e.error as u32, e.missing_permission)), &mut con, &mut operations, out);
                         if subscribed { avatar.check(&mut con, storage.as_deref(), &avatar_tx, &mut operations, out); }
                     },
                     Some(PendingOperation::AvatarStop(token)) => {
+                        avatar.observe(avatar_store, out);
                         avatar.transfer_stopped(token, result.map_err(|e| format!("{:?} (0x{:04x}) missing_permission={:?}", e.error, e.error as u32, e.missing_permission)), out);
                         if subscribed { avatar.check(&mut con, storage.as_deref(), &avatar_tx, &mut operations, out); }
                     },
                     Some(PendingOperation::AvatarDelete(token)) => {
+                        avatar.observe(avatar_store, out);
                         avatar.deleted(token, result, out);
                         if subscribed { avatar.check(&mut con, storage.as_deref(), &avatar_tx, &mut operations, out); }
                     },
                     Some(PendingOperation::AvatarInfo(token)) => {
+                        avatar.observe(avatar_store, out);
                         avatar.info_result(token, result.map_err(|error| format!("{:?} (0x{:04x}) missing_permission={:?}", error.error, error.error as u32, error.missing_permission)), &mut con, out);
                         if subscribed { avatar.check(&mut con, storage.as_deref(), &avatar_tx, &mut operations, out); }
                     },
                     None => {},
                 },
                 Some(Ok(StreamItem::MessageEvent(msg))) => {
+                    avatar.observe(avatar_store, out);
                     avatar.info(&msg, &mut con, out);
                     if subscribed { avatar.check(&mut con, storage.as_deref(), &avatar_tx, &mut operations, out); }
                 },
                 Some(Ok(StreamItem::FileUpload(handle, transfer))) => {
+                    avatar.observe(avatar_store, out);
                     avatar.file_upload(handle, transfer, &avatar_tx, out);
                     if subscribed { avatar.check(&mut con, storage.as_deref(), &avatar_tx, &mut operations, out); }
                 },
                 Some(Ok(StreamItem::FileDownload(handle, download))) => {
+                    avatar.observe(avatar_store, out);
                     let mut download = Some(download);
-                    if avatar.file_download(handle, &mut download, &avatar_tx, out) { continue; }
+                    if avatar.file_download(handle, &mut download, &avatar_tx, out) {
+                        if subscribed { avatar.check(&mut con, storage.as_deref(), &avatar_tx, &mut operations, out); }
+                        continue;
+                    }
                     let download = download.unwrap();
                     if let Some(request) = transfers.remove(&handle) {
                         let tx = media_tx.clone();
@@ -1523,6 +1558,7 @@ async fn session(
                     }
                 },
                 Some(Ok(StreamItem::FiletransferFailed(handle, error))) => {
+                    avatar.observe(avatar_store, out);
                     if avatar.file_failed(handle, error, out) {
                         avatar.finish_upload(&mut con, &mut operations, out);
                         if subscribed { avatar.check(&mut con, storage.as_deref(), &avatar_tx, &mut operations, out); }
@@ -1535,6 +1571,7 @@ async fn session(
                     schedule_media(&mut con, storage.as_deref(), &mut media_active, &mut media_failed, &mut transfers);
                 },
                 Some(Ok(StreamItem::DisconnectedTemporarily(_))) => {
+                    avatar.observe(avatar_store, out);
                     if chats.fail_pending("message_unconfirmed_after_reconnect") {
                         if chat_writable { persist_chat(persist_tx, storage.as_deref(), current_server.as_deref(), &chats); }
                         publish_chat(out, &chats, storage.as_deref(), current_server.as_deref());
@@ -1565,6 +1602,7 @@ async fn session(
                 schedule_media(&mut con, storage.as_deref(), &mut media_active, &mut media_failed, &mut transfers);
             },
             Some(completion) = avatar_rx.recv() => {
+                avatar.observe(avatar_store, out);
                 avatar.completed(completion, &mut con, &mut operations, out);
                 if subscribed { avatar.check(&mut con, storage.as_deref(), &avatar_tx, &mut operations, out); }
             },
@@ -1749,8 +1787,6 @@ async fn session(
                     max_refill_gap_ms = 0; max_refill_work_us = 0;
                     received_packets = 0; rejected_packets = 0; ended_queues = 0; last_packet_error.clear();
                 }
-                avatar.tick(out);
-                if subscribed { avatar.check(&mut con, storage.as_deref(), &avatar_tx, &mut operations, out); }
             }
         }
     }

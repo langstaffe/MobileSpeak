@@ -1232,19 +1232,20 @@ impl AvatarSync {
         }
     }
 
-    pub fn tick(&mut self, out: &Arc<Mutex<Output>>) {
-        if self
-            .query
-            .as_ref()
-            .is_some_and(|q| tokio::time::Instant::now() >= q.deadline)
-        {
+    pub fn deadline(&self) -> Option<tokio::time::Instant> {
+        self.deadline
+            .into_iter()
+            .chain(self.query.as_ref().map(|query| query.deadline))
+            .min()
+    }
+
+    pub fn expire(&mut self, out: &Arc<Mutex<Output>>) {
+        let now = tokio::time::Instant::now();
+        if self.query.as_ref().is_some_and(|q| now >= q.deadline) {
             self.query = None;
             self.query_timed_out = true;
         }
-        if self
-            .deadline
-            .is_some_and(|deadline| tokio::time::Instant::now() >= deadline)
-        {
+        if self.deadline.is_some_and(|deadline| now >= deadline) {
             self.failed(out, "avatar_timeout: stage deadline exceeded".into());
         }
     }
@@ -1621,6 +1622,7 @@ mod tests {
     fn timeout_names_every_actual_stage_and_stops_worker() {
         for stage in [
             Stage::Load,
+            Stage::Own,
             Stage::Connect,
             Stage::Write,
             Stage::Update,
@@ -1634,7 +1636,7 @@ mod tests {
         ] {
             let (mut sync, out) = setup(stage);
             sync.deadline = Some(tokio::time::Instant::now());
-            sync.tick(&out);
+            sync.expire(&out);
             assert_eq!(last_status(&out), "failed");
             assert!(out.lock().unwrap().events.back().unwrap()["detail"]
                 .as_str()
@@ -1644,6 +1646,174 @@ mod tests {
             assert!(sync.deadline.is_none());
             assert!(!sync.pending);
         }
+    }
+
+    #[tokio::test]
+    async fn one_shot_timeout_resets_and_expires_the_earliest_outstanding_deadline() {
+        let (mut sync, out) = setup(Stage::Write);
+        sync.enter(Stage::Write);
+        assert!(sync.deadline().unwrap() > tokio::time::Instant::now() + Duration::from_secs(29));
+        let old = sync.token;
+        let mut timer = Box::pin(tokio::time::sleep_until(tokio::time::Instant::now()));
+        timer.as_mut().await;
+        sync.changed(&out);
+        // A wake from the previous phase cannot expire the newly entered drain phase.
+        sync.expire(&out);
+        assert_eq!(sync.stage, Stage::Drain);
+        assert!(!sync.blocked);
+        timer.as_mut().reset(sync.deadline().unwrap());
+        assert!(
+            tokio::time::timeout(Duration::from_millis(10), timer.as_mut())
+                .await
+                .is_err()
+        );
+
+        sync.query = Some(InfoQuery {
+            token: old,
+            uid: "self".into(),
+            hash: None,
+            result: None,
+            deadline: tokio::time::Instant::now() + Duration::from_millis(5),
+        });
+        assert_eq!(sync.deadline(), sync.query.as_ref().map(|q| q.deadline));
+        timer.as_mut().reset(sync.deadline().unwrap());
+        tokio::time::timeout(Duration::from_secs(1), timer.as_mut())
+            .await
+            .unwrap();
+        sync.expire(&out);
+        assert!(sync.query.is_none() && sync.query_timed_out);
+        assert_eq!(sync.stage, Stage::Drain);
+        assert_eq!(sync.deadline(), sync.deadline);
+
+        sync.deadline = Some(tokio::time::Instant::now() + Duration::from_millis(5));
+        timer.as_mut().reset(sync.deadline().unwrap());
+        tokio::time::timeout(Duration::from_secs(1), timer.as_mut())
+            .await
+            .unwrap();
+        sync.expire(&out);
+        assert!(sync.blocked && !sync.pending && sync.worker.is_none());
+        assert_eq!(sync.deadline(), None);
+        assert_eq!(last_status(&out), "failed");
+    }
+
+    #[tokio::test]
+    async fn completed_or_failed_stage_retains_only_the_old_query_timer_until_drained() {
+        for success in [true, false] {
+            let (mut sync, out) = setup(Stage::Verify);
+            sync.enter(Stage::Verify);
+            let old = sync.token;
+            sync.query = Some(InfoQuery {
+                token: old,
+                uid: "self".into(),
+                hash: None,
+                result: None,
+                deadline: tokio::time::Instant::now() + Duration::from_millis(5),
+            });
+            sync.verified(
+                old,
+                FiletransferHandle(8),
+                if success {
+                    Ok(())
+                } else {
+                    Err("invalid bytes".into())
+                },
+                &out,
+            );
+            assert!(sync.deadline.is_none());
+            assert_eq!(sync.deadline(), sync.query.as_ref().map(|q| q.deadline));
+            tokio::time::sleep_until(sync.deadline().unwrap()).await;
+            sync.expire(&out);
+            assert!(sync.query_timed_out);
+            assert_eq!(sync.deadline(), None);
+            let status = last_status(&out);
+            let mut con = Connection::build("localhost").connect().unwrap();
+            sync.info_result(old, Ok(()), &mut con, &out);
+            assert_eq!(last_status(&out), status);
+            sync.enter(Stage::Own);
+            sync.disconnected();
+            sync.info_result(old, Ok(()), &mut con, &out);
+            assert_eq!(sync.deadline(), None);
+            assert!(!sync.query_timed_out);
+        }
+    }
+
+    #[tokio::test]
+    async fn query_timeout_event_advances_to_failure_and_blocks_uncorrelated_retry() {
+        let (mut sync, out) = setup(Stage::Hash);
+        sync.enter(Stage::Hash);
+        let token = sync.token;
+        sync.query = Some(InfoQuery {
+            token,
+            uid: "self".into(),
+            hash: None,
+            result: None,
+            deadline: tokio::time::Instant::now() + Duration::from_millis(5),
+        });
+        tokio::time::sleep_until(sync.deadline().unwrap()).await;
+        sync.expire(&out);
+        assert!(sync.upload.is_some());
+        let mut con = Connection::build("localhost").connect().unwrap();
+        let (tx, _rx) = mpsc::unbounded_channel();
+        sync.check(&mut con, None, &tx, &mut HashMap::new(), &out);
+        assert_eq!(last_status(&out), "failed");
+        assert!(sync.upload.is_none() && sync.query_timed_out);
+        assert_eq!(sync.deadline(), None);
+        let events = out.lock().unwrap().events.len();
+        sync.info_result(token, Ok(()), &mut con, &out);
+        sync.request_info(&mut con, &mut HashMap::new(), &out);
+        assert!(sync.query.is_none());
+        assert_eq!(out.lock().unwrap().events.len(), events + 1);
+    }
+
+    #[tokio::test]
+    async fn save_and_completion_events_load_the_latest_avatar_and_reconnect_without_ticks() {
+        let (root, store, out) = storage();
+        stage_image(&root, "a", 1);
+        stage_image(&root, "b", 2);
+        persist(&store, 0, Some("a"), &out).unwrap();
+        let mut sync = AvatarSync::default();
+        sync.ready();
+        sync.observe(&store, &out);
+        let mut con = Connection::build("localhost").connect().unwrap();
+        let mut operations = HashMap::new();
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        sync.check(&mut con, Some(&root), &tx, &mut operations, &out);
+        let old_completion = tokio::time::timeout(Duration::from_secs(1), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        // The save notification and old completion can be ready simultaneously.
+        persist(&store, 0, Some("b"), &out).unwrap();
+        sync.observe(&store, &out);
+        sync.check(&mut con, Some(&root), &tx, &mut operations, &out);
+        sync.completed(old_completion, &mut con, &mut operations, &out);
+        assert!(sync.worker.is_some());
+        assert_eq!(sync.stage, Stage::Load);
+        let latest = tokio::time::timeout(Duration::from_secs(1), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        sync.completed(latest, &mut con, &mut operations, &out);
+        sync.check(&mut con, Some(&root), &tx, &mut operations, &out);
+        assert_eq!(sync.stage, Stage::Own);
+        assert_eq!(
+            sync.choices,
+            match candidates(&root).unwrap() {
+                Desired::Image(v) => Some(v),
+                _ => panic!(),
+            }
+        );
+        assert!(sync.disconnected());
+        assert_eq!(sync.deadline(), None);
+        sync.check(&mut con, Some(&root), &tx, &mut operations, &out);
+        let reloaded = tokio::time::timeout(Duration::from_secs(1), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        sync.completed(reloaded, &mut con, &mut operations, &out);
+        assert_eq!(sync.stage, Stage::Own);
+        assert!(sync.choices.is_some());
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -1682,7 +1852,7 @@ mod tests {
         });
         sync.changed(&out);
         assert!(sync.query.is_some());
-        sync.tick(&out);
+        sync.expire(&out);
         assert!(sync.query_timed_out);
         assert_eq!(last_status(&out), "idle");
     }
@@ -1745,7 +1915,7 @@ mod tests {
                 sync.changed(&out);
             } else {
                 sync.deadline = Some(tokio::time::Instant::now());
-                sync.tick(&out);
+                sync.expire(&out);
             }
             let mut bytes = Vec::new();
             tokio::time::timeout(Duration::from_secs(2), server.read_to_end(&mut bytes))
@@ -1951,7 +2121,7 @@ mod tests {
         sync.deleting = Some(sync.token);
         sync.clear = true;
         sync.deadline = Some(tokio::time::Instant::now());
-        sync.tick(&out);
+        sync.expire(&out);
         assert_eq!(last_status(&out), "clear_failed");
         assert!(sync.blocked);
         assert!(out.lock().unwrap().events.back().unwrap()["detail"]

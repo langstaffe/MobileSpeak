@@ -10,12 +10,32 @@ void ts_playback_active(const void *, bool);
 size_t ts_render(const void *, float *, float *, size_t, size_t);
 }
 
+struct AttachedEnv {
+    JavaVM *vm;
+    JNIEnv *env = nullptr;
+    bool attached = false;
+    explicit AttachedEnv(JavaVM *vm) : vm(vm) {
+        if (vm->GetEnv(reinterpret_cast<void **>(&env), JNI_VERSION_1_6) == JNI_EDETACHED) {
+            attached = vm->AttachCurrentThread(&env, nullptr) == JNI_OK;
+        }
+    }
+    ~AttachedEnv() { if (attached) vm->DetachCurrentThread(); }
+};
+
 struct Callback final : oboe::AudioStreamDataCallback, oboe::AudioStreamErrorCallback {
     const void *pcm;
     const int channels;
+    JavaVM *vm;
+    jobject wake;
+    jmethodID run;
     std::atomic<bool> failed{false};
-    Callback(void *core, int channels) : pcm(ts_playback_acquire(core)), channels(channels) {}
-    ~Callback() override { ts_playback_release(pcm); }
+    Callback(void *core, int channels, JavaVM *vm, jobject wake, jmethodID run)
+        : pcm(ts_playback_acquire(core)), channels(channels), vm(vm), wake(wake), run(run) {}
+    ~Callback() override {
+        AttachedEnv attached(vm);
+        if (attached.env) attached.env->DeleteGlobalRef(wake);
+        ts_playback_release(pcm);
+    }
     oboe::DataCallbackResult onAudioReady(oboe::AudioStream *, void *data, int32_t frames) override {
         if (frames <= 0) return oboe::DataCallbackResult::Continue;
         auto *samples = static_cast<float *>(data);
@@ -23,8 +43,17 @@ struct Callback final : oboe::AudioStreamDataCallback, oboe::AudioStreamErrorCal
         return oboe::DataCallbackResult::Continue;
     }
     bool onError(oboe::AudioStream *, oboe::Result) override {
-        failed.store(true, std::memory_order_release);
-        // Kotlin's stream owner closes/rebuilds on its ordinary management thread.
+        if (!failed.exchange(true, std::memory_order_acq_rel)) {
+            AttachedEnv attached(vm);
+            if (attached.env) {
+                attached.env->CallVoidMethod(wake, run);
+                if (attached.env->ExceptionCheck()) {
+                    attached.env->ExceptionDescribe();
+                    attached.env->ExceptionClear();
+                }
+            }
+        }
+        // Kotlin's owner closes/rebuilds; no stream lifetime work on this error thread.
         return true;
     }
 };
@@ -41,10 +70,20 @@ struct Output {
 
 extern "C" JNIEXPORT jlong JNICALL
 Java_dev_mobilespeak_mobilespeak_NativeOutput_open(JNIEnv *env, jobject, jlong core, jint channels,
-                                                jboolean communication) {
-    if (!core || (channels != 1 && channels != 2)) return 0;
+                                                jboolean communication, jobject notification) {
+    if (!core || (channels != 1 && channels != 2) || !notification) return 0;
+    JavaVM *vm = nullptr;
+    if (env->GetJavaVM(&vm) != JNI_OK) return 0;
+    const jclass notificationClass = env->GetObjectClass(notification);
+    if (!notificationClass) return 0;
+    const jmethodID run = env->GetMethodID(notificationClass, "run", "()V");
+    env->DeleteLocalRef(notificationClass);
+    if (!run) return 0;
+    const jobject wake = env->NewGlobalRef(notification);
+    if (!wake) return 0;
     auto output = std::make_unique<Output>();
-    output->callback = std::make_shared<Callback>(reinterpret_cast<void *>(core), channels);
+    // openStream(shared_ptr) also keeps this callback alive through Oboe's error thread.
+    output->callback = std::make_shared<Callback>(reinterpret_cast<void *>(core), channels, vm, wake, run);
     oboe::AudioStreamBuilder builder;
     builder.setDirection(oboe::Direction::Output)
         ->setPerformanceMode(oboe::PerformanceMode::LowLatency)
