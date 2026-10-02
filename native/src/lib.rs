@@ -13,7 +13,7 @@ use tsclientlib_audio::AudioHandler;
 mod voice;
 
 use badges::{known_badges, BadgeMetadata};
-use futures::StreamExt;
+use futures::{FutureExt, StreamExt};
 use nnnoiseless::DenoiseState;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -98,6 +98,8 @@ pub enum Command {
     },
     Disconnect,
     Shutdown,
+    #[cfg(test)]
+    PanicSession,
 }
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -597,6 +599,15 @@ fn snapshot(
     storage: Option<&Path>,
 ) {
     let Ok(state) = con.get_state() else { return };
+    // initserver arrives before our client and channel lists. Keep connecting
+    // (or reconnecting) until there is an actual channel to display.
+    if !state
+        .clients
+        .get(&state.own_client)
+        .is_some_and(|me| state.channels.contains_key(&me.channel))
+    {
+        return;
+    }
     let server_id = state.server.public_key.get_uid();
     let channels: Vec<_> = state
         .channels
@@ -1398,6 +1409,8 @@ async fn session(
                             .send_with_result(&mut con)?;
                         operations.insert(handle, PendingOperation::Other("channel_subscribe_failed"));
                         subscribed = true;
+                    }
+                    if current_channel_conversation(&con).is_some() {
                         first_connection = false;
                     }
                     let connected_server = server_id(&con);
@@ -1622,6 +1635,8 @@ async fn session(
                     return Ok(false);
                 },
                 Some(Command::Shutdown) => { avatar.disconnected(); invalidate_capture(processor, capture_epoch); let _ = voice.interrupt(|codec, data| send_voice(&mut con, codec, data)); playback.clear(); out.lock().unwrap().status("disconnected"); let _ = con.disconnect(DisconnectOptions::new()); return Ok(true); },
+                #[cfg(test)]
+                Some(Command::PanicSession) => panic!("injected session failure"),
                 Some(Command::Connect { .. }) => report_code(out, "disconnect_before_connect", None),
                 Some(Command::AvatarSelect { .. } | Command::AvatarSet { .. }) => unreachable!("avatar storage commands are handled by Bridge::send"),
                 Some(Command::Configure { .. }) => report_code(out, "storage_change_while_connected", None),
@@ -1856,7 +1871,8 @@ impl Bridge {
                             avatar::offline(&worker_avatar_store, &worker_output).await;
                         }
                         request @ Command::Connect { .. } => {
-                            match session(
+                            // A protocol panic ends this connection, not the command receiver.
+                            match std::panic::AssertUnwindSafe(session(
                                 request,
                                 &worker_playback,
                                 &refill,
@@ -1870,11 +1886,18 @@ impl Bridge {
                                 &mut processing,
                                 &mut processor,
                                 &worker_avatar_store,
-                            )
+                            ))
+                            .catch_unwind()
                             .await
                             {
-                                Ok(true) => break,
-                                Err(error) => report(&worker_output, error),
+                                Ok(Ok(true)) => break,
+                                Ok(Err(error)) => report(&worker_output, error),
+                                Err(panic) => {
+                                    let detail = panic.downcast_ref::<String>().map(String::as_str)
+                                        .or_else(|| panic.downcast_ref::<&str>().copied())
+                                        .unwrap_or("unknown panic");
+                                    report(&worker_output, format!("Connection task panicked: {detail}"));
+                                }
                                 _ => {}
                             }
                             worker_playback.clear();
@@ -2043,6 +2066,36 @@ pub unsafe extern "C" fn ts_playback(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn session_panic_disconnects_and_keeps_the_bridge_reusable() {
+        fn wait_until(mut ready: impl FnMut() -> bool) {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while !ready() {
+                assert!(Instant::now() < deadline, "worker did not recover");
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        }
+        // An unresponsive loopback socket keeps the handshake pending without a real server.
+        let server = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+        let connect = json!({"type":"connect","address":server.local_addr().unwrap().to_string(),"name":"test"}).to_string();
+        let bridge = Bridge::new();
+        bridge.output.lock().unwrap().status("connected");
+        bridge.send(&connect).unwrap();
+        bridge.tx.blocking_send(Command::PanicSession).unwrap();
+        wait_until(|| {
+            let output = bridge.output.lock().unwrap();
+            output.snapshot["status"] == "disconnected"
+                && output.events.iter().any(|event| {
+                    event["detail"] == "Connection task panicked: injected session failure"
+                })
+        });
+        assert!(!bridge.tx.is_closed());
+        assert_eq!(bridge.poll()["chats"], json!([]));
+        bridge.send(&connect).unwrap();
+        wait_until(|| bridge.poll()["snapshot"]["status"] == "connecting");
+        bridge.send(r#"{"type":"disconnect"}"#).unwrap();
+        wait_until(|| bridge.poll()["snapshot"]["status"] == "disconnected");
+    }
     #[test]
     fn final_audio_gate_blocks_mute_deafen_permissions_disconnect_and_join() {
         assert!(audio_send_allowed(false, false, true, true, false));
