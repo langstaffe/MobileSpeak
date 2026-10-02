@@ -533,12 +533,30 @@ struct HomeView: View {
                     Button { client.error = nil } label: { Image(systemName: "xmark").frame(width: 44, height: 44) }.accessibilityLabel(L10n.string("accessibility_close_error"))
                 }.padding(.leading, 16).background(Color(hex: 0x542A30))
             }
-            Group {
-                if tab == 2 { settings }
-                else if client.busy { VStack(spacing: 20) { ProgressView(); Text(L10n.string(client.reconnecting ? "status_reconnecting" : "status_connecting_server")) }.frame(maxWidth: .infinity, maxHeight: .infinity) }
-                else if !client.connected { if client.bookmarks.isEmpty { empty } else { bookmarkList } }
-                else if tab == 0 { channels }
-                else { members }
+            ZStack {
+                Group {
+                    if client.busy { VStack(spacing: 20) { ProgressView(); Text(L10n.string(client.reconnecting ? "status_reconnecting" : "status_connecting_server")) }.frame(maxWidth: .infinity, maxHeight: .infinity) }
+                    else if !client.connected { if client.bookmarks.isEmpty { empty } else { bookmarkList } }
+                    else {
+                        ZStack {
+                            channels
+                                .opacity(tab == 0 ? 1 : 0)
+                                .allowsHitTesting(tab == 0)
+                                .accessibilityHidden(tab != 0)
+                            members
+                                .opacity(tab == 1 ? 1 : 0)
+                                .allowsHitTesting(tab == 1)
+                                .accessibilityHidden(tab != 1)
+                        }
+                    }
+                }
+                .opacity(tab == 2 ? 0 : 1)
+                .allowsHitTesting(tab != 2)
+                .accessibilityHidden(tab == 2)
+                settings
+                    .opacity(tab == 2 ? 1 : 0)
+                    .allowsHitTesting(tab == 2)
+                    .accessibilityHidden(tab != 2)
             }.frame(maxWidth: .infinity, maxHeight: .infinity)
             voiceBar
             HStack {

@@ -7,6 +7,157 @@ import Combine
 @testable import MobileSpeak
 
 final class ClientTests: XCTestCase {
+    @MainActor func testHomeTabsKeepIndependentNativeScrollOffsetsAcrossNavigationAndConnectionChanges() async throws {
+        #if targetEnvironment(simulator)
+        // XCTest's unit-test host does not enable the SwiftUI accessibility tree itself.
+        let library = try XCTUnwrap(dlopen("/usr/lib/libAccessibility.dylib", RTLD_NOW))
+        let automation = unsafeBitCast(try XCTUnwrap(dlsym(library, "_AXSSetAutomationEnabled")), to: (@convention(c) (Bool) -> Void).self)
+        let enabled = unsafeBitCast(try XCTUnwrap(dlsym(library, "_AXSAutomationEnabled")), to: (@convention(c) () -> Bool).self)()
+        automation(true)
+        defer { automation(enabled); dlclose(library) }
+        #else
+        throw XCTSkip("Native accessibility automation fixture runs in the simulator")
+        #endif
+        let client = Client.shared
+        guard !client.connected, !client.busy else { throw XCTSkip("Requires an offline test profile") }
+        // No serverId: chat navigation exercises the UI without sending core commands.
+        let original = client.state
+        let channels = (1...160).map { Channel(id: UInt64($0), parent: 0, order: UInt64($0 - 1), name: "Scroll channel \($0)", password: false, permanent: true, key: "\($0)", icon: nil, iconPath: nil) }
+        let members = (1...160).map { Member(id: UInt64($0), channel: 20, uid: "scroll-\($0)", name: "Scroll member \($0)", avatarHash: "", avatarPath: nil, badges: [], serverGroupIcons: [], channelGroupIcon: nil, muted: false, deafened: false, speaking: false) }
+        let snapshot = Snapshot(status: "connected", server: "Scroll fixture", ownClient: 1, channels: channels, clients: members)
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let host = UIHostingController(rootView: NavigationView { HomeView(client: client) }
+            .navigationViewStyle(.stack).environmentObject(LanguageSettings())
+            .preferredColorScheme(.dark).tint(Palette.accent))
+        let window = UIWindow(windowScene: scene)
+        let container = UIViewController()
+        window.rootViewController = container
+        container.addChild(host); container.view.addSubview(host.view)
+        host.view.frame = CGRect(x: 0, y: 0, width: 320, height: 568); host.didMove(toParent: container)
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true; client.state = original }
+        try await Task.sleep(nanoseconds: 200_000_000) // Let initial core configuration settle.
+        client.state = snapshot
+        try await Task.sleep(nanoseconds: 150_000_000)
+
+        func scrolls(_ view: UIView) -> [UIScrollView] {
+            (view as? UIScrollView).map { [$0] } ?? view.subviews.flatMap(scrolls)
+        }
+        func navigation(_ controller: UIViewController) -> UINavigationController? {
+            if let stack = controller as? UINavigationController { return stack }
+            return controller.children.lazy.compactMap(navigation).first
+        }
+        func accessibleElements() -> [NSObject] {
+            var visited = Set<ObjectIdentifier>()
+            func collect(_ object: NSObject) -> [NSObject] {
+                guard visited.insert(ObjectIdentifier(object)).inserted, !object.accessibilityElementsHidden else { return [] }
+                if let view = object as? UIView, view.isHidden || view.alpha < 0.01 { return [] }
+                let elements = object.accessibilityElements as? [NSObject]
+                let count = object.accessibilityElementCount()
+                let children = elements ?? (count > 0 && count < 1_000 ? (0..<count).compactMap { object.accessibilityElement(at: $0) as? NSObject } : [])
+                if elements == nil, count == NSNotFound, !object.isAccessibilityElement {
+                    return ((object as? UIView)?.subviews ?? []).flatMap(collect)
+                }
+                return (object.isAccessibilityElement ? [object] : []) + children.flatMap(collect)
+            }
+            return collect(host.view)
+        }
+        func activate(_ label: String) throws {
+            let buttons = accessibleElements().filter { $0.accessibilityTraits.contains(.button) }
+            let element = try XCTUnwrap(buttons.first { $0.accessibilityLabel == label } ?? buttons.first { $0.accessibilityLabel?.contains(label) == true }, label + ": " + accessibleElements().compactMap(\.accessibilityLabel).joined(separator: " | "))
+            XCTAssertTrue(element.accessibilityActivate(), label)
+        }
+        let homeScrolls = scrolls(host.view)
+        XCTAssertEqual(homeScrolls.count, 3)
+        guard homeScrolls.count == 3 else { return }
+        let stack = try XCTUnwrap(navigation(host))
+        let home = try XCTUnwrap(stack.topViewController)
+        let offsets: [CGFloat] = [1_400, 600, 220]
+        for (scroll, offset) in zip(homeScrolls, offsets) {
+            XCTAssertGreaterThan(scroll.contentSize.height - scroll.bounds.height, offset)
+            scroll.setContentOffset(CGPoint(x: 0, y: offset), animated: false)
+        }
+        try await Task.sleep(nanoseconds: 100_000_000)
+        func checkOffsets() {
+            for (scroll, offset) in zip(homeScrolls, offsets) {
+                XCTAssertEqual(scroll.contentOffset.y, offset, accuracy: 0.5)
+                XCTAssertTrue(scrolls(host.view).contains { $0 === scroll })
+            }
+        }
+        let started = Date()
+        for _ in 0..<8 {
+            for (tab, title) in ["tab_members", "tab_settings", "tab_channels"].enumerated() {
+                try activate(L10n.string(title))
+                try await Task.sleep(nanoseconds: 50_000_000)
+                host.view.layoutIfNeeded()
+                checkOffsets()
+                let active = homeScrolls[[1, 2, 0][tab]]
+                let point = active.convert(CGPoint(x: 8, y: active.bounds.midY), to: host.view)
+                let hit = try XCTUnwrap(host.view.hitTest(point, with: nil))
+                XCTAssertTrue(hit === active || hit.isDescendant(of: active), "Only the visible tab receives touches")
+                let labels = accessibleElements().compactMap(\.accessibilityLabel).joined(separator: " ")
+                if title == "tab_settings" { XCTAssertTrue(labels.contains(L10n.string("settings_noise_suppression"))); XCTAssertFalse(labels.contains("Scroll channel 21")); XCTAssertFalse(labels.contains("Scroll member 12")) }
+                // Direct UIKit enumeration exposes both retained lazy containers;
+                // their visibility to VoiceOver needs a real assistive traversal.
+                if title == "tab_channels" { XCTAssertTrue(labels.contains("Scroll channel 21")); XCTAssertFalse(labels.contains(L10n.string("settings_noise_suppression"))) }
+                if title == "tab_members" { XCTAssertTrue(labels.contains("Scroll member 12")); XCTAssertFalse(labels.contains(L10n.string("settings_noise_suppression"))) }
+            }
+            // Hidden lists also receive a normal client update, retaining native offsets.
+            client.objectWillChange.send()
+            try await Task.sleep(nanoseconds: 20_000_000)
+            checkOffsets()
+        }
+        let timingText = "160 channels + 160 members: 24 tab switches and 8 client updates in \(Date().timeIntervalSince(started)) seconds (includes 1360 ms waits)"
+        print(timingText)
+        let timing = XCTAttachment(string: timingText)
+        timing.lifetime = .keepAlways; add(timing)
+
+        for (tab, label) in [("tab_channels", L10n.format("channel_chat_open", "Scroll channel 20")), ("tab_members", "Scroll member 12"), ("tab_settings", L10n.string("settings_about"))] {
+            try activate(L10n.string(tab))
+            try await Task.sleep(nanoseconds: 30_000_000)
+            try activate(label)
+            try await Task.sleep(nanoseconds: 350_000_000)
+            XCTAssertEqual(stack.viewControllers.count, 2, label)
+            stack.popViewController(animated: false)
+            try await Task.sleep(nanoseconds: 100_000_000)
+            XCTAssertTrue(stack.topViewController === home)
+            checkOffsets()
+        }
+        try activate(L10n.string("tab_settings"))
+        try await Task.sleep(nanoseconds: 30_000_000)
+        let image = UIGraphicsImageRenderer(size: host.view.bounds.size).image { _ in host.view.drawHierarchy(in: host.view.bounds, afterScreenUpdates: true) }
+        let attachment = XCTAttachment(image: image); attachment.name = "Settings hides both retained lists"; attachment.lifetime = .keepAlways; add(attachment)
+        try image.pngData()?.write(to: FileManager.default.temporaryDirectory.appendingPathComponent("home-scroll-settings.png"))
+        // Shorten the original lists while their retained offsets are still nonzero.
+        checkOffsets()
+        client.state.channels = Array(channels.prefix(3))
+        client.state.clients = Array(members.prefix(3))
+        for title in ["tab_channels", "tab_members"] {
+            try activate(L10n.string(title))
+            try await Task.sleep(nanoseconds: 100_000_000)
+            for scroll in homeScrolls.prefix(2) {
+                XCTAssertTrue(scrolls(host.view).contains { $0 === scroll })
+                XCTAssertGreaterThanOrEqual(scroll.contentOffset.y, -scroll.adjustedContentInset.top - 0.5)
+                XCTAssertLessThanOrEqual(scroll.contentOffset.y, max(-scroll.adjustedContentInset.top, scroll.contentSize.height - scroll.bounds.height + scroll.adjustedContentInset.bottom) + 0.5)
+            }
+        }
+        try activate(L10n.string("tab_settings"))
+        try await Task.sleep(nanoseconds: 30_000_000)
+        for status in ["disconnected", "connecting", "connected"] {
+            client.state = status == "connected" ? snapshot : Snapshot(status: status)
+            try await Task.sleep(nanoseconds: 80_000_000)
+            XCTAssertTrue(scrolls(host.view).contains { $0 === homeScrolls[2] })
+            XCTAssertEqual(homeScrolls[2].contentOffset.y, offsets[2], accuracy: 0.5)
+            let labels = accessibleElements().compactMap(\.accessibilityLabel).joined(separator: " ")
+            XCTAssertFalse(labels.contains("Scroll channel 21")); XCTAssertFalse(labels.contains("Scroll member 12"))
+            XCTAssertFalse(labels.contains(L10n.string("status_connecting_server")))
+            let image = UIGraphicsImageRenderer(size: host.view.bounds.size).image { _ in host.view.drawHierarchy(in: host.view.bounds, afterScreenUpdates: true) }
+            let attachment = XCTAttachment(image: image); attachment.name = "Retained settings while \(status)"; attachment.lifetime = .keepAlways; add(attachment)
+            try image.pngData()?.write(to: FileManager.default.temporaryDirectory.appendingPathComponent("home-scroll-settings-\(status).png"))
+        }
+        XCTAssertEqual(homeScrolls[2].contentOffset.y, offsets[2], accuracy: 0.5)
+    }
+
     @MainActor func testIconAssetsKeepTemplateTintAndOffOriginalColors() throws {
         let names = "avatar-placeholder channel-chat channels checkmark chevron-right error headphones lock members mic-off mic-on more off pencil plus trash send settings speaker-off speaker-on waveform".split(separator: " ")
         for name in names {

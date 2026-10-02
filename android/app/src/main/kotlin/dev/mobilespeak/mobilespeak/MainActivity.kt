@@ -209,6 +209,8 @@ internal fun MobileSpeakApp(requestPermissions: () -> Unit, openAbout: Boolean =
     val page = PageTarget(chat, settingsPage)
     val navigation = updateTransition(page, label = "Page navigation")
     val homeState = rememberSaveableStateHolder()
+    // Track connection changes even while home is removed for chat or settings details.
+    val connectionKey = rememberSaveable(ui.snapshot.status == "connected", ui.snapshot.serverId) { UUID.randomUUID().toString() }
     val focusManager = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
     val closeChat = {
@@ -272,6 +274,20 @@ internal fun MobileSpeakApp(requestPermissions: () -> Unit, openAbout: Boolean =
             } else if (target.chat != null) {
                 ChatScreen(target.chat, ui, active = chat?.conversation == target.chat.conversation, onBack = closeChat)
             } else homeState.SaveableStateProvider("home") {
+                val tabState = rememberSaveableStateHolder()
+                var savedConnectionKey by rememberSaveable { mutableStateOf(connectionKey) }
+                if (savedConnectionKey != connectionKey) {
+                    tabState.removeState("channels:$savedConnectionKey")
+                    tabState.removeState("members:$savedConnectionKey")
+                    savedConnectionKey = connectionKey
+                }
+                val tabPageKey = when {
+                    tab == 2 -> "settings"
+                    ui.snapshot.status in setOf("connecting", "reconnecting") -> "busy:${ui.snapshot.status}"
+                    ui.snapshot.status != "connected" -> "bookmarks"
+                    tab == 0 -> "channels:$connectionKey"
+                    else -> "members:$connectionKey"
+                }
                 Scaffold(
                     containerColor = Palette.background,
                     contentWindowInsets = WindowInsets(0),
@@ -298,7 +314,7 @@ internal fun MobileSpeakApp(requestPermissions: () -> Unit, openAbout: Boolean =
                                 TextButton(onClick = ClientSession::clearError) { Text(stringResource(R.string.action_close)) }
                             }
                         }
-                        when {
+                        tabState.SaveableStateProvider(tabPageKey) { when {
                             tab == 2 -> SettingsScreen(ui, requestPermissions, onPage = { settingsPage = it })
                             ui.snapshot.status in setOf("connecting", "reconnecting") -> BusyScreen(ui.snapshot.status)
                             ui.snapshot.status != "connected" -> BookmarkScreen(
@@ -315,7 +331,7 @@ internal fun MobileSpeakApp(requestPermissions: () -> Unit, openAbout: Boolean =
                             else -> MemberScreen(ui) {
                                 it.conversation?.let { conversation -> if (chat == null && !navigation.isRunning) chat = ChatTarget(conversation, it.name, member = it) }
                             }
-                        }
+                        } }
                     }
                 }
             }
