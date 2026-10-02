@@ -2755,6 +2755,57 @@
           }
         }
       }
+    },
+    "settings_audio_applied" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Active: %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "当前生效：%@"
+          }
+        }
+      }
+    },
+    "settings_dpdfnet_performance" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "DPDFNet2 uses more CPU and battery. Slower devices may have interrupted audio, especially in the background."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "DPDFNet2 的处理和耗电开销较高；较慢设备尤其在后台可能出现语音断续。"
+          }
+        }
+      }
+    },
+    "settings_noise_system_help" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "None disables MobileSpeak noise suppression. System voice processing may still apply."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“无”关闭 MobileSpeak 降噪；系统语音处理仍可能生效。"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

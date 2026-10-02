@@ -198,5 +198,8 @@
     <string name="update_notifications">App Updates</string>
     <string name="update_wrong_abi">This APK does not support this device’s CPU. Installation blocked.</string>
     <string name="settings_audio_switching">Switching…</string>
+    <string name="settings_audio_applied">Active: %1$s</string>
+    <string name="settings_noise_system_help">None disables MobileSpeak noise suppression. System voice processing may still apply.</string>
     <string name="error_noise_suppression">Audio processing switch failed; previous selection retained</string>
+    <string name="settings_dpdfnet_performance">DPDFNet2 uses more CPU and battery. Slower devices may have interrupted audio, especially in the background.</string>
 </resources>

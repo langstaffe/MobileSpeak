@@ -197,5 +197,8 @@
     <string name="update_notifications">应用更新</string>
     <string name="update_wrong_abi">此 APK 不支持当前设备的处理器，已阻止安装。</string>
     <string name="settings_audio_switching">正在切换…</string>
+    <string name="settings_audio_applied">当前生效：%1$s</string>
+    <string name="settings_noise_system_help">“无”关闭 MobileSpeak 降噪；系统语音处理仍可能生效。</string>
     <string name="error_noise_suppression">音频处理切换失败，已保留原方案</string>
+    <string name="settings_dpdfnet_performance">DPDFNet2 的处理和耗电开销较高；较慢设备尤其在后台可能出现语音断续。</string>
 </resources>
