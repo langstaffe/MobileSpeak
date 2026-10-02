@@ -5,6 +5,11 @@ mod audio_models;
 mod audio_processing;
 mod avatar;
 mod badges;
+mod playback;
+// Fixed upstream receive module with the queued-packet recovery patch.
+#[allow(dead_code)]
+mod tsclientlib_audio;
+use tsclientlib_audio::AudioHandler;
 mod voice;
 
 use badges::{known_badges, BadgeMetadata};
@@ -24,9 +29,8 @@ use std::{
 use tokio::{io::AsyncReadExt, sync::mpsc};
 use tsclientlib::prelude::*;
 use tsclientlib::{
-    audio::AudioHandler, events::Event, ChannelId, ChannelType, CodecEncryptionMode, Connection,
-    DisconnectOptions, FiletransferHandle, Identity, MessageHandle, MessageTarget, OutCommandExt,
-    StreamItem,
+    events::Event, ChannelId, ChannelType, CodecEncryptionMode, Connection, DisconnectOptions,
+    FiletransferHandle, Identity, MessageHandle, MessageTarget, OutCommandExt, StreamItem,
 };
 use tsproto_packets::packets::{AudioData, CodecType, OutAudio};
 
@@ -375,7 +379,6 @@ struct Output {
     chat_snapshot: Option<Value>,
     unread: Value,
     events: VecDeque<Value>,
-    audio: VecDeque<Vec<f32>>,
     notifier: Option<(extern "C" fn(usize), usize)>,
 }
 impl Output {
@@ -409,15 +412,16 @@ impl Output {
     }
     fn status(&mut self, status: &str) {
         self.set_snapshot(json!({"status":status,"channels":[],"clients":[]}));
-        self.audio.clear();
     }
 }
 
 pub struct Bridge {
     tx: mpsc::Sender<Command>,
-    pcm: mpsc::Sender<Vec<i16>>,
+    pcm: mpsc::Sender<(u64, Vec<i16>)>,
+    capture_epoch: Arc<AtomicU64>,
     output: Arc<Mutex<Output>>,
     avatar_store: Arc<avatar::Store>,
+    playback: Arc<playback::Playback>,
 }
 
 fn report(out: &Arc<Mutex<Output>>, error: impl std::fmt::Display) {
@@ -1191,10 +1195,18 @@ impl AudioProcessingState {
     }
 }
 
+fn invalidate_capture(processor: &mut audio_processing::Processor, epoch: &AtomicU64) {
+    epoch.fetch_add(1, Ordering::AcqRel);
+    processor.invalidate();
+}
+
 async fn session(
     first: Command,
+    playback: &Arc<playback::Playback>,
+    refill: &tokio::net::UnixDatagram,
     rx: &mut mpsc::Receiver<Command>,
-    pcm: &mut mpsc::Receiver<Vec<i16>>,
+    pcm: &mut mpsc::Receiver<(u64, Vec<i16>)>,
+    capture_epoch: &AtomicU64,
     out: &Arc<Mutex<Output>>,
     storage: Option<PathBuf>,
     persist_tx: &std_mpsc::Sender<PersistJob>,
@@ -1237,7 +1249,9 @@ async fn session(
         .output_hardware_enabled(true)
         .connect()?;
     let mut audio = AudioHandler::new();
-    processor.invalidate();
+    let mut receive_traces = HashMap::<tsclientlib::ClientId, playback::ReceiveTrace>::new();
+    let audio_trace_start = Instant::now();
+    invalidate_capture(processor, capture_epoch);
     let mut voice = voice::VoiceSender::new()?;
     let mut voice_channel = None;
     let mut input_muted = true;
@@ -1262,15 +1276,86 @@ async fn session(
     clock.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let deadline = tokio::time::sleep(Duration::from_secs(30));
     tokio::pin!(deadline);
+    let mut voice_timer: Option<std::pin::Pin<Box<tokio::time::Sleep>>> = None;
+    let mut playback_revision = playback.revision.load(Ordering::Acquire);
+    let mut refill_byte = [0u8];
+    let mut armed_deadline = None;
+    let mut playback_log_at = Instant::now();
+    let mut playback_counts = playback.diagnostics();
+    let mut last_refill = Instant::now();
+    let mut max_refill_gap_ms = 0u128;
+    let mut max_refill_work_us = 0u128;
+    let mut received_packets = 0u64;
+    let mut rejected_packets = 0u64;
+    let mut last_packet_error = String::new();
+    let mut ended_queues = 0u64;
+    playback.clear();
+    playback.request();
     loop {
+        let voice_deadline = voice.deadline();
+        if voice_deadline != armed_deadline {
+            match voice_deadline {
+                Some(at) => match voice_timer.as_mut() {
+                    Some(timer) => timer.as_mut().reset(at.into()),
+                    None => voice_timer = Some(Box::pin(tokio::time::sleep_until(at.into()))),
+                },
+                None => voice_timer = None, // Drop unregisters the one-shot timer immediately.
+            }
+            armed_deadline = voice_deadline;
+        }
         avatar.observe(avatar_store, out);
         tokio::select! {
+            _ = async {
+                match voice_timer.as_mut() {
+                    Some(timer) => timer.as_mut().await,
+                    None => std::future::pending::<()>().await,
+                }
+            } => {
+                let speaking = voice.speaking();
+                let result = voice.expire(Instant::now(), |codec, data| send_voice(&mut con, codec, data));
+                if speaking != voice.speaking() { snapshot(&con, out, &audio, voice.speaking(), storage.as_deref()); }
+                result?;
+            },
+            Ok(_) = refill.recv(&mut refill_byte) => {
+                playback.acknowledged();
+                let revision = playback.revision.load(Ordering::Acquire);
+                if revision != playback_revision {
+                    playback_revision = revision;
+                    last_refill = Instant::now();
+                    audio.reset(); receive_traces.clear(); playback.clear();
+                    snapshot(&con, out, &audio, voice.speaking(), storage.as_deref());
+                }
+                if subscribed && !output_muted && playback.active.load(Ordering::Acquire) {
+                    let started = Instant::now();
+                    max_refill_gap_ms = max_refill_gap_ms.max(started.duration_since(last_refill).as_millis());
+                    last_refill = started;
+                    let ended = playback.refill(&mut audio);
+                    max_refill_work_us = max_refill_work_us.max(started.elapsed().as_micros());
+                    ended_queues += u64::from(!ended.is_empty());
+                    playback.prepared(revision);
+                    for client in &ended {
+                        if let Some(trace) = receive_traces.remove(client) {
+                            // This observes accepted markers, not the private decoder's exact
+                            // removal reason. A marker may still be behind a missing packet.
+                            eprintln!("Playback receive_end at_ms={} client={} end_marker_observed={} packets={} end_markers={} duration_ms={} last_packet_age_ms={} max_packet_gap_ms={} sequence_skips={} reordered_or_duplicate={} rejected={}",
+                                audio_trace_start.elapsed().as_millis(), client.0, trace.end_markers > 0,
+                                trace.packets, trace.end_markers, trace.started.elapsed().as_millis(),
+                                trace.last_packet.elapsed().as_millis(), trace.max_gap_ms, trace.sequence_skips,
+                                trace.reordered_or_duplicate, trace.rejected);
+                        }
+                    }
+                    if !ended.is_empty() { snapshot(&con, out, &audio, voice.speaking(), storage.as_deref()); }
+                }
+            },
             _ = &mut deadline, if first_connection => return Err("Connection timed out after 30 seconds".into()),
             event = async { con.events().next().await } => match event {
                 Some(Ok(StreamItem::BookEvents(events))) => {
                     let channel = con.get_state().ok().and_then(|state| state.clients.get(&state.own_client).map(|me| (me.channel, state.channels.get(&me.channel).map(|channel| channel.codec))));
+                    if channel != voice_channel {
+                        audio.reset(); receive_traces.clear(); playback.clear(); playback.request();
+                    }
                     if channel != voice_channel || !con.can_send_audio() {
-                        processor.invalidate(); let _ = voice.interrupt(|codec, data| send_voice(&mut con, codec, data));
+                        invalidate_capture(processor, capture_epoch); let _ = voice.interrupt(|codec, data| send_voice(&mut con, codec, data));
                         while pcm.try_recv().is_ok() {}
                         voice_channel = channel;
                     }
@@ -1335,22 +1420,37 @@ async fn session(
                 Some(Ok(StreamItem::AudioChange(change))) => {
                     match change {
                         tsclientlib::AudioEvent::CanSendAudio(false) => {
-                            processor.invalidate(); let _ = voice.interrupt(|codec, data| send_voice(&mut con, codec, data));
+                            invalidate_capture(processor, capture_epoch); let _ = voice.interrupt(|codec, data| send_voice(&mut con, codec, data));
                             while pcm.try_recv().is_ok() {}
                         },
-                        tsclientlib::AudioEvent::CanReceiveAudio(false) => { audio.reset(); out.lock().unwrap().audio.clear(); },
+                        tsclientlib::AudioEvent::CanReceiveAudio(false) => { audio.reset(); receive_traces.clear(); playback.clear(); playback.request(); },
                         _ => {},
                     }
                     snapshot(&con, out, &audio, voice.speaking(), storage.as_deref());
                 },
                 Some(Ok(StreamItem::Audio(packet))) => {
-                    if !output_muted {
+                    if !output_muted && playback.active.load(Ordering::Acquire) {
                         let from = match packet.data().data() {
                             AudioData::S2C { from, .. } | AudioData::S2CWhisper { from, .. } => tsclientlib::ClientId(*from),
                             _ => continue,
                         };
-                        if matches!(audio.handle_packet(from, packet), Ok(Some(_))) {
-                            snapshot(&con, out, &audio, voice.speaking(), storage.as_deref());
+                        received_packets += 1;
+                        let sequence = packet.data().data().id();
+                        let end_marker = packet.data().data().data().len() <= 1;
+                        let now = Instant::now();
+                        match audio.handle_packet(from, packet) {
+                            Ok(started) => {
+                                if started.is_some() {
+                                    receive_traces.insert(from, playback::ReceiveTrace::new(now));
+                                    eprintln!("Playback receive_start at_ms={} client={} sequence={}", audio_trace_start.elapsed().as_millis(), from.0, sequence);
+                                }
+                                if let Some(trace) = receive_traces.get_mut(&from) { trace.received(sequence, end_marker, now); }
+                                if started.is_some() { snapshot(&con, out, &audio, voice.speaking(), storage.as_deref()); }
+                            },
+                            Err(error) => {
+                                rejected_packets += 1; last_packet_error = error.to_string();
+                                if let Some(trace) = receive_traces.get_mut(&from) { trace.rejected += 1; }
+                            },
                         }
                     }
                 },
@@ -1447,8 +1547,8 @@ async fn session(
                     media_active.clear();
                     media_failed.clear();
                     transfers.clear();
-                    audio.reset();
-                    processor.invalidate(); let _ = voice.interrupt(|_, _| Ok(()));
+                    audio.reset(); receive_traces.clear(); playback.clear();
+                    invalidate_capture(processor, capture_epoch); let _ = voice.interrupt(|_, _| Ok(()));
                     voice_channel = None;
                     while pcm.try_recv().is_ok() {}
                     out.lock().unwrap().status("reconnecting");
@@ -1477,13 +1577,13 @@ async fn session(
             received = rx.recv() => match received {
                 Some(Command::Disconnect) | None => {
                     avatar.disconnected();
-                    processor.invalidate(); let _ = voice.interrupt(|codec, data| send_voice(&mut con, codec, data));
-                    out.lock().unwrap().status("disconnected");
+                    invalidate_capture(processor, capture_epoch); let _ = voice.interrupt(|codec, data| send_voice(&mut con, codec, data));
+                    playback.clear(); out.lock().unwrap().status("disconnected");
                     con.disconnect(DisconnectOptions::new())?;
                     let _ = tokio::time::timeout(Duration::from_secs(2), async { while con.events().next().await.is_some() {} }).await;
                     return Ok(false);
                 },
-                Some(Command::Shutdown) => { avatar.disconnected(); processor.invalidate(); let _ = voice.interrupt(|codec, data| send_voice(&mut con, codec, data)); out.lock().unwrap().status("disconnected"); let _ = con.disconnect(DisconnectOptions::new()); return Ok(true); },
+                Some(Command::Shutdown) => { avatar.disconnected(); invalidate_capture(processor, capture_epoch); let _ = voice.interrupt(|codec, data| send_voice(&mut con, codec, data)); playback.clear(); out.lock().unwrap().status("disconnected"); let _ = con.disconnect(DisconnectOptions::new()); return Ok(true); },
                 Some(Command::Connect { .. }) => report_code(out, "disconnect_before_connect", None),
                 Some(Command::AvatarSelect { .. } | Command::AvatarSet { .. }) => unreachable!("avatar storage commands are handled by Bridge::send"),
                 Some(Command::Configure { .. }) => report_code(out, "storage_change_while_connected", None),
@@ -1506,17 +1606,17 @@ async fn session(
                     if state.clients.get(&state.own_client).is_some_and(|client| client.channel.0 == channel) { continue; }
                     let Some(me) = state.clients.get(&state.own_client) else { report_code(out, "client_state_unavailable", None); continue; };
                     let request = me.client_move(ChannelId(channel)).set_password(&password).to_packet();
-                    processor.invalidate(); let _ = voice.interrupt(|codec, data| send_voice(&mut con, codec, data));
+                    invalidate_capture(processor, capture_epoch); let _ = voice.interrupt(|codec, data| send_voice(&mut con, codec, data));
                     while pcm.try_recv().is_ok() {}
-                    audio.reset(); out.lock().unwrap().audio.clear();
+                    audio.reset(); receive_traces.clear(); playback.clear(); playback.request();
                     snapshot(&con, out, &audio, false, storage.as_deref());
                     let handle = request.send_with_result(&mut con)?;
                     operations.insert(handle, PendingOperation::Other("join_channel_failed"));
                 },
                 Some(Command::Mute { input, output }) => {
-                    if input || output { processor.invalidate(); let _ = voice.interrupt(|codec, data| send_voice(&mut con, codec, data)); }
+                    if input || output { invalidate_capture(processor, capture_epoch); let _ = voice.interrupt(|codec, data| send_voice(&mut con, codec, data)); }
+                    if output_muted != output { audio.reset(); receive_traces.clear(); playback.clear(); playback.request(); }
                     input_muted = input; output_muted = output;
-                    if output { audio.reset(); out.lock().unwrap().audio.clear(); }
                     while pcm.try_recv().is_ok() {}
                     snapshot(&con, out, &audio, voice.speaking(), storage.as_deref());
                     if subscribed {
@@ -1530,7 +1630,7 @@ async fn session(
                     }
                 },
                 Some(Command::CaptureStopped) => {
-                    processor.invalidate(); let _ = voice.interrupt(|codec, data| send_voice(&mut con, codec, data));
+                    invalidate_capture(processor, capture_epoch); let _ = voice.interrupt(|codec, data| send_voice(&mut con, codec, data));
                     while pcm.try_recv().is_ok() {}
                     snapshot(&con, out, &audio, false, storage.as_deref());
                 },
@@ -1596,7 +1696,8 @@ async fn session(
                     }
                 },
             },
-            Some(samples) = pcm.recv() => {
+            Some((epoch, samples)) = pcm.recv() => {
+                if epoch != capture_epoch.load(Ordering::Acquire) { continue; }
                 if audio_send_allowed(input_muted, output_muted, subscribed, con.can_send_audio(),
                     operations.values().any(|op| matches!(op, PendingOperation::Other("join_channel_failed")))) {
                     processor.capture(&samples);
@@ -1614,7 +1715,7 @@ async fn session(
                             Some(tsclientlib::Codec::OpusVoice)=>CodecType::OpusVoice,
                             Some(tsclientlib::Codec::OpusMusic)=>CodecType::OpusMusic,
                             _=>{
-                                processor.invalidate(); let _=voice.interrupt(|codec,data|send_voice(&mut con,codec,data));
+                                invalidate_capture(processor, capture_epoch); let _=voice.interrupt(|codec,data|send_voice(&mut con,codec,data));
                                 input_muted=true;snapshot(&con,out,&audio,false,storage.as_deref());report_audio_muted(out,"legacy_codec",None);continue
                             }
                         };
@@ -1631,22 +1732,25 @@ async fn session(
                 }
             },
             _ = clock.tick() => {
-                let speaking = voice.speaking();
-                voice.expire(Instant::now(), |codec, data| send_voice(&mut con, codec, data))?;
-                if speaking != voice.speaking() { snapshot(&con, out, &audio, voice.speaking(), storage.as_deref()); }
+                if playback_log_at.elapsed() >= Duration::from_secs(5) {
+                    let counts = playback.diagnostics();
+                    let delta: [u64; 5] = std::array::from_fn(|i| counts[i].wrapping_sub(playback_counts[i]));
+                    let receive = audio.take_diagnostics();
+                    if delta[0] > 0 || received_packets > 0 {
+                        eprintln!("Playback health elapsed_ms={} renders={} underruns={} missing_frames={} growth_silence_frames={} resets={} max_callback_frames={} queued_frames={} max_refill_gap_ms={} max_refill_work_us={} packets={} rejected={} end_batches={} receive_queues={} plc_frames={} fec_frames={} catchup_frames={} truncated_packets={} buffering_frames={} decode_errors={} last_packet_error={:?}",
+                            playback_log_at.elapsed().as_millis(), delta[0], delta[1], delta[2], delta[3], delta[4],
+                            playback.max_callback(), playback.available(), max_refill_gap_ms, max_refill_work_us,
+                            received_packets, rejected_packets, ended_queues, audio.get_queues().len(),
+                            receive.plc_frames, receive.fec_frames, receive.catchup_frames, receive.truncated_packets,
+                            receive.buffering_frames, receive.decode_errors, last_packet_error);
+                    }
+                    playback_counts = counts;
+                    playback_log_at = Instant::now();
+                    max_refill_gap_ms = 0; max_refill_work_us = 0;
+                    received_packets = 0; rejected_packets = 0; ended_queues = 0; last_packet_error.clear();
+                }
                 avatar.tick(out);
                 if subscribed { avatar.check(&mut con, storage.as_deref(), &avatar_tx, &mut operations, out); }
-                if subscribed && !output_muted {
-                        let mut samples = vec![0f32; 1920];
-                        if !audio.fill_buffer(&mut samples).is_empty() {
-                            snapshot(&con, out, &audio, voice.speaking(), storage.as_deref());
-                        }
-                        for value in &mut samples { *value = value.clamp(-1., 1.); }
-                        let mut output = out.lock().unwrap();
-                        // ponytail: one active server; retain at most 100ms when the UI stalls.
-                        if output.audio.len() >= 5 { output.audio.pop_front(); }
-                        output.audio.push_back(samples);
-                }
             }
         }
     }
@@ -1665,6 +1769,11 @@ impl Bridge {
         let avatar_store = Arc::new(avatar::Store::default());
         let worker_avatar_store = avatar_store.clone();
         let worker_output = output.clone();
+        let (playback, refill) = playback::Playback::new().expect("playback wake socket");
+        let playback = Arc::new(playback);
+        let worker_playback = playback.clone();
+        let capture_epoch = Arc::new(AtomicU64::new(0));
+        let worker_capture_epoch = capture_epoch.clone();
         let persistence_output = output.clone();
         let (persist_tx, persist_rx) = std_mpsc::channel::<PersistJob>();
         std::thread::spawn(move || {
@@ -1690,6 +1799,7 @@ impl Bridge {
                 .build()
                 .unwrap();
             runtime.block_on(async {
+                let refill = tokio::net::UnixDatagram::from_std(refill).unwrap();
                 let mut storage: Option<PathBuf> = None;
                 let mut app_active = false;
                 let mut processing = AudioProcessingState::default();
@@ -1712,8 +1822,11 @@ impl Bridge {
                         request @ Command::Connect { .. } => {
                             match session(
                                 request,
+                                &worker_playback,
+                                &refill,
                                 &mut rx,
                                 &mut pcm_rx,
+                                &worker_capture_epoch,
                                 &worker_output,
                                 storage.clone(),
                                 &persist_tx,
@@ -1728,7 +1841,8 @@ impl Bridge {
                                 Err(error) => report(&worker_output, error),
                                 _ => {}
                             }
-                            processor.invalidate();
+                            worker_playback.clear();
+                            invalidate_capture(&mut processor, &worker_capture_epoch);
                             worker_output.lock().unwrap().status("disconnected");
                             avatar::offline(&worker_avatar_store, &worker_output).await;
                             worker_output.lock().unwrap().set_chats(json!([]));
@@ -1748,8 +1862,10 @@ impl Bridge {
         Self {
             tx,
             pcm,
+            capture_epoch,
             output,
             avatar_store,
+            playback,
         }
     }
     pub fn send(&self, json: &str) -> Result<(), String> {
@@ -1864,9 +1980,10 @@ pub unsafe extern "C" fn ts_capture(handle: *mut Bridge, samples: *const i16, le
     if handle.is_null() || samples.is_null() || len != 960 {
         return -1;
     }
+    let epoch = (*handle).capture_epoch.load(Ordering::Acquire);
     match (*handle)
         .pcm
-        .try_send(std::slice::from_raw_parts(samples, len).to_vec())
+        .try_send((epoch, std::slice::from_raw_parts(samples, len).to_vec()))
     {
         Ok(_) => 0,
         Err(_) => 1,
@@ -1878,16 +1995,13 @@ pub unsafe extern "C" fn ts_playback(
     samples: *mut f32,
     capacity: usize,
 ) -> usize {
-    if handle.is_null() || samples.is_null() || capacity < 1920 {
+    if handle.is_null() || samples.is_null() || capacity < 2 {
         return 0;
     }
-    let mut out = (*handle).output.lock().unwrap();
-    if let Some(frame) = out.audio.pop_front() {
-        std::ptr::copy_nonoverlapping(frame.as_ptr(), samples, frame.len());
-        frame.len()
-    } else {
-        0
-    }
+    (*handle)
+        .playback
+        .render(samples, samples.add(1), capacity / 2, 2)
+        * 2
 }
 
 #[cfg(test)]
@@ -2168,4 +2282,44 @@ mod tests {
         assert!(image_data_valid(b"\xff\xd8\xffrest"));
         assert!(!image_data_valid(b"not an image"));
     }
+}
+
+// Retained separately from Bridge so platform stream teardown owns callback lifetime.
+#[no_mangle]
+pub unsafe extern "C" fn ts_playback_acquire(handle: *mut Bridge) -> *const playback::Playback {
+    if handle.is_null() {
+        return std::ptr::null();
+    }
+    Arc::into_raw((*handle).playback.clone())
+}
+#[no_mangle]
+pub unsafe extern "C" fn ts_playback_release(handle: *const playback::Playback) {
+    if !handle.is_null() {
+        drop(Arc::from_raw(handle));
+    }
+}
+#[no_mangle]
+pub unsafe extern "C" fn ts_playback_active(handle: *const playback::Playback, active: bool) {
+    if let Some(p) = handle.as_ref() {
+        p.set_active(active);
+    }
+}
+#[no_mangle]
+pub unsafe extern "C" fn ts_render(
+    handle: *const playback::Playback,
+    left: *mut f32,
+    right: *mut f32,
+    frames: usize,
+    stride: usize,
+) -> usize {
+    if handle.is_null() || left.is_null() || !(1..=2).contains(&stride) {
+        return 0;
+    }
+    (*handle).render(left, right, frames, stride)
+}
+#[no_mangle]
+pub unsafe extern "C" fn ts_render_count(handle: *const playback::Playback) -> u64 {
+    handle
+        .as_ref()
+        .map_or(0, |p| p.renders.load(Ordering::Relaxed))
 }

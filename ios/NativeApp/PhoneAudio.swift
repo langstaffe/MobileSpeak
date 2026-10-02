@@ -9,21 +9,25 @@ final class PhoneAudio {
     private var capturing = false
     private let lock = NSLock()
     private var enabled = true
-    private var renderedBuffers = 0
+    private let playback: UnsafeRawPointer
     private var capturedFrames = 0
     var frameCounts: (rendered: Int, captured: Int) {
         lock.lock(); defer { lock.unlock() }
-        return (renderedBuffers, capturedFrames)
+        return (Int(ts_render_count(playback)), capturedFrames)
     }
     var inputFormat: AVAudioFormat? { engine?.inputNode.outputFormat(forBus: 0) }
     var isVoiceProcessingEnabled: Bool { engine?.inputNode.isVoiceProcessingEnabled == true }
     var isRunning: Bool { engine?.isRunning == true }
     var isCapturing: Bool { capturing }
     var listening: Bool {
-        get { lock.lock(); defer { lock.unlock() }; return enabled }
-        set { lock.lock(); enabled = newValue; lock.unlock() }
+        get { enabled }
+        set { enabled = newValue; ts_playback_active(playback, newValue && isRunning) }
     }
-    init(handle: UnsafeMutableRawPointer) { self.handle = handle }
+    init(handle: UnsafeMutableRawPointer) {
+        self.handle = handle
+        self.playback = ts_playback_acquire(handle)!
+    }
+    deinit { stop(); ts_playback_release(playback) }
     func permission() async -> Bool {
         await withCheckedContinuation { continuation in
             AVAudioSession.sharedInstance().requestRecordPermission { continuation.resume(returning: $0) }
@@ -43,22 +47,18 @@ final class PhoneAudio {
         try input.setVoiceProcessingEnabled(true)
         let output = engine.outputNode
         let format = AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 2)!
-        var frame = [Float](repeating: 0, count: 1920)
-        var offset = 1920
-        let source = AVAudioSourceNode(format: format) { [self] _, _, count, list in
-            lock.lock(); renderedBuffers += 1; lock.unlock()
+        let pcm = playback
+        let source = AVAudioSourceNode(format: format) { _, _, count, list in
             let buffers = UnsafeMutableAudioBufferListPointer(list)
-            let audible = listening
-            for i in 0..<Int(count) {
-                if offset >= 1920 {
-                    let length = frame.withUnsafeMutableBufferPointer { ts_playback(handle, $0.baseAddress, $0.count) }
-                    if length == 0 { frame.withUnsafeMutableBufferPointer { $0.initialize(repeating: 0) } }
-                    offset = 0
+            // The source format is planar stereo, independent of the hardware route.
+            // AVAudioEngine performs device sample-rate/channel conversion downstream.
+            if buffers.count == 2, let left = buffers[0].mData, let right = buffers[1].mData {
+                _ = ts_render(pcm, left.assumingMemoryBound(to: Float.self),
+                              right.assumingMemoryBound(to: Float.self), Int(count), 1)
+            } else {
+                for buffer in buffers {
+                    if let data = buffer.mData { memset(data, 0, Int(buffer.mDataByteSize)) }
                 }
-                for channel in 0..<buffers.count {
-                    buffers[channel].mData!.assumingMemoryBound(to: Float.self)[i] = audible ? frame[offset + min(channel, 1)] : 0
-                }
-                offset += 2
             }
             return noErr
         }
@@ -66,11 +66,13 @@ final class PhoneAudio {
         engine.connect(source, to: engine.mainMixerNode, format: format)
         engine.connect(engine.mainMixerNode, to: output, format: output.inputFormat(forBus: 0))
         engine.prepare()
+        ts_playback_active(playback, enabled)
         do { try engine.start() } catch {
+            ts_playback_active(playback, false)
             try? session.setActive(false, options: .notifyOthersOnDeactivation)
             throw error
         }
-        self.engine = engine; self.source = source; listening = true
+        self.engine = engine; self.source = source
         logger.info("Audio started: input \(engine.inputNode.outputFormat(forBus: 0).description, privacy: .public); output \(output.inputFormat(forBus: 0).description, privacy: .public); route \(session.currentRoute.description, privacy: .public)")
     }
     func startCapture() throws {
@@ -111,9 +113,11 @@ final class PhoneAudio {
     func ensureRunning() throws {
         guard let engine else { try start(); return }
         if !engine.isRunning {
+            ts_playback_active(playback, false)
             try AVAudioSession.sharedInstance().setActive(true)
             engine.prepare()
-            try engine.start()
+            ts_playback_active(playback, enabled)
+            do { try engine.start() } catch { ts_playback_active(playback, false); throw error }
             logger.info("Audio engine restarted after configuration change")
         }
     }
@@ -128,9 +132,11 @@ final class PhoneAudio {
     }
     func pauseForInterruption() {
         stopCapture()
+        ts_playback_active(playback, false)
         engine?.pause()
     }
     func stop() {
+        ts_playback_active(playback, false)
         stopCapture(); engine?.stop(); engine = nil; source = nil
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }

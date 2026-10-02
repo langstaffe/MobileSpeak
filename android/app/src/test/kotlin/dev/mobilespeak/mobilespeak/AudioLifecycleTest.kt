@@ -8,6 +8,31 @@ import org.junit.Test
 
 class AudioLifecycleTest {
     @Test
+    fun phoneAndWiredRoutesUseMediaWhileBluetoothCommunicationKeepsItsMode() {
+        for ((type, expected) in listOf(
+            AudioDeviceInfo.TYPE_BUILTIN_SPEAKER to false,
+            AudioDeviceInfo.TYPE_BUILTIN_EARPIECE to false,
+            AudioDeviceInfo.TYPE_WIRED_HEADSET to false,
+            AudioDeviceInfo.TYPE_WIRED_HEADPHONES to false,
+            AudioDeviceInfo.TYPE_USB_HEADSET to false,
+            AudioDeviceInfo.TYPE_BLUETOOTH_A2DP to false,
+            AudioDeviceInfo.TYPE_BLUETOOTH_SCO to true,
+            AudioDeviceInfo.TYPE_BLE_HEADSET to true,
+            AudioDeviceInfo.TYPE_BLE_SPEAKER to true,
+            AudioDeviceInfo.TYPE_HEARING_AID to true,
+        )) {
+            assertEquals(expected, requiresCommunicationMode(type))
+        }
+
+        val devices = setOf(AudioDeviceInfo.TYPE_BUILTIN_SPEAKER, AudioDeviceInfo.TYPE_BLUETOOTH_SCO)
+        assertTrue(requiresCommunicationMode(preferredCommunicationDevice(true, devices)!!))
+        assertFalse(requiresCommunicationMode(preferredCommunicationDevice(true,
+            devices - AudioDeviceInfo.TYPE_BLUETOOTH_SCO)!!))
+        assertFalse(requiresCommunicationMode(preferredCommunicationDevice(true,
+            devices + AudioDeviceInfo.TYPE_WIRED_HEADSET)!!))
+    }
+
+    @Test
     fun audioIntentWaitsForOwnMemberAndResetsOnReconnect() {
         val own = Member(7, 1, null, "", null, emptyList(), emptyList(), null,
             muted = true, deafened = false, speaking = false)
@@ -119,7 +144,7 @@ class AudioLifecycleTest {
         assertTrue(shouldCaptureAudio(true, captureRequested = true))
     }
 
-    @Test fun mediaOnlyBluetoothDoesNotSuppressPhoneSpeaker() {
+    @Test fun mediaOnlyBluetoothDoesNotBecomeACommunicationDeviceRequest() {
         assertEquals(AudioDeviceInfo.TYPE_BUILTIN_SPEAKER, preferredCommunicationDevice(true,
             setOf(AudioDeviceInfo.TYPE_BUILTIN_SPEAKER, AudioDeviceInfo.TYPE_BLUETOOTH_A2DP)))
         assertEquals(Int.MAX_VALUE, communicationDevicePriority(AudioDeviceInfo.TYPE_BLUETOOTH_A2DP))
@@ -245,12 +270,6 @@ class AudioLifecycleTest {
         request.reset()
         request.request(10)
         assertEquals(null, request.recoverAfterLoss(request.token, true, false, 30_101))
-    }
-
-    @Test fun scoDownmixPreservesTimeAndDoesNotIncreaseLevel() {
-        val mono = FloatArray(3)
-        downmixStereo(floatArrayOf(1f, 1f, -1f, 1f, .2f, .6f), mono)
-        org.junit.Assert.assertArrayEquals(floatArrayOf(1f, 0f, .4f), mono, .0001f)
     }
 
     @Test fun unavailableScoObservationBetweenConnectingAndConnectedDoesNotAbortBoundedRequest() {

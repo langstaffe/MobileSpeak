@@ -22,6 +22,7 @@ android {
         versionCode = 4
         versionName = mobileVersion
         ndk { abiFilters += "arm64-v8a" }
+        externalNativeBuild { cmake { arguments += "-DANDROID_STL=c++_shared" } }
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -31,13 +32,17 @@ android {
         }
     }
 
-    buildFeatures { compose = true }
+    buildFeatures { compose = true; prefab = true }
+    externalNativeBuild { cmake { path = file("src/main/cpp/CMakeLists.txt"); version = "3.22.1" } }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
     packaging {
-        jniLibs { useLegacyPackaging = true }
+        jniLibs {
+            useLegacyPackaging = true
+            pickFirsts += "**/libc++_shared.so" // Same pinned NDK runtime also staged by the Rust build.
+        }
     }
 }
 
@@ -48,6 +53,7 @@ kotlin {
 }
 
 dependencies {
+    implementation("com.google.oboe:oboe:1.9.3")
     val composeBom = platform("androidx.compose:compose-bom:2025.12.01")
     implementation(composeBom)
     implementation("androidx.appcompat:appcompat:1.8.0")
@@ -73,4 +79,5 @@ listOf("arm64-v8a", "x86_64").forEach { abi ->
     tasks.matching { it.name == prepareTask }.configureEach { dependsOn(rustCore) }
     // JNI merging reads the shared folder before ABI filtering.
     tasks.matching { it.name.endsWith("JniLibFolders") }.configureEach { mustRunAfter(rustCore) }
+    tasks.matching { it.name.startsWith("buildCMake") && it.name.contains("[$abi]") }.configureEach { dependsOn(rustCore) }
 }

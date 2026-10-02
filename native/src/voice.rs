@@ -109,6 +109,10 @@ impl VoiceSender {
         Ok(())
     }
 
+    pub fn deadline(&self) -> Option<Instant> {
+        self.codec.and(self.last_voice).map(|last| last + HOLD)
+    }
+
     pub fn expire(
         &mut self,
         now: Instant,
@@ -186,6 +190,63 @@ mod tests {
             probability: 0.9,
         }
     }
+    #[test]
+    fn resettable_deadline_silence_stop_and_stale_timer() {
+        let mut sender = VoiceSender::new().unwrap();
+        let start = Instant::now();
+        let mut ends = 0;
+        let mut send = |_, data: &[u8]| {
+            if data.is_empty() {
+                ends += 1;
+            }
+            Ok(())
+        };
+        assert_eq!(sender.deadline(), None);
+        sender
+            .process(frame(0, 768, true), CodecType::OpusVoice, start, &mut send)
+            .unwrap();
+        let old = sender.deadline().unwrap();
+        sender
+            .process(
+                frame(960, 0, true),
+                CodecType::OpusVoice,
+                start + Duration::from_millis(100),
+                &mut send,
+            )
+            .unwrap();
+        let renewed = sender.deadline().unwrap();
+        assert_eq!(renewed, old + Duration::from_millis(100));
+        sender
+            .process(
+                frame(1920, 0, false),
+                CodecType::OpusVoice,
+                start + Duration::from_millis(150),
+                &mut send,
+            )
+            .unwrap();
+        assert_eq!(sender.deadline(), Some(renewed));
+        sender.expire(old, &mut send).unwrap();
+        assert!(sender.speaking());
+        sender.interrupt(&mut send).unwrap();
+        assert_eq!(sender.deadline(), None);
+        sender
+            .process(
+                frame(2880, 768, true),
+                CodecType::OpusVoice,
+                start + Duration::from_millis(250),
+                &mut send,
+            )
+            .unwrap();
+        sender.expire(renewed, &mut send).unwrap(); // previous utterance's timer
+        assert!(sender.speaking());
+        sender
+            .expire(sender.deadline().unwrap(), &mut send)
+            .unwrap(); // capture stopped arriving
+        assert_eq!(sender.deadline(), None);
+        sender.interrupt(&mut send).unwrap();
+        assert_eq!(ends, 2);
+    }
+
     #[test]
     fn silence_onset_short_pause_tail_and_single_end() {
         let mut sender = VoiceSender::new().unwrap();
@@ -370,7 +431,8 @@ mod tests {
 
     #[test]
     fn standard_end_packet_ends_the_existing_receive_queue_without_extra_hold() {
-        use tsclientlib::{audio::AudioHandler, ClientId};
+        use crate::tsclientlib_audio::AudioHandler;
+        use tsclientlib::ClientId;
         use tsproto_packets::packets::{AudioData, Direction, InAudioBuf, OutAudio};
         let mut receiver = AudioHandler::<ClientId>::new();
         let mut sender = VoiceSender::new().unwrap();

@@ -5,6 +5,12 @@
   `ee3bc6f45a7137db7793ba5593a321df400d53e5`.
   MIT OR Apache-2.0; license texts are in `licenses/`.
   `native/src/badges.json` is generated from upstream `Badges.csv`.
+  `native/src/tsclientlib_audio.rs` retains that revision's receive-audio module
+  with a fix preventing historical packet-loss counts from deleting newly queued
+  packets, smooth sample shortening during queue catch-up, and receive diagnostics;
+  its header records the source and local changes.
+- Oboe 1.9.3: https://github.com/google/oboe/tree/1.9.3, Apache-2.0;
+  license text is in `licenses/oboe-Apache-2.0.txt`. Android output only.
 - libopus, bundled through audiopus_sys: BSD-3-Clause; license text is in `licenses/`.
 - nnnoiseless 0.5.2, a Rust port of RNNoise: BSD-3-Clause; license text is in
   `licenses/nnnoiseless-BSD.txt`.

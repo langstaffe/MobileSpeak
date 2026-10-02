@@ -16,6 +16,9 @@ tsproto-packets = { git = "https://github.com/ReSpeak/tsclientlib", rev = "ee3bc
 audiopus = "0.3.0-rc.0"
 audiopus_sys = { version = "0.2", features = ["static"] }
 nnnoiseless = { version = "0.5.2", default-features = false }
+# Already locked transitive dependencies, used by the patched receive module.
+thiserror = "=2.0.20"
+tracing = "=0.1.44"
 futures = "0.3"
 tokio = { version = "1", features = ["rt", "sync", "time", "net", "macros", "io-util"] }
 serde = { version = "1", features = ["derive"] }

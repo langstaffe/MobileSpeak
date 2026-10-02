@@ -1,0 +1,8 @@
+cmake_minimum_required(VERSION 3.22.1)
+project(mobilespeak_output LANGUAGES CXX)
+find_package(oboe REQUIRED CONFIG)
+add_library(mobilespeak_output SHARED output.cpp)
+target_compile_features(mobilespeak_output PRIVATE cxx_std_17)
+target_compile_options(mobilespeak_output PRIVATE -Wall -Wextra -Werror)
+target_link_directories(mobilespeak_output PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../jniLibs/${ANDROID_ABI})
+target_link_libraries(mobilespeak_output PRIVATE oboe::oboe mobilespeak_core)

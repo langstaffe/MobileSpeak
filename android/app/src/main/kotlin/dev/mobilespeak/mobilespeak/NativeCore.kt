@@ -11,5 +11,4 @@ internal object NativeCore {
     external fun command(handle: Long, json: ByteArray): Int
     external fun poll(handle: Long): ByteArray
     external fun capture(handle: Long, samples: ShortArray): Int
-    external fun playback(handle: Long, samples: FloatArray): Int
 }

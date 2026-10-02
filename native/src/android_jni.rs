@@ -1,12 +1,11 @@
 //! Small Android adapter for the same C ABI used by iOS.
 use crate::{
-    ts_capture, ts_command, ts_create, ts_destroy, ts_free, ts_playback, ts_poll, ts_set_notifier,
-    Bridge,
+    ts_capture, ts_command, ts_create, ts_destroy, ts_free, ts_poll, ts_set_notifier, Bridge,
 };
 use jni::{
     errors::{Error, JniError, ThrowRuntimeExAndDefault},
     jni_sig, jni_str,
-    objects::{Global, JByteArray, JFloatArray, JObject, JShortArray},
+    objects::{Global, JByteArray, JObject, JShortArray},
     sys::{jbyteArray, jint, jlong},
     EnvUnowned, JavaVM,
 };
@@ -151,27 +150,6 @@ pub extern "system" fn Java_dev_mobilespeak_mobilespeak_NativeCore_capture<'a>(
         let mut pcm = [0i16; 960];
         samples.get_region(env, 0, &mut pcm)?;
         Ok(unsafe { ts_capture(handle as *mut Bridge, pcm.as_ptr(), pcm.len()) })
-    })
-    .resolve::<ThrowRuntimeExAndDefault>()
-}
-
-#[no_mangle]
-pub extern "system" fn Java_dev_mobilespeak_mobilespeak_NativeCore_playback<'a>(
-    mut env: EnvUnowned<'a>,
-    _object: JObject<'a>,
-    handle: jlong,
-    samples: JFloatArray<'a>,
-) -> jint {
-    env.with_env(|env| -> jni::errors::Result<_> {
-        if handle == 0 || samples.len(env)? < 1920 {
-            return Err(invalid());
-        }
-        let mut pcm = [0f32; 1920];
-        let count = unsafe { ts_playback(handle as *mut Bridge, pcm.as_mut_ptr(), pcm.len()) };
-        if count > 0 {
-            samples.set_region(env, 0, &pcm[..count])?;
-        }
-        Ok(count as jint)
     })
     .resolve::<ThrowRuntimeExAndDefault>()
 }
