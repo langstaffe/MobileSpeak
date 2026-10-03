@@ -701,11 +701,18 @@ impl AvatarSync {
                     .write_all(&bytes)
                     .await
                     .map_err(|error| error.to_string())?;
-                transfer
+                // The server knows the declared size and closes after receiving it.
+                // Keep the socket alive until then, including through a VPN forwarder.
+                let mut response = [0; 1];
+                match transfer
                     .stream
-                    .shutdown()
+                    .read(&mut response)
                     .await
-                    .map_err(|error| error.to_string())
+                    .map_err(|error| error.to_string())?
+                {
+                    0 => Ok(()),
+                    _ => Err("avatar_upload_unexpected_response".into()),
+                }
             }
             .await;
             let _ = tx.send(Completion::Written(token, handle, result));
@@ -724,17 +731,26 @@ impl AvatarSync {
         if upload.handle != handle && upload.download != Some(handle) {
             return false;
         }
+        let direction = if upload.handle == handle {
+            "upload"
+        } else {
+            "download"
+        };
+        let detail = format!(
+            "transfer={direction} handle={}: {}",
+            handle.0,
+            transfer_error(&error)
+        );
         if matches!(&error, tsclientlib::Error::CommandError(c) if c.error == tsclientlib::TsError::FileTransferComplete)
         {
-            // Optional server status, never a replacement for write_all + shutdown.
-            self.log("transfer_complete_notification", None);
+            // Optional server status, never a replacement for the TCP transfer.
+            self.log("transfer_complete_notification", Some(&detail));
             return true;
         }
         if self.draining {
-            self.log("previous_transfer_status", Some(&transfer_error(&error)));
+            self.log("previous_transfer_status", Some(&detail));
             return true;
         }
-        let detail = transfer_error(&error);
         self.log("transfer_error", Some(&detail));
         if handle == upload.handle && self.stage == Stage::Connect && size_rejection(&error) {
             self.stop();
@@ -774,7 +790,7 @@ impl AvatarSync {
         match result {
             Ok(()) => {
                 self.upload.as_mut().unwrap().written = true;
-                self.log("write_finished", None);
+                self.log("upload_peer_closed", None);
                 true
             }
             Err(error) => {
@@ -1522,6 +1538,23 @@ mod tests {
     }
 
     #[test]
+    fn verification_stage_errors_identify_the_actual_failed_transfer() {
+        for (handle, direction) in [(7, "upload"), (8, "download")] {
+            let (mut sync, out) = setup(Stage::Verify);
+            assert!(sync.file_failed(
+                FiletransferHandle(handle),
+                command_error(tsclientlib::TsError::FileCouldNotOpenConnection),
+                &out
+            ));
+            let output = out.lock().unwrap();
+            let detail = output.events.back().unwrap()["detail"].as_str().unwrap();
+            assert!(detail.contains("stage=verify_file"));
+            assert!(detail.contains(&format!("transfer={direction} handle={handle}")));
+            assert!(detail.contains("FileCouldNotOpenConnection (0x080b)"));
+        }
+    }
+
+    #[test]
     fn server_hash_change_during_or_after_verification_invalidates_success() {
         for stage in [Stage::Download, Stage::Verify, Stage::Synced] {
             let (mut sync, out) = setup(stage);
@@ -1858,7 +1891,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn actual_tcp_write_matches_declared_size_and_closes_without_complete_event() {
+    async fn upload_waits_for_server_close_without_complete_event() {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let client = tokio::net::TcpStream::connect(listener.local_addr().unwrap())
             .await
@@ -1876,13 +1909,25 @@ mod tests {
             &tx,
             &out,
         );
-        let mut actual = Vec::new();
-        tokio::time::timeout(Duration::from_secs(2), server.read_to_end(&mut actual))
+        let mut actual = vec![0; expected.len()];
+        tokio::time::timeout(Duration::from_secs(2), server.read_exact(&mut actual))
             .await
             .unwrap()
             .unwrap();
         assert_eq!(actual, expected);
-        match rx.recv().await.unwrap() {
+        assert!(rx.try_recv().is_err());
+        assert!(
+            tokio::time::timeout(Duration::from_millis(30), server.read(&mut [0; 1]))
+                .await
+                .is_err(),
+            "client must keep the upload connection open until the server finishes"
+        );
+        server.shutdown().await.unwrap();
+        match tokio::time::timeout(Duration::from_secs(2), rx.recv())
+            .await
+            .unwrap()
+            .unwrap()
+        {
             Completion::Written(token, handle, result) => {
                 assert!(sync.accept_written(token, handle, result, &out));
             }
