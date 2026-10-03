@@ -2,6 +2,7 @@ package dev.mobilespeak.mobilespeak
 
 import android.app.KeyguardManager
 import android.os.SystemClock
+import android.provider.Settings
 import android.view.View
 import android.view.ViewGroup
 import androidx.compose.ui.platform.ViewRootForTest
@@ -56,11 +57,19 @@ class HomeScrollStateTest {
                 scroll(pixels = 170f)
                 val settingsPosition = position()
                 assertTrue(settingsPosition.axis > 0)
-                repeat(4) {
+                val viewport = onMain { scrollNode().boundsInRoot }
+                click(context.localized(R.string.voice_drawer_expand))
+                repeat(4) { refresh ->
                     click(context.localized(R.string.tab_channels)); assertEquals(channelPosition, position())
                     click(context.localized(R.string.tab_members)); assertEquals(memberPosition, position())
                     click(context.localized(R.string.tab_settings)); assertEquals(settingsPosition, position())
+                    assertEquals("Expansion keeps the list viewport", viewport, onMain { scrollNode().boundsInRoot })
+                    publish(fixture.copy(snapshot = fixture.snapshot.copy(clients = fixture.snapshot.clients.map {
+                        if (it.id == own.id) it.copy(speaking = refresh % 2 == 0) else it
+                    })))
+                    assertDrawer(expanded = true, enabled = true)
                 }
+                click(context.localized(R.string.voice_drawer_collapse))
 
                 click(context.localized(R.string.tab_channels))
                 click(context.localized(R.string.channel_chat_open, channels[19].name))
@@ -76,10 +85,39 @@ class HomeScrollStateTest {
                 val settingsBottom = position()
                 click(context.localized(R.string.settings_language))
                 click(context.localized(R.string.action_back)); assertEquals(settingsBottom, position())
-                publish(fixture.copy(snapshot = Snapshot()))
+                val collapsedTop = drawerTop()
+                val animationScale = Settings.Global.getFloat(context.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f)
+                val animationWait = maxOf(500L, (800 * animationScale).toLong())
+                click(context.localized(R.string.voice_drawer_expand))
+                settle(animationWait)
+                val expandedTop = drawerTop()
+                publish(fixture.copy(snapshot = Snapshot(status = "disconnected")), wait = false)
+                settle(40)
+                val closingTop = drawerTop()
+                if (animationScale > 0f) {
+                    assertTrue("Disconnect closes from the visible position", closingTop >= expandedTop - 1f)
+                    assertTrue("Disconnect must not snap to the collapsed position", closingTop < collapsedTop - 1f)
+                }
+                assertDrawer(expanded = false, enabled = false)
+                publish(fixture, wait = false) // Reconnect while automatic closing is still running.
+                settle(40)
+                assertTrue("Reconnect must not jump to an anchor", drawerTop() >= closingTop - 1f)
+                assertDrawer(expanded = false, enabled = true)
+                click(context.localized(R.string.voice_drawer_expand))
+                settle(animationWait)
+                assertDrawer(expanded = true, enabled = true)
+                assertTrue("A new user action supersedes the old close animation", drawerTop() < collapsedTop - 1f)
+                for (status in listOf("disconnected", "connecting", "reconnecting")) {
+                    publish(fixture.copy(snapshot = Snapshot(status = status)))
+                    assertDrawer(expanded = false, enabled = false)
+                }
+                settle(animationWait)
+                assertEquals(collapsedTop, drawerTop(), 1f)
+                assertEquals("Closing keeps the list viewport", viewport, onMain { scrollNode().boundsInRoot })
                 assertEquals("Disconnect keeps settings offset", settingsBottom, position())
                 click(context.localized(R.string.tab_channels))
                 publish(fixture)
+                assertDrawer(expanded = false, enabled = true)
                 assertEquals("A new connection starts channels at the top", 0f, position().axis, 0f)
                 click(context.localized(R.string.tab_members))
                 assertEquals("A new connection starts members at the top", 0f, position().axis, 0f)
@@ -101,6 +139,19 @@ class HomeScrollStateTest {
     }
 
     private data class Position(val axis: Float, val first: String?, val top: Float?)
+
+    private fun drawerTop(): Float = onMain {
+        val labels = listOf(context.localized(R.string.voice_drawer_expand), context.localized(R.string.voice_drawer_collapse))
+        nodes().first { node -> node.config.getOrNull(SemanticsProperties.ContentDescription)?.any { it in labels } == true }.boundsInRoot.top
+    }
+
+    private fun assertDrawer(expanded: Boolean, enabled: Boolean) = onMain {
+        val label = context.localized(if (expanded) R.string.voice_drawer_collapse else R.string.voice_drawer_expand)
+        val handle = nodes().first { it.config.getOrNull(SemanticsProperties.ContentDescription)?.contains(label) == true }
+        assertEquals(!enabled, handle.config.contains(SemanticsProperties.Disabled))
+        assertEquals(context.localized(if (expanded) R.string.voice_drawer_expanded else R.string.voice_drawer_collapsed),
+            handle.config[SemanticsProperties.StateDescription])
+    }
 
     private fun position(): Position = onMain {
         val scroll = scrollNode()
@@ -143,8 +194,8 @@ class HomeScrollStateTest {
         settle()
     }
 
-    private fun publish(ui: SessionUiState) { instrumentation.runOnMainSync { state.value = ui }; settle() }
-    private fun settle() { instrumentation.waitForIdleSync(); SystemClock.sleep(500); instrumentation.waitForIdleSync() }
+    private fun publish(ui: SessionUiState, wait: Boolean = true) { instrumentation.runOnMainSync { state.value = ui }; if (wait) settle() }
+    private fun settle(delayMillis: Long = 500) { instrumentation.waitForIdleSync(); SystemClock.sleep(delayMillis); instrumentation.waitForIdleSync() }
     private fun field(name: String) = ClientSession.javaClass.getDeclaredField(name).apply { isAccessible = true }
     @Suppress("UNCHECKED_CAST")
     private val state get() = field("mutableState").get(ClientSession) as MutableStateFlow<SessionUiState>

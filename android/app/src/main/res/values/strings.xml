@@ -79,6 +79,10 @@
     <string name="voice_mute">Mute</string>
     <string name="voice_enable_listening">Turn On Listening</string>
     <string name="voice_disable_listening">Turn Off Listening</string>
+    <string name="voice_drawer_expand">Expand connection drawer</string>
+    <string name="voice_drawer_collapse">Collapse connection drawer</string>
+    <string name="voice_drawer_expanded">Expanded</string>
+    <string name="voice_drawer_collapsed">Collapsed</string>
     <string name="chat_send_failed">Failed to send</string>
     <string name="chat_input_placeholder">Message</string>
     <string name="notification_channel_voice">Voice Connection</string>

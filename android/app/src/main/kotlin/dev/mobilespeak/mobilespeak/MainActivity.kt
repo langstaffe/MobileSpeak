@@ -15,6 +15,10 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.AnimationState
+import androidx.compose.animation.core.animateTo
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.updateTransition
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -34,6 +38,8 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -56,12 +62,19 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.input.pointer.util.VelocityTracker
+import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
@@ -84,12 +97,16 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.UUID
+import kotlin.math.abs
+import kotlin.math.roundToInt
 
 class MainActivity : AppCompatActivity() {
     private var openAbout by mutableStateOf(false)
@@ -189,6 +206,15 @@ private data class ChatTarget(val conversation: String, val title: String, val c
 internal fun MobileSpeakApp(requestPermissions: () -> Unit, openAbout: Boolean = false, consumedAbout: () -> Unit = {}) {
     val ui by ClientSession.state.collectAsStateWithLifecycle()
     var tab by androidx.compose.runtime.saveable.rememberSaveable { mutableIntStateOf(0) }
+    var drawerExpanded by rememberSaveable { mutableStateOf(false) }
+    val connected = ui.snapshot.status == "connected"
+    val drawerHaptic = LocalHapticFeedback.current
+    val setDrawerExpanded: (Boolean) -> Unit = { expanded ->
+        if (connected && expanded != drawerExpanded) {
+            drawerHaptic.performHapticFeedback(HapticFeedbackType.VirtualKey)
+            drawerExpanded = expanded
+        }
+    }
     var editingBookmark by remember { mutableStateOf<Bookmark?>(null) }
     var showNewBookmark by remember { mutableStateOf(false) }
     var deletingBookmark by remember { mutableStateOf<Bookmark?>(null) }
@@ -225,19 +251,21 @@ internal fun MobileSpeakApp(requestPermissions: () -> Unit, openAbout: Boolean =
         if (openAbout) { closeChat(); tab = 2; settingsPage = "about"; consumedAbout() }
     }
 
-    BackHandler(enabled = navigation.isRunning || settingsPage != null || chat != null || selectedChannel != null || editingBookmark != null || showNewBookmark) {
+    BackHandler(enabled = navigation.isRunning || settingsPage != null || chat != null || selectedChannel != null || editingBookmark != null || showNewBookmark || drawerExpanded) {
         when {
             settingsPage != null -> settingsPage = null
             chat != null -> closeChat()
             navigation.isRunning -> Unit
             selectedChannel != null -> selectedChannel = null
             editingBookmark != null -> editingBookmark = null
-            else -> showNewBookmark = false
+            showNewBookmark -> showNewBookmark = false
+            else -> setDrawerExpanded(false)
         }
     }
 
     LaunchedEffect(ui.snapshot.status, ui.snapshot.ownClient?.let { id -> ui.snapshot.clients.firstOrNull { it.id == id }?.channel }) {
         if (ui.snapshot.status != "connected") {
+            drawerExpanded = false
             selectedChannel = null
             closeChat()
         } else if (chat?.channel != null && chat?.channel?.id != ui.snapshot.clients.firstOrNull { it.id == ui.snapshot.ownClient }?.channel) {
@@ -295,7 +323,6 @@ internal fun MobileSpeakApp(requestPermissions: () -> Unit, openAbout: Boolean =
                     topBar = { Header(ui) },
                     bottomBar = {
                         Column(Modifier.background(Palette.bottom).navigationBarsPadding()) {
-                            VoiceBar(ui, requestPermissions)
                             Row(Modifier.padding(top = 10.dp, bottom = 8.dp)) {
                                 NavigationItem(stringResource(R.string.tab_channels), UiIcons.Number, tab == 0, ui.unread.channelCount) { tab = 0 }
                                 NavigationItem(stringResource(R.string.tab_members), UiIcons.People, tab == 1, ui.unread.privateCounts.values.sum()) { tab = 1 }
@@ -314,24 +341,30 @@ internal fun MobileSpeakApp(requestPermissions: () -> Unit, openAbout: Boolean =
                                 TextButton(onClick = ClientSession::clearError) { Text(stringResource(R.string.action_close)) }
                             }
                         }
-                        tabState.SaveableStateProvider(tabPageKey) { when {
-                            tab == 2 -> SettingsScreen(ui, requestPermissions, onPage = { settingsPage = it })
-                            ui.snapshot.status in setOf("connecting", "reconnecting") -> BusyScreen(ui.snapshot.status)
-                            ui.snapshot.status != "connected" -> BookmarkScreen(
-                                ui,
-                                onAdd = { showNewBookmark = true },
-                                onEdit = { editingBookmark = it },
-                                onDelete = { deletingBookmark = it },
-                                onConnect = {
-                                    ClientSession.connect(it)
-                                    requestPermissions()
-                                },
-                            )
-                            tab == 0 -> ChannelScreen(ui, onSelect = { selectedChannel = it }, onChat = { if (chat == null && !navigation.isRunning) chat = ChatTarget(it.conversation, it.name, channel = it) })
-                            else -> MemberScreen(ui) {
-                                it.conversation?.let { conversation -> if (chat == null && !navigation.isRunning) chat = ChatTarget(conversation, it.name, member = it) }
+                        BoxWithConstraints(Modifier.weight(1f).fillMaxWidth().clipToBounds()) {
+                            // Only the collapsed header takes layout space; expansion overlays the same list viewport.
+                            Box(Modifier.fillMaxSize().padding(bottom = 64.dp)) {
+                                tabState.SaveableStateProvider(tabPageKey) { when {
+                                    tab == 2 -> SettingsScreen(ui, requestPermissions, onPage = { settingsPage = it })
+                                    ui.snapshot.status in setOf("connecting", "reconnecting") -> BusyScreen(ui.snapshot.status)
+                                    ui.snapshot.status != "connected" -> BookmarkScreen(
+                                        ui,
+                                        onAdd = { showNewBookmark = true },
+                                        onEdit = { editingBookmark = it },
+                                        onDelete = { deletingBookmark = it },
+                                        onConnect = {
+                                            ClientSession.connect(it)
+                                            requestPermissions()
+                                        },
+                                    )
+                                    tab == 0 -> ChannelScreen(ui, onSelect = { selectedChannel = it }, onChat = { if (chat == null && !navigation.isRunning) chat = ChatTarget(it.conversation, it.name, channel = it) })
+                                    else -> MemberScreen(ui) {
+                                        it.conversation?.let { conversation -> if (chat == null && !navigation.isRunning) chat = ChatTarget(conversation, it.name, member = it) }
+                                    }
+                                } }
                             }
-                        } }
+                            VoiceDrawer(ui, requestPermissions, drawerExpanded, setDrawerExpanded, maxHeight, maxWidth, Modifier.align(Alignment.BottomCenter))
+                        }
                     }
                 }
             }
@@ -848,15 +881,174 @@ private fun toggleHapticType(enabled: Boolean) = when {
 }
 
 @Composable
+private fun VoiceDrawer(ui: SessionUiState, requestPermissions: () -> Unit, expanded: Boolean, onExpandedChange: (Boolean) -> Unit, availableHeight: Dp, availableWidth: Dp, modifier: Modifier = Modifier) {
+    val density = LocalDensity.current
+    val connected = ui.snapshot.status == "connected"
+    val travel = with(density) { voiceDrawerTravel(availableHeight.toPx(), 64.dp.toPx()) }
+    val limit = with(density) { minOf(16.dp.toPx(), (availableHeight.toPx() - 64.dp.toPx() - travel).coerceAtLeast(0f)) }
+    val touchSlop = LocalViewConfiguration.current.touchSlop
+    val geometry = remember(availableHeight, availableWidth, density.density) { Any() }
+    val session = remember(connected, geometry) { Any() }
+    val currentSession by rememberUpdatedState(session)
+    val currentExpanded by rememberUpdatedState(expanded)
+    val changeExpanded by rememberUpdatedState(onExpandedChange)
+    var height by remember { mutableFloatStateOf(if (connected && expanded) travel else 0f) }
+    var held by remember { mutableStateOf(false) }
+    var releaseVelocity by remember { mutableFloatStateOf(0f) }
+    var settleRequest by remember { mutableIntStateOf(0) }
+    var automaticallyClosing by remember { mutableStateOf(false) }
+    val currentAutomaticClose by rememberUpdatedState(automaticallyClosing)
+    val containerOffset = with(density) { (availableHeight.toPx() - 64.dp.toPx()).coerceAtLeast(0f) }
+    // A resized expansion anchor must not clip an automatic close or the user's next gesture.
+    val maximumOffset = maxOf(travel + limit, height).coerceAtMost(containerOffset)
+    var configuredSession by remember { mutableStateOf<Any?>(null) }
+    var configuredGeometry by remember { mutableStateOf<Any?>(null) }
+    LaunchedEffect(session, expanded, held, settleRequest) {
+        if (configuredSession !== session) {
+            val resized = configuredGeometry !== geometry
+            val initial = configuredGeometry == null
+            configuredSession = session
+            configuredGeometry = geometry
+            held = false
+            releaseVelocity = 0f
+            if (initial || (resized && connected && !automaticallyClosing)) {
+                automaticallyClosing = false
+                height = if (connected && expanded) travel else 0f
+                return@LaunchedEffect
+            }
+            // A connection change invalidates gestures, but keeps the visible position for closing.
+            automaticallyClosing = !connected || automaticallyClosing
+        }
+        if (!held) {
+            if (connected && expanded) automaticallyClosing = false
+            height = height.coerceIn(-limit, maximumOffset)
+            val target = if (connected && expanded) travel else 0f
+            if (abs(target - height) <= with(density) { .5.dp.toPx() }) {
+                height = target
+                automaticallyClosing = false
+                return@LaunchedEffect
+            }
+            val maxVelocity = minOf(with(density) { 1500.dp.toPx() }, maxOf(with(density) { 80.dp.toPx() }, abs(target - height) * 8f))
+            AnimationState(height, initialVelocity = (-releaseVelocity).coerceIn(-maxVelocity, maxVelocity)).animateTo(
+                target, spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow,
+                    visibilityThreshold = with(density) { .5.dp.toPx() }),
+            ) {
+                if (currentSession === session && currentExpanded == expanded && !held) height = value.coerceIn(-limit, maximumOffset)
+            }
+            if (currentSession === session && currentExpanded == expanded && !held) {
+                releaseVelocity = 0f
+                automaticallyClosing = false
+            }
+        }
+    }
+    val drag = Modifier.pointerInput(session) {
+        awaitEachGesture {
+            val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+            if (!connected || travel == 0f) return@awaitEachGesture
+            val closingOnPress = currentAutomaticClose
+            if (!closingOnPress) {
+                held = true
+                releaseVelocity = 0f
+                settleRequest++
+            }
+            val tracker = VelocityTracker()
+            var position = Offset.Zero
+            tracker.addPosition(down.uptimeMillis, position)
+            if (!closingOnPress) height = height.coerceIn(-limit, containerOffset)
+            var dragTravel = if (height > travel + limit) height else travel
+            var raw = voiceDrawerRawOffset(height, dragTravel, limit)
+            var dragging = false
+            var released = false
+            try {
+                while (true) {
+                    val change = awaitPointerEvent(PointerEventPass.Initial).changes.firstOrNull { it.id == down.id } ?: break
+                    if (change.isConsumed) break
+                    val delta = change.positionChange()
+                    position += delta
+                    // Accumulated deltas keep the velocity tracker independent of the moving drawer's local origin.
+                    tracker.addPosition(change.uptimeMillis, position)
+                    if (!dragging) {
+                        if (abs(position.x) > touchSlop && abs(position.x) > abs(position.y)) break
+                        if (abs(position.y) > touchSlop) {
+                            if (closingOnPress) {
+                                held = true
+                                automaticallyClosing = false
+                                dragTravel = maxOf(travel, height)
+                                raw = voiceDrawerRawOffset(height, dragTravel, limit)
+                            }
+                            dragging = true
+                            raw -= position.y
+                        }
+                    } else raw -= delta.y
+                    if (dragging) {
+                        height = voiceDrawerOffset(raw, dragTravel, limit)
+                        change.consume() // Initial pass cancels a child button's press before it can click.
+                    }
+                    if (!change.pressed) { released = true; break }
+                }
+            } finally {
+                if (currentSession === session && (!closingOnPress || dragging)) {
+                    releaseVelocity = if (dragging && released) tracker.calculateVelocity().y else 0f
+                    if (dragging && released) changeExpanded(voiceDrawerShouldExpand(height, travel, releaseVelocity))
+                    held = false
+                    settleRequest++ // Also settle taps/cancellations or drags returning to the same anchor.
+                }
+            }
+        }
+    }
+    val label = stringResource(if (expanded && connected) R.string.voice_drawer_collapse else R.string.voice_drawer_expand)
+    val state = stringResource(if (expanded && connected) R.string.voice_drawer_expanded else R.string.voice_drawer_collapsed)
+    val visibleOffset = height.coerceIn(-limit, maximumOffset)
+    Column(modifier.fillMaxWidth()
+        .offset { IntOffset(0, (-minOf(0f, visibleOffset)).roundToInt()) }
+        .height((64.dp + with(density) { maxOf(0f, visibleOffset).toDp() }).coerceAtMost(availableHeight))
+        .background(Palette.bottom).then(drag)) {
+        Box(Modifier.fillMaxWidth().height(64.dp)) {
+            Column {
+                Spacer(Modifier.height(16.dp))
+                VoiceBar(ui, requestPermissions)
+            }
+            Box(Modifier.align(Alignment.TopCenter).size(48.dp)
+                .clickable(interactionSource = null, indication = null, enabled = connected && travel > 0f, role = Role.Button, onClickLabel = label) { changeExpanded(!currentExpanded) }
+                .semantics { contentDescription = label; stateDescription = state }
+                .padding(top = 10.dp), contentAlignment = Alignment.TopCenter) {
+                Icon(UiIcons.DrawerHandle, null, Modifier.size(44.dp, 4.dp), tint = if (connected) Palette.text else Palette.muted)
+            }
+        }
+        Spacer(Modifier.weight(1f).fillMaxWidth())
+    }
+}
+
+internal fun voiceDrawerTravel(availableHeight: Float, collapsedHeight: Float): Float =
+    (availableHeight * 7f / 10f - collapsedHeight).coerceAtLeast(0f)
+
+internal fun voiceDrawerShouldExpand(height: Float, travel: Float, velocity: Float): Boolean =
+    travel > 0f && height.coerceIn(0f, travel) - velocity * .2f > travel / 2f
+
+internal fun voiceDrawerOffset(raw: Float, travel: Float, limit: Float): Float {
+    val clamped = raw.coerceIn(0f, travel)
+    val overflow = raw - clamped
+    return if (limit > 0f) clamped + overflow * .35f / (1f + abs(overflow) * .35f / limit) else clamped
+}
+
+internal fun voiceDrawerRawOffset(offset: Float, travel: Float, limit: Float): Float {
+    val clamped = offset.coerceIn(0f, travel)
+    val overflow = offset - clamped
+    return if (limit > 0f) clamped + overflow / (.35f * (1f - minOf(.999f, abs(overflow) / limit))) else clamped
+}
+
+@Composable
 private fun VoiceBar(ui: SessionUiState, requestPermissions: () -> Unit) {
     val haptic = LocalHapticFeedback.current
     val connected = ui.snapshot.status == "connected"
     val ownClient = ui.snapshot.clients.firstOrNull { it.id == ui.snapshot.ownClient }
     val channel = ownClient?.channel
     val muted = ui.microphoneMuted || ui.deafened
-    Row(Modifier.fillMaxWidth().background(Palette.bottom).padding(start = 12.dp, end = 8.dp).heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Icon(UiIcons.Wave, null, Modifier.size(18.dp), tint = if (connected) Palette.green else Palette.muted)
-        Text(if (connected) stringResource(R.string.status_connected_to_channel, ui.snapshot.channels.firstOrNull { it.id == channel }?.name.orEmpty()) else if (ui.snapshot.status in listOf("connecting", "reconnecting")) stringResource(R.string.status_connecting) else stringResource(R.string.status_disconnected), Modifier.weight(1f), fontSize = 12.sp, lineHeight = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    Row(Modifier.fillMaxWidth().background(Palette.bottom).padding(end = 8.dp).height(48.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(Modifier.weight(1f).height(48.dp).padding(start = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Icon(UiIcons.Wave, null, Modifier.size(18.dp), tint = if (connected) Palette.green else Palette.muted)
+            Text(if (connected) stringResource(R.string.status_connected_to_channel, ui.snapshot.channels.firstOrNull { it.id == channel }?.name.orEmpty()) else if (ui.snapshot.status in listOf("connecting", "reconnecting")) stringResource(R.string.status_connecting) else stringResource(R.string.status_disconnected), Modifier.weight(1f), fontSize = 12.sp, lineHeight = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
         IconButton(onClick = {
             haptic.performHapticFeedback(toggleHapticType(ui.microphoneMuted))
             if (ui.microphoneMuted && !ClientSession.microphonePermission) requestPermissions()

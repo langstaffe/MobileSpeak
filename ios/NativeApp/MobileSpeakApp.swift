@@ -494,10 +494,274 @@ extension View {
     }
 }
 
+private struct VoiceAudioButtonStyle: ButtonStyle {
+    let dragging: Bool
+    let reduceMotion: Bool
+    @Environment(\.isEnabled) private var enabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        let pressed = enabled && configuration.isPressed && !dragging
+        return configuration.label.opacity(enabled ? 1 : 0.5).background {
+            ZStack {
+                if pressed {
+                    Circle()
+                        .fill(Color(hex: 0xF2F3F5).opacity(0.1))
+                        .frame(width: 44, height: 44)
+                        .transition(.asymmetric(insertion: .scale(scale: 0.4).combined(with: .opacity), removal: .opacity))
+                }
+            }
+            .animation(reduceMotion || dragging || !enabled ? nil : .easeOut(duration: pressed ? 0.16 : 0.2), value: pressed)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+        }
+    }
+}
+
+// UIKit owns the pan and spring so a new press can stop at the presentation frame on iOS 15.
+private struct VoiceDrawerHost: UIViewControllerRepresentable {
+    let content: AnyView
+    let connected: Bool
+    let expanded: Bool
+    let travel: CGFloat
+    let reduceMotion: Bool
+    let onExpanded: (Bool) -> Void
+    let onTouch: (Bool) -> Void
+
+    func makeUIViewController(context: Context) -> VoiceDrawerController { VoiceDrawerController() }
+    func updateUIViewController(_ controller: VoiceDrawerController, context: Context) {
+        controller.configure(content: content, connected: connected, expanded: expanded, travel: travel,
+                             reduceMotion: reduceMotion, onExpanded: onExpanded, onTouch: onTouch)
+    }
+    static func dismantleUIViewController(_ controller: VoiceDrawerController, coordinator: ()) { controller.cancelMotion() }
+}
+
+private final class DrawerHitView: UIView {
+    weak var pane: UIView?
+    var currentFrame: (() -> CGRect)?
+    var onPress: (() -> Void)?
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        guard isUserInteractionEnabled, !isHidden, alpha > 0.01, bounds.contains(point),
+              let pane, (currentFrame?() ?? pane.frame).contains(point) else { return nil }
+        if event?.allTouches?.contains(where: { $0.phase == .began }) == true { onPress?() }
+        // The model frame already holds the spring's destination; route taps to the visible header.
+        let frame = currentFrame?() ?? pane.frame
+        return pane.hitTest(CGPoint(x: point.x - frame.minX, y: point.y - frame.minY), with: event) ?? self
+    }
+}
+
+private final class DrawerPanRecognizer: UIPanGestureRecognizer {
+    var onTapEnd: (() -> Void)?
+    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent) {
+        super.touchesMoved(touches, with: event)
+        if state == .failed { onTapEnd?() }
+    }
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
+        super.touchesEnded(touches, with: event)
+        if state == .failed { onTapEnd?() }
+    }
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) {
+        super.touchesCancelled(touches, with: event)
+        if state == .failed { onTapEnd?() }
+    }
+}
+
+private final class VoiceDrawerController: UIViewController, UIGestureRecognizerDelegate {
+    private let host = UIHostingController(rootView: AnyView(EmptyView()))
+    private var animator: UIViewPropertyAnimator?
+    private var springOrigin = CGRect.zero
+    private var connected = false
+    private var expanded = false
+    private var automaticallyClosing = false
+    private var travel: CGFloat = 0
+    private var reduceMotion = false
+    private var dragOrigin: CGFloat = 0
+    private var dragTravel: CGFloat = 0
+    private var gestureValid = false
+    private var lastSize = CGSize.zero
+    private var onExpanded: (Bool) -> Void = { _ in }
+    private var onTouch: (Bool) -> Void = { _ in }
+    private lazy var pan: DrawerPanRecognizer = {
+        let recognizer = DrawerPanRecognizer(target: self, action: #selector(drag(_:)))
+        recognizer.delegate = self
+        recognizer.cancelsTouchesInView = true
+        recognizer.onTapEnd = { [weak self] in
+            guard let self, self.connected, !self.automaticallyClosing else { return }
+            self.settle(velocity: 0)
+        }
+        return recognizer
+    }()
+    override func loadView() { view = DrawerHitView() }
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.clipsToBounds = true
+        addChild(host); view.addSubview(host.view); host.didMove(toParent: self)
+        host.view.autoresizingMask = []
+        host.view.backgroundColor = UIColor(Palette.bottom)
+        host.view.accessibilityIdentifier = "voice-drawer"
+        host.view.clipsToBounds = true
+        let hitView = view as! DrawerHitView
+        hitView.pane = host.view
+        hitView.currentFrame = { [weak self] in self?.presentationFrame ?? .zero }
+        hitView.onPress = { [weak self] in
+            guard let self, self.connected, !self.automaticallyClosing,
+                  self.pan.state != .began, self.pan.state != .changed else { return }
+            self.onTouch(false)
+            self.stopSpring()
+        }
+        view.addGestureRecognizer(pan)
+    }
+    func configure(content: AnyView, connected: Bool, expanded: Bool, travel: CGFloat, reduceMotion: Bool,
+                   onExpanded: @escaping (Bool) -> Void, onTouch: @escaping (Bool) -> Void) {
+        loadViewIfNeeded()
+        let connectionChanged = self.connected != connected
+        let resized = self.travel != travel
+        let changed = self.expanded != (connected && expanded)
+        let continueClosing = automaticallyClosing && !(connected && expanded)
+        let stopAnimation = reduceMotion && !self.reduceMotion
+        self.connected = connected; self.expanded = connected && expanded
+        self.travel = travel; self.reduceMotion = reduceMotion
+        self.onExpanded = onExpanded; self.onTouch = onTouch
+        host.rootView = content
+        if connectionChanged || resized {
+            cancelMotion()
+            pan.isEnabled = connected && travel > 0
+            if (connectionChanged && !connected) || continueClosing {
+                automaticallyClosing = true
+                self.expanded = false
+                settle(velocity: 0)
+            } else { render(self.expanded ? travel : 0) }
+        } else if changed || stopAnimation {
+            if changed { automaticallyClosing = false }
+            settle(velocity: 0)
+        }
+    }
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        guard lastSize != view.bounds.size else { return }
+        lastSize = view.bounds.size
+        let continueClosing = automaticallyClosing
+        cancelMotion()
+        pan.isEnabled = connected && travel > 0
+        if continueClosing {
+            automaticallyClosing = true
+            settle(velocity: 0)
+        } else { render(expanded && connected ? travel : 0) }
+    }
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        cancelMotion()
+        pan.isEnabled = connected && travel > 0
+        render(expanded && connected ? travel : 0)
+    }
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        cancelMotion()
+        render(expanded && connected ? travel : 0)
+    }
+    func cancelMotion() {
+        gestureValid = false
+        automaticallyClosing = false
+        pan.isEnabled = false
+        stopSpring()
+        releaseClickBlock()
+    }
+    private var presentationFrame: CGRect {
+        animator == nil ? host.view.frame : (host.view.layer.presentation()?.frame ?? springOrigin)
+    }
+    private var offset: CGFloat {
+        let frame = presentationFrame
+        let collapsed = min(64, view.bounds.height)
+        // Keep the visible drawer height when an error banner or window change resizes the container.
+        return frame.height > collapsed ? frame.height - collapsed : view.bounds.height - frame.minY - collapsed
+    }
+    private var resistanceLimit: CGFloat { min(16, max(0, view.bounds.height - 64 - travel)) }
+    private func releaseClickBlock() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self, !self.gestureValid else { return }
+            self.onTouch(false)
+        }
+    }
+    private func render(_ offset: CGFloat) {
+        let collapsed = min(64, view.bounds.height)
+        let height = min(view.bounds.height, collapsed + max(0, offset))
+        host.view.frame = CGRect(x: 0, y: view.bounds.height - height - min(0, offset), width: view.bounds.width, height: height)
+    }
+    private func stopSpring() {
+        guard let animator else { return }
+        let current = offset
+        animator.stopAnimation(true)
+        self.animator = nil
+        render(current)
+    }
+    private func settle(velocity: CGFloat) {
+        stopSpring()
+        let target: CGFloat = connected && expanded ? travel : 0
+        let distance = target - offset
+        guard !reduceMotion, UIView.areAnimationsEnabled, abs(distance) > 0.5 else {
+            automaticallyClosing = false
+            render(target)
+            return
+        }
+        // UIKit takes velocity relative to the remaining distance; pan velocity is downward pt/s.
+        let relativeVelocity = min(8, max(-8, -velocity / distance))
+        let timing = UISpringTimingParameters(dampingRatio: 1, initialVelocity: CGVector(dx: 0, dy: relativeVelocity))
+        let animation = UIViewPropertyAnimator(duration: 0.45, timingParameters: timing)
+        animation.addAnimations { [weak self] in self?.render(target) }
+        animation.addCompletion { [weak self, weak animation] _ in
+            guard let self, self.animator === animation else { return }
+            self.animator = nil
+            self.automaticallyClosing = false
+            self.render(self.connected && self.expanded ? self.travel : 0)
+        }
+        springOrigin = host.view.frame
+        animator = animation
+        animation.startAnimation()
+    }
+    func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        let velocity = pan.velocity(in: view)
+        return connected && travel > 0 && abs(velocity.y) > abs(velocity.x)
+    }
+    @objc private func drag(_ recognizer: UIPanGestureRecognizer) {
+        guard connected, travel > 0 else { return }
+        switch recognizer.state {
+        case .began:
+            let closing = automaticallyClosing
+            automaticallyClosing = false
+            stopSpring()
+            // Closing may retain a taller pane after a resize; resume dragging without jumping to the new anchor.
+            dragTravel = closing || offset > travel + resistanceLimit ? max(travel, offset) : travel
+            dragOrigin = HomeView.drawerRawOffset(offset, travel: dragTravel, limit: resistanceLimit)
+            gestureValid = true; onTouch(true)
+            fallthrough
+        case .changed:
+            guard gestureValid else { return }
+            render(HomeView.drawerOffset(dragOrigin - recognizer.translation(in: view).y, travel: dragTravel, limit: resistanceLimit))
+        case .ended:
+            guard gestureValid else { return }
+            gestureValid = false
+            let velocity = recognizer.velocity(in: view).y
+            expanded = HomeView.drawerShouldExpand(height: offset, travel: travel, velocity: velocity)
+            onExpanded(expanded)
+            settle(velocity: velocity)
+            releaseClickBlock()
+        case .cancelled, .failed:
+            guard gestureValid else { return }
+            gestureValid = false
+            settle(velocity: 0)
+            releaseClickBlock()
+        default: break
+        }
+    }
+}
+
 struct HomeView: View {
     @ObservedObject var client: Client
     @EnvironmentObject private var language: LanguageSettings
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State var tab = 0
+    @Environment(\.sizeCategory) private var sizeCategory
+    @State private var drawerExpanded = false
+    @State private var drawerBlocksClick = false
     @State private var showConnect = false
     @State private var editingBookmark: Bookmark?
     @State private var deletingBookmark: Bookmark?
@@ -533,37 +797,41 @@ struct HomeView: View {
                     Button { client.error = nil } label: { Image(systemName: "xmark").frame(width: 44, height: 44) }.accessibilityLabel(L10n.string("accessibility_close_error"))
                 }.padding(.leading, 16).background(Color(hex: 0x542A30))
             }
-            ZStack {
-                Group {
-                    if client.busy { VStack(spacing: 20) { ProgressView(); Text(L10n.string(client.reconnecting ? "status_reconnecting" : "status_connecting_server")) }.frame(maxWidth: .infinity, maxHeight: .infinity) }
-                    else if !client.connected { if client.bookmarks.isEmpty { empty } else { bookmarkList } }
-                    else {
-                        ZStack {
-                            channels
-                                .opacity(tab == 0 ? 1 : 0)
-                                .allowsHitTesting(tab == 0)
-                                .accessibilityHidden(tab != 0)
-                            members
-                                .opacity(tab == 1 ? 1 : 0)
-                                .allowsHitTesting(tab == 1)
-                                .accessibilityHidden(tab != 1)
+            GeometryReader { proxy in
+                ZStack(alignment: .bottom) {
+                    ZStack {
+                        Group {
+                            if client.busy { VStack(spacing: 20) { ProgressView(); Text(L10n.string(client.reconnecting ? "status_reconnecting" : "status_connecting_server")) }.frame(maxWidth: .infinity, maxHeight: .infinity) }
+                            else if !client.connected { if client.bookmarks.isEmpty { empty } else { bookmarkList } }
+                            else {
+                                ZStack {
+                                    channels
+                                        .opacity(tab == 0 ? 1 : 0)
+                                        .allowsHitTesting(tab == 0)
+                                        .accessibilityHidden(tab != 0)
+                                    members
+                                        .opacity(tab == 1 ? 1 : 0)
+                                        .allowsHitTesting(tab == 1)
+                                        .accessibilityHidden(tab != 1)
+                                }
+                            }
                         }
-                    }
-                }
-                .opacity(tab == 2 ? 0 : 1)
-                .allowsHitTesting(tab != 2)
-                .accessibilityHidden(tab == 2)
-                settings
-                    .opacity(tab == 2 ? 1 : 0)
-                    .allowsHitTesting(tab == 2)
-                    .accessibilityHidden(tab != 2)
-            }.frame(maxWidth: .infinity, maxHeight: .infinity)
-            voiceBar
+                        .opacity(tab == 2 ? 0 : 1)
+                        .allowsHitTesting(tab != 2)
+                        .accessibilityHidden(tab == 2)
+                        settings
+                            .opacity(tab == 2 ? 1 : 0)
+                            .allowsHitTesting(tab == 2)
+                            .accessibilityHidden(tab != 2)
+                    }.frame(maxWidth: .infinity, maxHeight: .infinity).padding(.bottom, 64)
+                    voiceDrawer(availableHeight: proxy.size.height)
+                }.frame(maxWidth: .infinity, maxHeight: .infinity).contentShape(Rectangle()).clipped()
+            }
             HStack {
                 navigation(L10n.string("tab_channels"), "channels", 0)
                 navigation(L10n.string("tab_members"), "members", 1)
                 navigation(L10n.string("tab_settings"), "settings", 2)
-            }.padding(.top, 10).padding(.bottom, 8).background(Palette.bottom)
+            }.padding(.top, 10).padding(.bottom, 8).background(Palette.bottom.ignoresSafeArea(edges: .bottom))
         }
         .foregroundStyle(Color(hex: 0xF2F3F5))
         .background(Palette.background.ignoresSafeArea())
@@ -572,6 +840,9 @@ struct HomeView: View {
                 .onAppear { viewportHeight = proxy.size.height }
                 .onChange(of: proxy.size.height) { viewportHeight = $0 }
         })
+        .onChange(of: client.connected) { connected in
+            if !connected { drawerExpanded = false; drawerBlocksClick = false }
+        }
         .navigationTitle(tab == 2 ? L10n.string("tab_settings") : "")
         .navigationBarHidden(true)
         .sheet(isPresented: $showConnect) { ConnectView(client: client) }
@@ -644,15 +915,15 @@ struct HomeView: View {
                         }.buttonStyle(.plain).disabled(client.connected || client.busy)
                         Menu {
                             Button { editingBookmark = bookmark } label: {
-                                Label { Text(L10n.string("action_edit")) } icon: { AppIcon(name: "pencil") }
+                                Label { Text(L10n.string("action_edit")) } icon: { AppIcon(name: "pencil", scaledSize: 24) }
                             }
                             Button(role: .destructive) { deletingBookmark = bookmark } label: {
-                                Label { Text(L10n.string("action_delete")) } icon: { AppIcon(name: "trash", originalTint: Palette.menuDestructive) }
+                                Label { Text(L10n.string("action_delete")) } icon: { AppIcon(name: "trash", scaledSize: 24, originalTint: Palette.menuDestructive) }
                             }
-                        } label: { AppIcon(name: "more").frame(width: 44, height: 44) }.accessibilityLabel(L10n.format("bookmark_manage", bookmark.title))
+                        } label: { AppIcon(name: "more", scaledSize: 24).frame(width: 44, height: 44) }.accessibilityLabel(L10n.format("bookmark_manage", bookmark.title))
                     }.padding(12).background(Palette.card).clipShape(RoundedRectangle(cornerRadius: 14))
                 }
-                Button { showConnect = true } label: { Label { Text(L10n.string("bookmark_add_server")) } icon: { AppIcon(name: "plus") } }.padding(.vertical, 12)
+                Button { showConnect = true } label: { Label { Text(L10n.string("bookmark_add_server")) } icon: { AppIcon(name: "plus", scaledSize: 18) } }.padding(.vertical, 12)
                 if client.connected { Text(L10n.string("bookmark_disconnect_first")).font(.footnote).foregroundStyle(Palette.muted) }
             }.padding(16)
         }.background(Palette.background)
@@ -662,7 +933,7 @@ struct HomeView: View {
             AppIcon(name: "headphones", size: 52).foregroundStyle(Palette.muted)
             Text(L10n.string("empty_title")).font(.system(size: 20, weight: .heavy))
             Text(L10n.string("empty_message")).font(.subheadline).foregroundStyle(Palette.muted).multilineTextAlignment(.center)
-            Button { showConnect = true } label: { Label { Text(L10n.string("action_connect_server")) } icon: { AppIcon(name: "plus") }.padding(.vertical, 5) }
+            Button { showConnect = true } label: { Label { Text(L10n.string("action_connect_server")) } icon: { AppIcon(name: "plus", scaledSize: 18) }.padding(.vertical, 5) }
                 .buttonStyle(.borderedProminent).clipShape(Capsule()).padding(.top, 8)
         }.padding(24).frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -764,7 +1035,7 @@ struct HomeView: View {
                     if let channelGroupIcon { GroupIconImage(icon: channelGroupIcon) }
                 }.fixedSize()
             }
-            AppIcon(name: m.deafened ? "speaker-off" : m.muted ? "mic-off" : "mic-on")
+            AppIcon(name: m.deafened ? "speaker-off" : m.muted ? "mic-off" : "mic-on", scaledSize: 20)
                 .foregroundStyle(m.speaking ? Palette.green : Palette.muted)
                 .frame(width: 20)
                 .accessibilityLabel(L10n.string(m.deafened ? "member_listening_off" : m.muted ? "member_muted" : m.speaking ? "member_speaking" : "member_microphone_on"))
@@ -881,25 +1152,80 @@ struct HomeView: View {
             }.padding(.top, PageTitle.inset).padding(.bottom, 20)
         }
     }
+    private func voiceDrawer(availableHeight: CGFloat) -> some View {
+        let travel = Self.drawerTravel(availableHeight: availableHeight)
+        return VoiceDrawerHost(
+            content: AnyView(VStack(spacing: 0) {
+                VStack(spacing: 0) {
+                    Color.clear.frame(height: 16)
+                    voiceBar
+                }
+                .overlay(alignment: .top) {
+                    Button {
+                        if !drawerBlocksClick { setDrawerExpanded(!drawerExpanded) }
+                    } label: {
+                        Image(decorative: "Icon-drawer-handle").renderingMode(.template).resizable().scaledToFit()
+                            .frame(width: 44, height: 4).foregroundStyle(client.connected ? Color(hex: 0xF2F3F5) : Palette.muted)
+                            .padding(.top, 10).frame(width: 44, height: 44, alignment: .top).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain).disabled(!client.connected || travel == 0)
+                    .accessibilityLabel(L10n.string(drawerExpanded && client.connected ? "voice_drawer_collapse" : "voice_drawer_expand"))
+                    .accessibilityValue(L10n.string(drawerExpanded && client.connected ? "voice_drawer_expanded" : "voice_drawer_collapsed"))
+                }
+                Spacer(minLength: 0)
+            }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .foregroundStyle(Color(hex: 0xF2F3F5)).background(Palette.bottom)
+                .environment(\.sizeCategory, sizeCategory).environment(\.locale, language.locale)
+                .tint(Palette.accent).ignoresSafeArea(.container)),
+            connected: client.connected, expanded: drawerExpanded, travel: travel, reduceMotion: reduceMotion,
+            onExpanded: setDrawerExpanded, onTouch: { drawerBlocksClick = $0 })
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+    private func setDrawerExpanded(_ expanded: Bool) {
+        guard client.connected, expanded != drawerExpanded else { return }
+        UISelectionFeedbackGenerator().selectionChanged()
+        drawerExpanded = expanded
+    }
+    static func drawerTravel(availableHeight: CGFloat) -> CGFloat {
+        max(0, min(availableHeight, availableHeight * 7 / 10) - 64)
+    }
+    static func drawerShouldExpand(height: CGFloat, travel: CGFloat, velocity: CGFloat) -> Bool {
+        travel > 0 && min(travel, max(0, height)) - velocity * 0.2 > travel / 2
+    }
+    static func drawerOffset(_ raw: CGFloat, travel: CGFloat, limit: CGFloat = 16) -> CGFloat {
+        let clamped = min(travel, max(0, raw))
+        let overflow = raw - clamped
+        return limit > 0 ? clamped + overflow * 0.35 / (1 + abs(overflow) * 0.35 / limit) : clamped
+    }
+    static func drawerRawOffset(_ offset: CGFloat, travel: CGFloat, limit: CGFloat) -> CGFloat {
+        let clamped = min(travel, max(0, offset))
+        let overflow = offset - clamped
+        return limit > 0 ? clamped + overflow / (0.35 * (1 - min(0.999, abs(overflow) / limit))) : clamped
+    }
     private var voiceBar: some View {
         let speaking = client.connected && client.state.clients.first { $0.id == client.state.ownClient }?.speaking == true
         return HStack(spacing: 8) {
-            AppIcon(name: "waveform").foregroundStyle(client.connected ? Palette.green : Palette.muted)
-            Text(client.connected ? L10n.format("status_connected_to_channel", client.state.channels.first { $0.id == client.currentChannel }?.name ?? "") : client.busy ? L10n.string("status_connecting") : L10n.string("status_disconnected")).font(.system(size: 12, weight: .semibold)).lineLimit(1)
-            Spacer(minLength: 0)
+            HStack(spacing: 8) {
+                AppIcon(name: "waveform", scaledSize: 18).foregroundStyle(client.connected ? Palette.green : Palette.muted)
+                Text(client.connected ? L10n.format("status_connected_to_channel", client.state.channels.first { $0.id == client.currentChannel }?.name ?? "") : client.busy ? L10n.string("status_connecting") : L10n.string("status_disconnected")).font(.system(size: 12, weight: .semibold)).lineLimit(1)
+                Spacer(minLength: 0)
+            }.padding(.leading, 12).frame(maxWidth: .infinity).frame(height: 48)
             Button {
+                guard !drawerBlocksClick else { return }
                 UISelectionFeedbackGenerator().selectionChanged()
                 Task { await client.setAudio(input: !client.microphoneMuted) }
             } label: {
-                AppIcon(name: client.muted ? "mic-off" : "mic-on").foregroundStyle(client.muted ? Palette.muted : speaking ? Palette.green : Color(hex: 0xF2F3F5)).frame(width: 44, height: 48)
+                AppIcon(name: client.muted ? "mic-off" : "mic-on", scaledSize: 20).foregroundStyle(client.muted ? Palette.muted : speaking ? Palette.green : Color(hex: 0xF2F3F5)).frame(width: 44, height: 48).contentShape(Rectangle())
             }.accessibilityLabel(L10n.string(client.microphoneMuted ? "voice_enable_microphone" : "voice_mute")).disabled(client.audioBusy || client.deafened)
             Button {
+                guard !drawerBlocksClick else { return }
                 UISelectionFeedbackGenerator().selectionChanged()
                 Task { await client.setAudio(output: !client.deafened) }
             } label: {
-                AppIcon(name: client.deafened ? "speaker-off" : "speaker-on").foregroundStyle(client.deafened ? Palette.muted : Color(hex: 0xF2F3F5)).frame(width: 44, height: 48)
+                AppIcon(name: client.deafened ? "speaker-off" : "speaker-on", scaledSize: 22).foregroundStyle(client.deafened ? Palette.muted : Color(hex: 0xF2F3F5)).frame(width: 44, height: 48).contentShape(Rectangle())
             }.accessibilityLabel(L10n.string(client.deafened ? "voice_enable_listening" : "voice_disable_listening")).disabled(client.audioBusy)
-        }.padding(.leading, 12).padding(.trailing, 8).background(Palette.bottom)
+        }.padding(.trailing, 8).background(Palette.bottom)
+            .buttonStyle(VoiceAudioButtonStyle(dragging: drawerBlocksClick, reduceMotion: reduceMotion))
     }
     private func navigation(_ title: String, _ icon: String, _ index: Int) -> some View {
         Button { tab = index } label: {
@@ -1049,7 +1375,7 @@ struct ChatView: View {
                     HStack(spacing: 4) {
                         if message.status == .pending { ProgressView().scaleEffect(0.65) }
                         if message.status == .failed {
-                            AppIcon(name: "error", scaledSize: 11, relativeTo: .caption2).foregroundStyle(.red)
+                            AppIcon(name: "error", scaledSize: 12, relativeTo: .caption2).foregroundStyle(.red)
                             Text(message.error.map { L10n.coreError($0, detail: "") } ?? L10n.string("chat_send_failed")).foregroundStyle(.red)
                         }
                     }.font(.caption2)
@@ -1120,7 +1446,7 @@ struct SettingsEntry: View {
             Text(title).fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
             if let value { Text(value).foregroundStyle(Palette.muted).fixedSize(horizontal: false, vertical: true) }
-            AppIcon(name: "chevron-right", scaledSize: 12, relativeTo: .caption).foregroundStyle(Palette.muted).accessibilityHidden(true)
+            AppIcon(name: "chevron-right", scaledSize: 16, relativeTo: .caption).foregroundStyle(Palette.muted).accessibilityHidden(true)
         }.frame(maxWidth: .infinity, minHeight: 56).padding(.horizontal, 16).padding(.vertical, 4)
             .contentShape(Rectangle()).background(Palette.card).clipShape(RoundedRectangle(cornerRadius: 14))
     }
@@ -1143,7 +1469,7 @@ struct SettingsDetailPage: View {
                                 HStack {
                                     Text(L10n.string(option.titleKey))
                                     Spacer()
-                                    if language.selection == option { AppIcon(name: "checkmark").foregroundStyle(Palette.accent).accessibilityHidden(true) }
+                                    if language.selection == option { AppIcon(name: "checkmark", scaledSize: 20).foregroundStyle(Palette.accent).accessibilityHidden(true) }
                                 }.frame(maxWidth: .infinity, minHeight: 56).padding(.horizontal, 16).padding(.vertical, 4).contentShape(Rectangle())
                             }.buttonStyle(.plain)
                                 .accessibilityValue(L10n.string(language.selection == option ? "selection_selected" : "selection_not_selected"))

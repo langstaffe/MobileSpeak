@@ -78,6 +78,10 @@
     <string name="voice_mute">静音</string>
     <string name="voice_enable_listening">开启收听</string>
     <string name="voice_disable_listening">关闭收听</string>
+    <string name="voice_drawer_expand">展开连接状态抽屉</string>
+    <string name="voice_drawer_collapse">收起连接状态抽屉</string>
+    <string name="voice_drawer_expanded">已展开</string>
+    <string name="voice_drawer_collapsed">已收起</string>
     <string name="chat_send_failed">发送失败</string>
     <string name="chat_input_placeholder">输入消息</string>
     <string name="notification_channel_voice">语音连接</string>

@@ -78,12 +78,18 @@ final class ClientTests: XCTestCase {
             scroll.setContentOffset(CGPoint(x: 0, y: offset), animated: false)
         }
         try await Task.sleep(nanoseconds: 100_000_000)
+        let viewportSizes = homeScrolls.map { $0.bounds.size }
         func checkOffsets() {
-            for (scroll, offset) in zip(homeScrolls, offsets) {
+            for (index, scroll) in homeScrolls.enumerated() {
+                let offset = offsets[index]
                 XCTAssertEqual(scroll.contentOffset.y, offset, accuracy: 0.5)
+                XCTAssertEqual(scroll.bounds.size, viewportSizes[index])
                 XCTAssertTrue(scrolls(host.view).contains { $0 === scroll })
             }
         }
+        try activate(L10n.string("voice_drawer_expand"))
+        try await Task.sleep(nanoseconds: 500_000_000)
+        checkOffsets()
         let started = Date()
         for _ in 0..<8 {
             for (tab, title) in ["tab_members", "tab_settings", "tab_channels"].enumerated() {
@@ -92,9 +98,12 @@ final class ClientTests: XCTestCase {
                 host.view.layoutIfNeeded()
                 checkOffsets()
                 let active = homeScrolls[[1, 2, 0][tab]]
-                let point = active.convert(CGPoint(x: 8, y: active.bounds.midY), to: host.view)
+                let point = active.convert(CGPoint(x: 8, y: active.bounds.minY + 20), to: host.view)
                 let hit = try XCTUnwrap(host.view.hitTest(point, with: nil))
                 XCTAssertTrue(hit === active || hit.isDescendant(of: active), "Only the visible tab receives touches")
+                let covered = active.convert(CGPoint(x: 8, y: active.bounds.maxY - 8), to: host.view)
+                let drawerHit = try XCTUnwrap(host.view.hitTest(covered, with: nil))
+                XCTAssertFalse(drawerHit === active || drawerHit.isDescendant(of: active), "The drawer blocks touches to the covered list")
                 let labels = accessibleElements().compactMap(\.accessibilityLabel).joined(separator: " ")
                 if title == "tab_settings" { XCTAssertTrue(labels.contains(L10n.string("settings_noise_suppression"))); XCTAssertFalse(labels.contains("Scroll channel 21")); XCTAssertFalse(labels.contains("Scroll member 12")) }
                 // Direct UIKit enumeration exposes both retained lazy containers;
@@ -111,6 +120,9 @@ final class ClientTests: XCTestCase {
         print(timingText)
         let timing = XCTAttachment(string: timingText)
         timing.lifetime = .keepAlways; add(timing)
+        try activate(L10n.string("voice_drawer_collapse"))
+        try await Task.sleep(nanoseconds: 500_000_000)
+        checkOffsets()
 
         for (tab, label) in [("tab_channels", L10n.format("channel_chat_open", "Scroll channel 20")), ("tab_members", "Scroll member 12"), ("tab_settings", L10n.string("settings_about"))] {
             try activate(L10n.string(tab))
@@ -143,18 +155,57 @@ final class ClientTests: XCTestCase {
         }
         try activate(L10n.string("tab_settings"))
         try await Task.sleep(nanoseconds: 30_000_000)
-        for status in ["disconnected", "connecting", "connected"] {
+        func drawerPane(_ view: UIView) -> UIView? {
+            if view.accessibilityIdentifier == "voice-drawer" { return view }
+            return view.subviews.lazy.compactMap(drawerPane).first
+        }
+        let pane = try XCTUnwrap(drawerPane(host.view))
+        let collapsedTop = pane.frame.minY
+        func drawerTop() -> CGFloat { pane.layer.presentation()?.frame.minY ?? pane.frame.minY }
+        let animated = !UIAccessibility.isReduceMotionEnabled && UIView.areAnimationsEnabled
+        try activate(L10n.string("voice_drawer_expand"))
+        try await Task.sleep(nanoseconds: 100_000_000) // Disconnect while the spring is still running.
+        let openingTop = drawerTop()
+        client.state = Snapshot(status: "disconnected")
+        try await Task.sleep(nanoseconds: 40_000_000)
+        let closingTop = drawerTop()
+        if animated {
+            // Allow one display frame of opening before SwiftUI observes the disconnect.
+            XCTAssertLessThan(abs(closingTop - openingTop), abs(collapsedTop - openingTop) * 0.75)
+            XCTAssertLessThan(closingTop, collapsedTop - 0.5, "Disconnect must animate from the visible position")
+        }
+        let disabledHandle = try XCTUnwrap(accessibleElements().first { $0.accessibilityLabel == L10n.string("voice_drawer_expand") })
+        XCTAssertTrue(disabledHandle.accessibilityTraits.contains(.notEnabled))
+        let parent = try XCTUnwrap(pane.superview)
+        let audioPoint = parent.convert(CGPoint(x: pane.bounds.maxX - 22, y: drawerTop() + 40), to: host.view)
+        let audioHit = try XCTUnwrap(host.view.hitTest(audioPoint, with: nil))
+        XCTAssertTrue(audioHit === pane || audioHit.isDescendant(of: pane), "The visible audio header remains touchable during closing")
+        client.state = snapshot // Reconnect before automatic closing completes.
+        try await Task.sleep(nanoseconds: 40_000_000)
+        XCTAssertGreaterThanOrEqual(drawerTop(), closingTop - 0.5)
+        let reconnectedHandle = try XCTUnwrap(accessibleElements().first { $0.accessibilityLabel == L10n.string("voice_drawer_expand") })
+        XCTAssertFalse(reconnectedHandle.accessibilityTraits.contains(.notEnabled))
+        XCTAssertEqual(reconnectedHandle.accessibilityValue, L10n.string("voice_drawer_collapsed"))
+        try activate(L10n.string("voice_drawer_expand"))
+        try await Task.sleep(nanoseconds: 500_000_000)
+        XCTAssertLessThan(drawerTop(), collapsedTop - 0.5, "A new user action supersedes the old close animation")
+        for status in ["disconnected", "connecting", "reconnecting", "connected"] {
             client.state = status == "connected" ? snapshot : Snapshot(status: status)
             try await Task.sleep(nanoseconds: 80_000_000)
             XCTAssertTrue(scrolls(host.view).contains { $0 === homeScrolls[2] })
             XCTAssertEqual(homeScrolls[2].contentOffset.y, offsets[2], accuracy: 0.5)
             let labels = accessibleElements().compactMap(\.accessibilityLabel).joined(separator: " ")
+            let handle = try XCTUnwrap(accessibleElements().first { $0.accessibilityLabel == L10n.string("voice_drawer_expand") })
+            XCTAssertEqual(handle.accessibilityTraits.contains(.notEnabled), status != "connected")
+            XCTAssertEqual(handle.accessibilityValue, L10n.string("voice_drawer_collapsed"))
             XCTAssertFalse(labels.contains("Scroll channel 21")); XCTAssertFalse(labels.contains("Scroll member 12"))
             XCTAssertFalse(labels.contains(L10n.string("status_connecting_server")))
             let image = UIGraphicsImageRenderer(size: host.view.bounds.size).image { _ in host.view.drawHierarchy(in: host.view.bounds, afterScreenUpdates: true) }
             let attachment = XCTAttachment(image: image); attachment.name = "Retained settings while \(status)"; attachment.lifetime = .keepAlways; add(attachment)
             try image.pngData()?.write(to: FileManager.default.temporaryDirectory.appendingPathComponent("home-scroll-settings-\(status).png"))
         }
+        try await Task.sleep(nanoseconds: 500_000_000)
+        XCTAssertEqual(drawerTop(), collapsedTop, accuracy: 0.5)
         XCTAssertEqual(homeScrolls[2].contentOffset.y, offsets[2], accuracy: 0.5)
     }
 
@@ -998,6 +1049,29 @@ final class ClientTests: XCTestCase {
         XCTAssertFalse(client.microphoneMuted)
         XCTAssertFalse(client.deafened)
         await client.setAudio(input: originalMicrophoneMuted, output: originalDeafened)
+    }
+    func testVoiceDrawerGeometryResistanceAndDistanceVelocitySettling() {
+        let travel = HomeView.drawerTravel(availableHeight: 650)
+        XCTAssertEqual(travel, 391, accuracy: 0.001)
+        XCTAssertEqual((64 + travel) / (650 - 64 - travel), 7.0 / 3, accuracy: 0.001)
+        XCTAssertEqual(HomeView.drawerTravel(availableHeight: 320), 320 * 7.0 / 10 - 64, accuracy: 0.001)
+        for height in [CGFloat(0), 64, 90] { XCTAssertEqual(HomeView.drawerTravel(availableHeight: height), 0) }
+        XCTAssertFalse(HomeView.drawerShouldExpand(height: 99, travel: 200, velocity: 0))
+        XCTAssertFalse(HomeView.drawerShouldExpand(height: 100, travel: 200, velocity: 0))
+        XCTAssertTrue(HomeView.drawerShouldExpand(height: 101, travel: 200, velocity: 0))
+        XCTAssertTrue(HomeView.drawerShouldExpand(height: 20, travel: 200, velocity: -500))
+        XCTAssertFalse(HomeView.drawerShouldExpand(height: 180, travel: 200, velocity: 500))
+        XCTAssertFalse(HomeView.drawerShouldExpand(height: 600, travel: 200, velocity: 600))
+        XCTAssertTrue(HomeView.drawerShouldExpand(height: -400, travel: 200, velocity: -600))
+        XCTAssertFalse(HomeView.drawerShouldExpand(height: 0, travel: 0, velocity: -500))
+        for raw in [CGFloat(-10_000), -40, 0, 100, 200, 240, 10_000] {
+            let offset = HomeView.drawerOffset(raw, travel: 200, limit: 16)
+            XCTAssertGreaterThan(offset, -16)
+            XCTAssertLessThan(offset, 216)
+            XCTAssertEqual(HomeView.drawerRawOffset(offset, travel: 200, limit: 16), raw, accuracy: 0.001)
+        }
+        XCTAssertEqual(HomeView.drawerOffset(-40, travel: 200, limit: 0), 0)
+        XCTAssertEqual(HomeView.drawerOffset(240, travel: 200, limit: 0), 200)
     }
     func testChannelSheetGrowsWithMeasuredContentAndCapsAtViewport() {
         let empty = HomeView.channelSheetLayout(memberHeight: 52, viewportHeight: 800)

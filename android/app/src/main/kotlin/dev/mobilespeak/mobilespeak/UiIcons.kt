@@ -38,6 +38,8 @@ internal object UiIcons {
         @Composable get() = ImageVector.vectorResource(R.drawable.ic_speaker_off)
     val Wave: ImageVector
         @Composable get() = ImageVector.vectorResource(R.drawable.ic_waveform)
+    val DrawerHandle: ImageVector
+        @Composable get() = ImageVector.vectorResource(R.drawable.ic_drawer_handle)
     val Chat: ImageVector
         @Composable get() = ImageVector.vectorResource(R.drawable.ic_channel_chat)
     val Send: ImageVector
