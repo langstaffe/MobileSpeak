@@ -56,7 +56,7 @@ extension NetworkGrade {
         switch self {
         case .good: Color(hex: 0x3DBE78)
         case .fair: Color(hex: 0xE9B44C)
-        case .poor: Color(hex: 0xC15AB8)
+        case .poor: Color(hex: 0xA8449A)
         }
     }
 }

@@ -29,7 +29,7 @@ import androidx.compose.ui.unit.sp
 internal fun NetworkGrade?.networkColor(): Color = when (this) {
     NetworkGrade.GOOD -> Color(0xFF3DBE78)
     NetworkGrade.FAIR -> Color(0xFFE9B44C)
-    NetworkGrade.POOR -> Color(0xFFC15AB8)
+    NetworkGrade.POOR -> Color(0xFFA8449A)
     null -> Palette.muted
 }
 

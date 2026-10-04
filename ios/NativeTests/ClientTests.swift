@@ -72,7 +72,7 @@ final class ClientTests: XCTestCase {
                 let context = try XCTUnwrap(CGContext(data: nil, width: cg.width, height: cg.height, bitsPerComponent: 8, bytesPerRow: cg.width * 4, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
                 context.draw(cg, in: CGRect(x: 0, y: 0, width: cg.width, height: cg.height))
                 let bytes = try XCTUnwrap(context.data).assumingMemoryBound(to: UInt8.self)
-                for color in [[61,190,120], [233,180,76], [193,90,184]] {
+                for color in [[61,190,120], [233,180,76], [168,68,154]] {
                     XCTAssertTrue((0..<cg.width * cg.height).contains { offset in (0..<3).allSatisfy { abs(Int(bytes[offset * 4 + $0]) - color[$0]) < 3 } }, "Missing network color \(color), \(name)")
                 }
             }
