@@ -206,4 +206,10 @@
     <string name="settings_noise_system_help">None disables MobileSpeak noise suppression. System voice processing may still apply.</string>
     <string name="error_noise_suppression">Audio processing switch failed; previous selection retained</string>
     <string name="settings_dpdfnet_performance">DPDFNet2 uses more CPU and battery. Slower devices may have interrupted audio, especially in the background.</string>
+    <string name="network_latency">Latency</string>
+    <string name="network_packet_loss">Packet loss</string>
+    <string name="network_unavailable">Network statistics unavailable</string>
+    <string name="network_summary">Latency %1$s milliseconds, RTT variation %2$s milliseconds, packet loss %3$s percent</string>
+    <string name="network_chart">Latency over the last 30 seconds</string>
+    <string name="network_chart_summary">%1$d samples, scale 0 to %2$s milliseconds</string>
 </resources>

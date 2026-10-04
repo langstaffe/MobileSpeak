@@ -205,4 +205,10 @@
     <string name="settings_noise_system_help">“无”关闭 MobileSpeak 降噪；系统语音处理仍可能生效。</string>
     <string name="error_noise_suppression">音频处理切换失败，已保留原方案</string>
     <string name="settings_dpdfnet_performance">DPDFNet2 的处理和耗电开销较高；较慢设备尤其在后台可能出现语音断续。</string>
+    <string name="network_latency">延迟</string>
+    <string name="network_packet_loss">丢包</string>
+    <string name="network_unavailable">暂无网络统计</string>
+    <string name="network_summary">延迟 %1$s 毫秒，RTT 波动 %2$s 毫秒，丢包百分之 %3$s</string>
+    <string name="network_chart">最近 30 秒延迟</string>
+    <string name="network_chart_summary">%1$d 个采样，纵轴 0 至 %2$s 毫秒</string>
 </resources>

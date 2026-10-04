@@ -44,7 +44,52 @@ data class Snapshot(
     val canSend: Boolean = false,
     val channels: List<Channel> = emptyList(),
     val clients: List<Member> = emptyList(),
+    val networkQuality: NetworkQuality? = null,
 )
+
+enum class NetworkGrade { GOOD, FAIR, POOR }
+data class NetworkSample(val second: Long, val rttMs: Double, val grade: NetworkGrade)
+data class NetworkQuality(
+    val rttMs: Double? = null,
+    val deviationMs: Double? = null,
+    val packetLossPercent: Double? = null,
+    val rttGrade: NetworkGrade? = null,
+    val deviationGrade: NetworkGrade? = null,
+    val packetLossGrade: NetworkGrade? = null,
+    val iconGrade: NetworkGrade? = null,
+    val axisMaxMs: Double = 10.0,
+    val nowSecond: Long = 0,
+    val samples: List<NetworkSample> = emptyList(),
+) {
+    val latencyText get() = number(rttMs, 0, 999.0)
+    val deviationText get() = number(deviationMs, 1, 999.9)
+    val lossText get() = number(packetLossPercent, 1)
+    val axisText get() = axisNumber(axisMaxMs)
+    val midAxisText get() = axisNumber(axisMaxMs / 2)
+    companion object {
+        fun axisNumber(value: Double): String = number(value, if (value % 1.0 == 0.0) 0 else 1)
+        fun number(value: Double?, decimals: Int, maximum: Double = Double.POSITIVE_INFINITY): String =
+            if (value == null || !value.isFinite()) "—"
+            else {
+                val scale = if (decimals == 0) 1.0 else 10.0
+                String.format(Locale.ROOT, "%.${decimals}f", kotlin.math.floor(minOf(value, maximum) * scale + 0.5) / scale)
+            }
+    }
+}
+
+internal fun JSONObject.networkQuality() = NetworkQuality(
+    rttMs = if (isNull("rttMs")) null else getDouble("rttMs"),
+    deviationMs = if (isNull("deviationMs")) null else getDouble("deviationMs"),
+    packetLossPercent = if (isNull("packetLossPercent")) null else getDouble("packetLossPercent"),
+    rttGrade = networkGrade("rttGrade"), deviationGrade = networkGrade("deviationGrade"),
+    packetLossGrade = networkGrade("packetLossGrade"), iconGrade = networkGrade("iconGrade"),
+    axisMaxMs = getDouble("axisMaxMs"), nowSecond = getLong("nowSecond"),
+    samples = getJSONArray("samples").objects().map {
+        NetworkSample(it.getLong("second"), it.getDouble("rttMs"), requireNotNull(it.networkGrade("grade")))
+    },
+)
+private fun JSONObject.networkGrade(key: String): NetworkGrade? =
+    stringOrNull(key)?.let { NetworkGrade.valueOf(it.uppercase(Locale.ROOT)) }
 
 data class ChatMessage(
     val id: String,
@@ -164,6 +209,7 @@ internal fun JSONObject.snapshot() = Snapshot(
     serverId = stringOrNull("serverId"),
     ownClient = if (has("ownClient") && !isNull("ownClient")) getLong("ownClient") else null,
     canSend = optBoolean("canSend"),
+    networkQuality = optJSONObject("networkQuality")?.networkQuality(),
     channels = getJSONArray("channels").objects().map {
         Channel(it.getLong("id"), it.getLong("parent"), it.getLong("order"), it.getString("name"),
             it.getBoolean("password"), it.getBoolean("permanent"), it.getString("key"), it.stringOrNull("iconPath"))

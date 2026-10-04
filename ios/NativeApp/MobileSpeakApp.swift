@@ -51,6 +51,92 @@ private struct AppIcon: View {
     }
 }
 
+extension NetworkGrade {
+    var color: Color {
+        switch self {
+        case .good: Color(hex: 0x3DBE78)
+        case .fair: Color(hex: 0xE9B44C)
+        case .poor: Color(hex: 0xC15AB8)
+        }
+    }
+}
+
+// Shared core owns all sampling, grades and scale; this view only draws its snapshot.
+struct NetworkQualityPanel: View {
+    var quality: NetworkQuality = NetworkQuality()
+    @ScaledMetric(relativeTo: .body) private var valueSize: CGFloat = 16
+    @ScaledMetric(relativeTo: .caption) private var labelSize: CGFloat = 12
+    @State private var width: CGFloat = 0
+
+    private let numbersWidth: CGFloat = 123
+    private var stacked: Bool { width < numbersWidth + 116 || valueSize > 16 }
+    private var numbers: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(L10n.string("network_latency")).font(.system(size: labelSize))
+            (Text(quality.latencyText).foregroundColor(quality.rttGrade?.color ?? Palette.muted)
+                + Text(" ms ± ").foregroundColor(Palette.muted)
+                + Text(quality.deviationText).foregroundColor(quality.deviationGrade?.color ?? Palette.muted))
+                .font(.system(size: valueSize, weight: .semibold)).monospacedDigit().fixedSize(horizontal: false, vertical: true)
+            (Text(L10n.string("network_packet_loss") + " ").foregroundColor(Palette.muted)
+                + Text(quality.lossText).foregroundColor(quality.packetLossGrade?.color ?? Palette.muted)
+                + Text("%").foregroundColor(Palette.muted))
+                .font(.system(size: labelSize)).monospacedDigit().fixedSize(horizontal: false, vertical: true)
+        }.foregroundStyle(Palette.muted)
+            .accessibilityElement(children: .ignore).accessibilityLabel(quality.accessibilitySummary)
+    }
+    private var chart: some View {
+        Canvas { context, size in
+            let font = Font.system(size: min(labelSize, 16)).monospacedDigit()
+            let upper = context.resolve(Text(quality.axisText + " ms").font(font).foregroundColor(Palette.muted))
+            let middle = context.resolve(Text(quality.midAxisText + " ms").font(font).foregroundColor(Palette.muted))
+            let upperSize = upper.measure(in: size)
+            let middleSize = middle.measure(in: size)
+            let labelWidth = max(upperSize.width, middleSize.width)
+            let left = labelWidth + 8
+            let plotWidth = max(0, size.width - left)
+            let top = upperSize.height / 2
+            let baseline = max(top, size.height - 1)
+            let height = baseline - top
+            for fraction in [CGFloat(0), 0.5, 1] {
+                let y = top + height * fraction
+                var line = Path(); line.move(to: CGPoint(x: left, y: y)); line.addLine(to: CGPoint(x: size.width, y: y))
+                context.stroke(line, with: .color(Palette.muted.opacity(0.25)), lineWidth: 0.5)
+            }
+            context.draw(upper, at: CGPoint(x: labelWidth, y: top), anchor: .trailing)
+            context.draw(middle, at: CGPoint(x: labelWidth, y: top + height / 2), anchor: .trailing)
+            let step = plotWidth / 30
+            let gap = min(2, step * 0.25)
+            for sample in quality.samples where sample.second <= quality.nowSecond && quality.nowSecond - sample.second < 30 {
+                let index = 29 - CGFloat(quality.nowSecond - sample.second)
+                let barHeight = max(1, height * CGFloat(sample.rttMs / quality.axisMaxMs))
+                let rect = CGRect(x: left + index * step + gap / 2, y: baseline - barHeight, width: max(0, step - gap), height: barHeight)
+                // Round only the top corners; keep the baseline flat.
+                let radius = min(1.5, rect.width / 2, barHeight / 2)
+                let path = Path(UIBezierPath(roundedRect: rect, byRoundingCorners: [.topLeft, .topRight], cornerRadii: CGSize(width: radius, height: radius)).cgPath)
+                context.fill(path, with: .color(sample.grade.color))
+            }
+        }.accessibilityElement(children: .ignore)
+            .accessibilityLabel(L10n.string("network_chart"))
+            .accessibilityValue(quality.samples.isEmpty ? L10n.string("network_unavailable") : L10n.format("network_chart_summary", quality.samples.count, quality.axisText))
+    }
+    var body: some View {
+        VStack(spacing: 12) {
+            if stacked {
+                numbers.frame(maxWidth: .infinity, alignment: .leading)
+                chart.frame(height: 64)
+            } else {
+                HStack(alignment: .top, spacing: 0) {
+                    numbers.frame(width: numbersWidth, alignment: .leading)
+                    chart.frame(maxWidth: .infinity)
+                }
+                .fixedSize(horizontal: false, vertical: true)
+            }
+        }.padding(.horizontal, 12).padding(.vertical, 12)
+            .background(GeometryReader { proxy in Color.clear.onAppear { width = proxy.size.width - 24 }.onChange(of: proxy.size.width) { width = $0 - 24 } })
+            .accessibilityIdentifier("network-quality")
+    }
+}
+
 struct AvatarSelectionRequest: Identifiable {
     let id: Int
 }
@@ -1173,6 +1259,13 @@ struct HomeView: View {
                     .accessibilityValue(L10n.string(drawerExpanded && client.connected ? "voice_drawer_expanded" : "voice_drawer_collapsed"))
                 }
                 Spacer(minLength: 0)
+                    .frame(maxWidth: .infinity)
+                    .overlay(alignment: .top) {
+                        NetworkQualityPanel(quality: client.state.networkQuality ?? NetworkQuality())
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .clipped()
+                    .accessibilityHidden(!drawerExpanded || !client.connected)
             }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 .foregroundStyle(Color(hex: 0xF2F3F5)).background(Palette.bottom)
                 .environment(\.sizeCategory, sizeCategory).environment(\.locale, language.locale)
@@ -1206,7 +1299,7 @@ struct HomeView: View {
         let speaking = client.connected && client.state.clients.first { $0.id == client.state.ownClient }?.speaking == true
         return HStack(spacing: 8) {
             HStack(spacing: 8) {
-                AppIcon(name: "waveform", scaledSize: 18).foregroundStyle(client.connected ? Palette.green : Palette.muted)
+                AppIcon(name: "waveform", scaledSize: 18).foregroundStyle(client.connected ? client.state.networkQuality?.iconGrade?.color ?? Palette.muted : Palette.muted)
                 Text(client.connected ? L10n.format("status_connected_to_channel", client.state.channels.first { $0.id == client.currentChannel }?.name ?? "") : client.busy ? L10n.string("status_connecting") : L10n.string("status_disconnected")).font(.system(size: 12, weight: .semibold)).lineLimit(1)
                 Spacer(minLength: 0)
             }.padding(.leading, 12).frame(maxWidth: .infinity).frame(height: 48)

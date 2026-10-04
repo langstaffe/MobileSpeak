@@ -7,6 +7,77 @@ import Combine
 @testable import MobileSpeak
 
 final class ClientTests: XCTestCase {
+    func testNetworkQualityBridgeAndNumberFormatting() throws {
+        let data = Data(#"{"status":"connected","channels":[],"clients":[],"networkQuality":{"rttMs":42.5,"deviationMs":6.05,"packetLossPercent":4.0,"rttGrade":"good","deviationGrade":"good","packetLossGrade":"poor","iconGrade":"poor","axisMaxMs":2000,"nowSecond":31,"samples":[{"second":29,"rttMs":1234,"grade":"poor"},{"second":31,"rttMs":42.5,"grade":"good"}]}}"#.utf8)
+        let snapshot = try JSONDecoder().decode(Snapshot.self, from: data)
+        let q = try XCTUnwrap(snapshot.networkQuality)
+        XCTAssertEqual(q.latencyText, "43"); XCTAssertEqual(q.deviationText, "6.1"); XCTAssertEqual(q.lossText, "4.0")
+        XCTAssertEqual(q.iconGrade, .poor); XCTAssertEqual(q.rttGrade, .good)
+        XCTAssertEqual(q.samples.map(\.second), [29, 31]); XCTAssertEqual(q.axisMaxMs, 2000)
+        XCTAssertEqual(NetworkQuality.number(0, decimals: 1), "0.0")
+        XCTAssertEqual(NetworkQuality.number(1234, decimals: 0), "1234")
+        XCTAssertEqual(NetworkQuality.number(123.4, decimals: 1), "123.4")
+        XCTAssertEqual(NetworkQuality.number(1e22, decimals: 0), "10000000000000000000000")
+        XCTAssertEqual(NetworkQuality().latencyText, "—")
+        XCTAssertEqual(NetworkQuality.number(.nan, decimals: 1), "—")
+        for (value, expected) in [(998.49, "998"), (998.5, "999"), (999.5, "999"), (1234.0, "999"), (1e22, "999")] {
+            XCTAssertEqual(NetworkQuality(rttMs: value).latencyText, expected)
+        }
+        for (value, expected) in [(999.84, "999.8"), (999.85, "999.9"), (999.95, "999.9"), (1234.0, "999.9"), (1e22, "999.9")] {
+            XCTAssertEqual(NetworkQuality(deviationMs: value).deviationText, expected)
+        }
+        XCTAssertEqual(NetworkQuality(rttMs: .infinity, deviationMs: .nan).latencyText, "—")
+        XCTAssertEqual(NetworkQuality(rttMs: .infinity, deviationMs: .nan).deviationText, "—")
+        XCTAssertEqual(NetworkQuality().axisMaxMs, 10)
+        for (axis, middle) in [(10.0, "5"), (50.0, "25"), (100.0, "50"), (750.0, "375"), (1359.0, "679.5")] {
+            let quality = NetworkQuality(axisMaxMs: axis)
+            XCTAssertEqual(quality.axisText, NetworkQuality.number(axis, decimals: 0))
+            XCTAssertEqual(quality.midAxisText, middle)
+        }
+        XCTAssertNil(try JSONDecoder().decode(Snapshot.self, from: Data(#"{"status":"disconnected","channels":[],"clients":[],"networkQuality":null}"#.utf8)).networkQuality)
+    }
+
+    @MainActor func testNetworkQualityNativeLayoutsAndColors() async throws {
+        let originalLanguage = UserDefaults.standard.object(forKey: AppLanguage.preferenceKey)
+        defer {
+            if let originalLanguage { UserDefaults.standard.set(originalLanguage, forKey: AppLanguage.preferenceKey) }
+            else { UserDefaults.standard.removeObject(forKey: AppLanguage.preferenceKey) }
+        }
+        for language in [AppLanguage.english, .simplifiedChinese] {
+            UserDefaults.standard.set(language.rawValue, forKey: AppLanguage.preferenceKey)
+            for (width, category, long) in [(CGFloat(390), ContentSizeCategory.large, false), (320, .large, true), (320, .accessibilityExtraExtraExtraLarge, true)] {
+                var q = NetworkQuality(rttMs: long ? 1234 : 42, deviationMs: long ? 1234.5 : 6, packetLossPercent: 4,
+                    rttGrade: long ? .poor : .good, deviationGrade: long ? .poor : .good, packetLossGrade: .poor, iconGrade: .poor)
+                q.axisMaxMs = 2000; q.nowSecond = 29
+                q.samples = (0..<30).filter { $0 != 24 }.map { second -> NetworkSample in
+                    let rtt: Double = second == 20 ? 1234 : second == 25 ? 150 : 42
+                    let grade: NetworkGrade = second == 20 ? .poor : second == 25 ? .fair : .good
+                    return NetworkSample(second: UInt64(second), rttMs: rtt, grade: grade)
+                }
+                let view = VStack(spacing: 0) { NetworkQualityPanel(quality: q); Spacer(minLength: 0) }
+                    .frame(height: 333, alignment: .top).clipped().frame(maxHeight: .infinity, alignment: .top)
+                    .background(Palette.bottom).environment(\.sizeCategory, category).environment(\.locale, language.locale)
+                let host = UIHostingController(rootView: view)
+                let window = UIWindow(frame: CGRect(x: 0, y: 0, width: width, height: 568))
+                window.rootViewController = host; window.makeKeyAndVisible()
+                defer { window.isHidden = true }
+                try await Task.sleep(nanoseconds: 200_000_000)
+                host.view.layoutIfNeeded()
+                let image = UIGraphicsImageRenderer(size: host.view.bounds.size).image { _ in host.view.drawHierarchy(in: host.view.bounds, afterScreenUpdates: true) }
+                let name = "network-\(language.rawValue)-\(Int(width))-\(category)"
+                try image.pngData()?.write(to: FileManager.default.temporaryDirectory.appendingPathComponent(name + ".png"))
+                let attachment = XCTAttachment(image: image); attachment.name = name; attachment.lifetime = .keepAlways; add(attachment)
+                // Every grade appears in the chart; verify actual native rendered pixels.
+                let cg = try XCTUnwrap(image.cgImage)
+                let context = try XCTUnwrap(CGContext(data: nil, width: cg.width, height: cg.height, bitsPerComponent: 8, bytesPerRow: cg.width * 4, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+                context.draw(cg, in: CGRect(x: 0, y: 0, width: cg.width, height: cg.height))
+                let bytes = try XCTUnwrap(context.data).assumingMemoryBound(to: UInt8.self)
+                for color in [[61,190,120], [233,180,76], [193,90,184]] {
+                    XCTAssertTrue((0..<cg.width * cg.height).contains { offset in (0..<3).allSatisfy { abs(Int(bytes[offset * 4 + $0]) - color[$0]) < 3 } }, "Missing network color \(color), \(name)")
+                }
+            }
+        }
+    }
     @MainActor func testHomeTabsKeepIndependentNativeScrollOffsetsAcrossNavigationAndConnectionChanges() async throws {
         #if targetEnvironment(simulator)
         // XCTest's unit-test host does not enable the SwiftUI accessibility tree itself.
@@ -24,7 +95,10 @@ final class ClientTests: XCTestCase {
         let original = client.state
         let channels = (1...160).map { Channel(id: UInt64($0), parent: 0, order: UInt64($0 - 1), name: "Scroll channel \($0)", password: false, permanent: true, key: "\($0)", icon: nil, iconPath: nil) }
         let members = (1...160).map { Member(id: UInt64($0), channel: 20, uid: "scroll-\($0)", name: "Scroll member \($0)", avatarHash: "", avatarPath: nil, badges: [], serverGroupIcons: [], channelGroupIcon: nil, muted: false, deafened: false, speaking: false) }
-        let snapshot = Snapshot(status: "connected", server: "Scroll fixture", ownClient: 1, channels: channels, clients: members)
+        let quality = NetworkQuality(rttMs: 96, deviationMs: 35, packetLossPercent: 0.8,
+            rttGrade: .good, deviationGrade: .good, packetLossGrade: .good, iconGrade: .good,
+            axisMaxMs: 200, nowSecond: 29, samples: (0..<30).map { NetworkSample(second: UInt64($0), rttMs: 96, grade: .good) })
+        let snapshot = Snapshot(status: "connected", server: "Scroll fixture", ownClient: 1, channels: channels, clients: members, networkQuality: quality)
         let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.first as? UIWindowScene)
         let host = UIHostingController(rootView: NavigationView { HomeView(client: client) }
             .navigationViewStyle(.stack).environmentObject(LanguageSettings())
@@ -67,6 +141,43 @@ final class ClientTests: XCTestCase {
             let element = try XCTUnwrap(buttons.first { $0.accessibilityLabel == label } ?? buttons.first { $0.accessibilityLabel?.contains(label) == true }, label + ": " + accessibleElements().compactMap(\.accessibilityLabel).joined(separator: " | "))
             XCTAssertTrue(element.accessibilityActivate(), label)
         }
+        func checkDrawerHeader(expanded: Bool, screenshot: String) throws {
+            func drawer(_ view: UIView) -> UIView? {
+                if view.accessibilityIdentifier == "voice-drawer" { return view }
+                return view.subviews.lazy.compactMap(drawer).first
+            }
+            let pane = try XCTUnwrap(drawer(host.view))
+            let frame = UIAccessibility.convertToScreenCoordinates(pane.bounds, in: pane)
+            let elements = accessibleElements()
+            let status = L10n.format("status_connected_to_channel", "Scroll channel 20")
+            let headerLabels = [status,
+                L10n.string(client.microphoneMuted ? "voice_enable_microphone" : "voice_mute"),
+                L10n.string(client.deafened ? "voice_enable_listening" : "voice_disable_listening"),
+                L10n.string(expanded ? "voice_drawer_collapse" : "voice_drawer_expand")]
+            for label in headerLabels {
+                let element = try XCTUnwrap(elements.first { $0.accessibilityLabel == label }, label)
+                XCTAssertGreaterThanOrEqual(element.accessibilityFrame.minY, frame.minY - 1, label)
+                XCTAssertLessThanOrEqual(element.accessibilityFrame.maxY, frame.minY + 65, label)
+                XCTAssertFalse(element.accessibilityFrame.isEmpty, label)
+            }
+            let chart = elements.first { $0.accessibilityLabel == L10n.string("network_chart") }
+            if expanded {
+                let chart = try XCTUnwrap(chart)
+                XCTAssertGreaterThanOrEqual(chart.accessibilityFrame.minY, frame.minY + 64)
+                XCTAssertLessThanOrEqual(chart.accessibilityFrame.maxY, frame.maxY + 1)
+                let numbers = try XCTUnwrap(elements.first { $0.accessibilityLabel == client.state.networkQuality?.accessibilitySummary })
+                XCTAssertEqual(chart.accessibilityFrame.minY, numbers.accessibilityFrame.minY, accuracy: 1)
+                XCTAssertEqual(chart.accessibilityFrame.maxY, numbers.accessibilityFrame.maxY, accuracy: 1)
+                XCTAssertEqual(chart.accessibilityFrame.minX - numbers.accessibilityFrame.minX, 123, accuracy: 1)
+            } else {
+                XCTAssertEqual(pane.bounds.height, 64, accuracy: 0.5)
+                XCTAssertNil(chart, "Collapsed drawer must not expose network details")
+            }
+            let image = UIGraphicsImageRenderer(size: host.view.bounds.size).image { _ in host.view.drawHierarchy(in: host.view.bounds, afterScreenUpdates: true) }
+            let attachment = XCTAttachment(image: image); attachment.name = screenshot; attachment.lifetime = .keepAlways; add(attachment)
+            try image.pngData()?.write(to: FileManager.default.temporaryDirectory.appendingPathComponent(screenshot + ".png"))
+        }
+        try checkDrawerHeader(expanded: false, screenshot: "drawer-network-collapsed")
         let homeScrolls = scrolls(host.view)
         XCTAssertEqual(homeScrolls.count, 3)
         guard homeScrolls.count == 3 else { return }
@@ -89,6 +200,26 @@ final class ClientTests: XCTestCase {
         }
         try activate(L10n.string("voice_drawer_expand"))
         try await Task.sleep(nanoseconds: 500_000_000)
+        try checkDrawerHeader(expanded: true, screenshot: "drawer-network-expanded")
+        for (deviation, grade, name) in [(70.0, NetworkGrade.fair, "mobile"), (120.0, NetworkGrade.poor, "poor")] {
+            client.state.networkQuality = NetworkQuality(rttMs: 30, deviationMs: deviation, packetLossPercent: 0,
+                rttGrade: .good, deviationGrade: grade, packetLossGrade: .good, iconGrade: grade,
+                axisMaxMs: 50, nowSecond: 29, samples: (0..<30).map { NetworkSample(second: UInt64($0), rttMs: 30, grade: .good) })
+            try await Task.sleep(nanoseconds: 100_000_000)
+            try checkDrawerHeader(expanded: true, screenshot: "drawer-network-\(name)-variation")
+        }
+        client.state.networkQuality = NetworkQuality(rttMs: 26, deviationMs: 8.6, packetLossPercent: 0,
+            rttGrade: .good, deviationGrade: .good, packetLossGrade: .good, iconGrade: .good,
+            axisMaxMs: 50, nowSecond: 29, samples: (0..<30).map { NetworkSample(second: UInt64($0), rttMs: 26, grade: .good) })
+        try await Task.sleep(nanoseconds: 100_000_000)
+        try checkDrawerHeader(expanded: true, screenshot: "drawer-network-axis-50")
+        client.state.networkQuality = NetworkQuality(rttMs: 1234, deviationMs: 1234.5, packetLossPercent: 4,
+            rttGrade: .poor, deviationGrade: .poor, packetLossGrade: .poor, iconGrade: .poor,
+            axisMaxMs: 2000, nowSecond: 29, samples: (0..<30).map { NetworkSample(second: UInt64($0), rttMs: 1234, grade: .poor) })
+        try await Task.sleep(nanoseconds: 100_000_000)
+        try checkDrawerHeader(expanded: true, screenshot: "drawer-network-capped-values")
+        XCTAssertEqual(client.state.networkQuality?.rttMs, 1234)
+        XCTAssertEqual(client.state.networkQuality?.deviationMs, 1234.5)
         checkOffsets()
         let started = Date()
         for _ in 0..<8 {
@@ -122,6 +253,10 @@ final class ClientTests: XCTestCase {
         timing.lifetime = .keepAlways; add(timing)
         try activate(L10n.string("voice_drawer_collapse"))
         try await Task.sleep(nanoseconds: 500_000_000)
+        client.state.networkQuality?.rttMs = 1234
+        client.state.networkQuality?.deviationMs = 123.4
+        try await Task.sleep(nanoseconds: 100_000_000)
+        try checkDrawerHeader(expanded: false, screenshot: "drawer-network-collapsed-refreshed")
         checkOffsets()
 
         for (tab, label) in [("tab_channels", L10n.format("channel_chat_open", "Scroll channel 20")), ("tab_members", "Scroll member 12"), ("tab_settings", L10n.string("settings_about"))] {
@@ -353,7 +488,9 @@ final class ClientTests: XCTestCase {
     }
 
     @MainActor func testSettingsDetailPagesUseInstalledVersionAndKeepClientAcrossLanguageChanges() async throws {
-        XCTAssertEqual(SettingsDetailPage.installedVersion, "0.3.0")
+        let installed = try XCTUnwrap(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String)
+        XCTAssertEqual(SettingsDetailPage.installedVersion, installed)
+        XCTAssertNotNil(installed.range(of: #"^\d+\.\d+\.\d+$"#, options: .regularExpression))
         let client = Client.shared
         let handle = client.handle
         let audio = client.audio

@@ -72,6 +72,44 @@ struct Snapshot: Decodable, Equatable {
     var canSend: Bool?
     var channels: [Channel] = []
     var clients: [Member] = []
+    var networkQuality: NetworkQuality?
+}
+
+enum NetworkGrade: String, Decodable { case good, fair, poor }
+struct NetworkSample: Decodable, Equatable {
+    let second: UInt64
+    let rttMs: Double
+    let grade: NetworkGrade
+}
+struct NetworkQuality: Decodable, Equatable {
+    var rttMs: Double?
+    var deviationMs: Double?
+    var packetLossPercent: Double?
+    var rttGrade: NetworkGrade?
+    var deviationGrade: NetworkGrade?
+    var packetLossGrade: NetworkGrade?
+    var iconGrade: NetworkGrade?
+    var axisMaxMs: Double = 10
+    var nowSecond: UInt64 = 0
+    var samples: [NetworkSample] = []
+
+    static func number(_ value: Double?, decimals: Int, maximum: Double = .infinity) -> String {
+        guard let value, value.isFinite else { return "—" }
+        let scale = decimals == 0 ? 1.0 : 10.0
+        let displayed = (min(value, maximum) * scale).rounded(.toNearestOrAwayFromZero) / scale
+        return String(format: "%.*f", locale: Locale(identifier: "en_US_POSIX"), decimals, displayed)
+    }
+    var latencyText: String { Self.number(rttMs, decimals: 0, maximum: 999) }
+    var deviationText: String { Self.number(deviationMs, decimals: 1, maximum: 999.9) }
+    var lossText: String { Self.number(packetLossPercent, decimals: 1) }
+    static func axisNumber(_ value: Double) -> String {
+        number(value, decimals: value.rounded(.towardZero) == value ? 0 : 1)
+    }
+    var axisText: String { Self.axisNumber(axisMaxMs) }
+    var midAxisText: String { Self.axisNumber(axisMaxMs / 2) }
+    var accessibilitySummary: String {
+        rttMs == nil ? L10n.string("network_unavailable") : L10n.format("network_summary", latencyText, deviationText, lossText)
+    }
 }
 
 enum ChatStatus: String, Decodable, Equatable { case received, pending, sent, failed }

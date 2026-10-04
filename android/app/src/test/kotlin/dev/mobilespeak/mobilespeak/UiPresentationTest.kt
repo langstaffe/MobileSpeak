@@ -7,6 +7,12 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class UiPresentationTest {
+    @Test fun networkPaletteDoesNotUseTheGlobalSpeakingColor() {
+        assertEquals(androidx.compose.ui.graphics.Color(0xFF3DBE78), NetworkGrade.GOOD.networkColor())
+        assertEquals(androidx.compose.ui.graphics.Color(0xFFE9B44C), NetworkGrade.FAIR.networkColor())
+        assertEquals(androidx.compose.ui.graphics.Color(0xFFC15AB8), NetworkGrade.POOR.networkColor())
+        assertEquals(Palette.muted, null.networkColor())
+    }
     @Test fun voiceDrawerGeometryResistanceAndDistanceVelocitySettling() {
         val travel = voiceDrawerTravel(650f, 64f)
         assertEquals(391f, travel, .001f)

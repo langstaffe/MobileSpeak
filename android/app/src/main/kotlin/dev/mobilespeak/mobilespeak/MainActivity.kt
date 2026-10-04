@@ -881,7 +881,7 @@ private fun toggleHapticType(enabled: Boolean) = when {
 }
 
 @Composable
-private fun VoiceDrawer(ui: SessionUiState, requestPermissions: () -> Unit, expanded: Boolean, onExpandedChange: (Boolean) -> Unit, availableHeight: Dp, availableWidth: Dp, modifier: Modifier = Modifier) {
+internal fun VoiceDrawer(ui: SessionUiState, requestPermissions: () -> Unit, expanded: Boolean, onExpandedChange: (Boolean) -> Unit, availableHeight: Dp, availableWidth: Dp, modifier: Modifier = Modifier) {
     val density = LocalDensity.current
     val connected = ui.snapshot.status == "connected"
     val travel = with(density) { voiceDrawerTravel(availableHeight.toPx(), 64.dp.toPx()) }
@@ -1002,7 +1002,7 @@ private fun VoiceDrawer(ui: SessionUiState, requestPermissions: () -> Unit, expa
     Column(modifier.fillMaxWidth()
         .offset { IntOffset(0, (-minOf(0f, visibleOffset)).roundToInt()) }
         .height((64.dp + with(density) { maxOf(0f, visibleOffset).toDp() }).coerceAtMost(availableHeight))
-        .background(Palette.bottom).then(drag)) {
+        .background(Palette.bottom).clipToBounds().then(drag)) {
         Box(Modifier.fillMaxWidth().height(64.dp)) {
             Column {
                 Spacer(Modifier.height(16.dp))
@@ -1015,7 +1015,11 @@ private fun VoiceDrawer(ui: SessionUiState, requestPermissions: () -> Unit, expa
                 Icon(UiIcons.DrawerHandle, null, Modifier.size(44.dp, 4.dp), tint = if (connected) Palette.text else Palette.muted)
             }
         }
-        Spacer(Modifier.weight(1f).fillMaxWidth())
+        Box(Modifier.weight(1f).fillMaxWidth().clipToBounds()) {
+            if (visibleOffset > 0f) {
+                NetworkQualityPanel(ui.snapshot.networkQuality ?: NetworkQuality(), Modifier.wrapContentHeight(align = Alignment.Top, unbounded = true))
+            }
+        }
     }
 }
 
@@ -1046,7 +1050,7 @@ private fun VoiceBar(ui: SessionUiState, requestPermissions: () -> Unit) {
     val muted = ui.microphoneMuted || ui.deafened
     Row(Modifier.fillMaxWidth().background(Palette.bottom).padding(end = 8.dp).height(48.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(Modifier.weight(1f).height(48.dp).padding(start = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Icon(UiIcons.Wave, null, Modifier.size(18.dp), tint = if (connected) Palette.green else Palette.muted)
+            Icon(UiIcons.Wave, null, Modifier.size(18.dp), tint = if (connected) ui.snapshot.networkQuality?.iconGrade.networkColor() else Palette.muted)
             Text(if (connected) stringResource(R.string.status_connected_to_channel, ui.snapshot.channels.firstOrNull { it.id == channel }?.name.orEmpty()) else if (ui.snapshot.status in listOf("connecting", "reconnecting")) stringResource(R.string.status_connecting) else stringResource(R.string.status_disconnected), Modifier.weight(1f), fontSize = 12.sp, lineHeight = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         IconButton(onClick = {

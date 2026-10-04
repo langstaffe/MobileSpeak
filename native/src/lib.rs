@@ -1,10 +1,19 @@
 //! Mobile-only C ABI. TeamSpeak protocol state, chat and file transfers live on one Rust worker.
+// Xcode's stderr transport can disappear after debugger/network disconnection.
+// Diagnostics must never panic or terminate a connection when that write fails.
+macro_rules! diagnostic {
+    ($($argument:tt)*) => {{
+        use std::io::Write as _;
+        let _ = writeln!(std::io::stderr().lock(), $($argument)*);
+    }};
+}
 #[cfg(target_os = "android")]
 mod android_jni;
 mod audio_models;
 mod audio_processing;
 mod avatar;
 mod badges;
+mod network_quality;
 mod playback;
 // Fixed upstream receive module with the queued-packet recovery patch.
 #[allow(dead_code)]
@@ -378,6 +387,7 @@ impl UnreadState {
 #[derive(Default)]
 struct Output {
     snapshot: Value,
+    network_quality: Option<Value>,
     chat_snapshot: Option<Value>,
     unread: Value,
     events: VecDeque<Value>,
@@ -389,9 +399,21 @@ impl Output {
             callback(context);
         }
     }
-    fn set_snapshot(&mut self, value: Value) {
+    fn set_snapshot(&mut self, mut value: Value) {
+        value["networkQuality"] = self.network_quality.clone().unwrap_or(Value::Null);
         if self.snapshot != value {
             self.snapshot = value;
+            self.notify();
+        }
+    }
+    fn set_network_quality(&mut self, quality: &network_quality::Quality) {
+        if self.snapshot["status"] != "connected" {
+            return;
+        }
+        let value = serde_json::to_value(quality).expect("finite network statistics");
+        if self.network_quality.as_ref() != Some(&value) {
+            self.snapshot["networkQuality"] = value.clone();
+            self.network_quality = Some(value);
             self.notify();
         }
     }
@@ -413,6 +435,7 @@ impl Output {
         self.notify();
     }
     fn status(&mut self, status: &str) {
+        self.network_quality = None;
         self.set_snapshot(json!({"status":status,"channels":[],"clients":[]}));
     }
 }
@@ -1189,7 +1212,7 @@ impl AudioProcessingState {
                     None,
                 );
                 #[cfg(debug_assertions)]
-                eprintln!("Audio processing applied {selection:?} in {elapsed_ms}ms");
+                diagnostic!("Audio processing applied {selection:?} in {elapsed_ms}ms");
                 let _ = elapsed_ms;
             }
             audio_processing::Event::Failed {
@@ -1270,6 +1293,7 @@ async fn session(
     let mut subscribed = false;
     let mut first_connection = true;
     let mut current_server: Option<String> = None;
+    let mut network = network_quality::History::new(Instant::now());
     let mut chats = ChatStore::default();
     let mut chat_writable = true;
     let mut operations = HashMap::<MessageHandle, PendingOperation>::new();
@@ -1371,7 +1395,7 @@ async fn session(
                         if let Some(trace) = receive_traces.remove(client) {
                             // This observes accepted markers, not the private decoder's exact
                             // removal reason. A marker may still be behind a missing packet.
-                            eprintln!("Playback receive_end at_ms={} client={} end_marker_observed={} packets={} end_markers={} duration_ms={} last_packet_age_ms={} max_packet_gap_ms={} sequence_skips={} reordered_or_duplicate={} rejected={}",
+                            diagnostic!("Playback receive_end at_ms={} client={} end_marker_observed={} packets={} end_markers={} duration_ms={} last_packet_age_ms={} max_packet_gap_ms={} sequence_skips={} reordered_or_duplicate={} rejected={}",
                                 audio_trace_start.elapsed().as_millis(), client.0, trace.end_markers > 0,
                                 trace.packets, trace.end_markers, trace.started.elapsed().as_millis(),
                                 trace.last_packet.elapsed().as_millis(), trace.max_gap_ms, trace.sequence_skips,
@@ -1415,6 +1439,8 @@ async fn session(
                     }
                     let connected_server = server_id(&con);
                     if current_server != connected_server {
+                        network = network_quality::History::new(Instant::now());
+                        out.lock().unwrap().network_quality = None;
                         current_server = connected_server;
                         chats = ChatStore::default();
                         chat_writable = true;
@@ -1479,7 +1505,7 @@ async fn session(
                             Ok(started) => {
                                 if started.is_some() {
                                     receive_traces.insert(from, playback::ReceiveTrace::new(now));
-                                    eprintln!("Playback receive_start at_ms={} client={} sequence={}", audio_trace_start.elapsed().as_millis(), from.0, sequence);
+                                    diagnostic!("Playback receive_start at_ms={} client={} sequence={}", audio_trace_start.elapsed().as_millis(), from.0, sequence);
                                 }
                                 if let Some(trace) = receive_traces.get_mut(&from) { trace.received(sequence, end_marker, now); }
                                 if started.is_some() { snapshot(&con, out, &audio, voice.speaking(), storage.as_deref()); }
@@ -1583,7 +1609,13 @@ async fn session(
                     }
                     schedule_media(&mut con, storage.as_deref(), &mut media_active, &mut media_failed, &mut transfers);
                 },
+                Some(Ok(StreamItem::NetworkStatsUpdated)) => {
+                    let stats = if current_channel_conversation(&con).is_some() { con.get_network_stats().ok() } else { None };
+                    let quality = network.update(stats, Instant::now());
+                    out.lock().unwrap().set_network_quality(quality);
+                },
                 Some(Ok(StreamItem::DisconnectedTemporarily(_))) => {
+                    network = network_quality::History::new(Instant::now());
                     avatar.observe(avatar_store, out);
                     if chats.fail_pending("message_unconfirmed_after_reconnect") {
                         if chat_writable { persist_chat(persist_tx, storage.as_deref(), current_server.as_deref(), &chats); }
@@ -1605,7 +1637,6 @@ async fn session(
                 },
                 Some(Err(error)) => return Err(error.into()),
                 None => return Ok(false),
-                _ => {},
             },
             Some((request, result)) = media_rx.recv() => {
                 media_active.remove(&request.key);
@@ -1630,8 +1661,13 @@ async fn session(
                     avatar.disconnected();
                     invalidate_capture(processor, capture_epoch); let _ = voice.interrupt(|codec, data| send_voice(&mut con, codec, data));
                     playback.clear(); out.lock().unwrap().status("disconnected");
-                    con.disconnect(DisconnectOptions::new())?;
-                    let _ = tokio::time::timeout(Duration::from_secs(2), async { while con.events().next().await.is_some() {} }).await;
+                    // Only an established connection can send clientdisconnect.
+                    // Drop pending handshakes; stop draining on errors so a failed
+                    // handshake's completed future is never polled again.
+                    if con.get_state().is_ok() {
+                        con.disconnect(DisconnectOptions::new())?;
+                        let _ = tokio::time::timeout(Duration::from_secs(2), async { while let Some(Ok(_)) = con.events().next().await {} }).await;
+                    }
                     return Ok(false);
                 },
                 Some(Command::Shutdown) => { avatar.disconnected(); invalidate_capture(processor, capture_epoch); let _ = voice.interrupt(|codec, data| send_voice(&mut con, codec, data)); playback.clear(); out.lock().unwrap().status("disconnected"); let _ = con.disconnect(DisconnectOptions::new()); return Ok(true); },
@@ -1649,6 +1685,10 @@ async fn session(
                     out.lock().unwrap().set_unread(unread.snapshot());
                 },
                 Some(Command::SetAppActive { active }) => {
+                    if active && !*app_active {
+                        let quality = network.resume(Instant::now());
+                        out.lock().unwrap().set_network_quality(quality);
+                    }
                     *app_active = active;
                     unread.set_app_active(active);
                     out.lock().unwrap().set_unread(unread.snapshot());
@@ -1785,12 +1825,15 @@ async fn session(
                 }
             },
             _ = clock.tick() => {
+                if let Some(quality) = network.expire(Instant::now()) {
+                    out.lock().unwrap().set_network_quality(quality);
+                }
                 if playback_log_at.elapsed() >= Duration::from_secs(5) {
                     let counts = playback.diagnostics();
                     let delta: [u64; 5] = std::array::from_fn(|i| counts[i].wrapping_sub(playback_counts[i]));
                     let receive = audio.take_diagnostics();
                     if delta[0] > 0 || received_packets > 0 {
-                        eprintln!("Playback health elapsed_ms={} renders={} underruns={} missing_frames={} growth_silence_frames={} resets={} max_callback_frames={} queued_frames={} max_refill_gap_ms={} max_refill_work_us={} packets={} rejected={} end_batches={} receive_queues={} plc_frames={} fec_frames={} catchup_frames={} truncated_packets={} buffering_frames={} decode_errors={} last_packet_error={:?}",
+                        diagnostic!("Playback health elapsed_ms={} renders={} underruns={} missing_frames={} growth_silence_frames={} resets={} max_callback_frames={} queued_frames={} max_refill_gap_ms={} max_refill_work_us={} packets={} rejected={} end_batches={} receive_queues={} plc_frames={} fec_frames={} catchup_frames={} truncated_packets={} buffering_frames={} decode_errors={} last_packet_error={:?}",
                             playback_log_at.elapsed().as_millis(), delta[0], delta[1], delta[2], delta[3], delta[4],
                             playback.max_callback(), playback.available(), max_refill_gap_ms, max_refill_work_us,
                             received_packets, rejected_packets, ended_queues, audio.get_queues().len(),
@@ -2066,15 +2109,97 @@ pub unsafe extern "C" fn ts_playback(
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn wait_until(mut ready: impl FnMut() -> bool) {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !ready() {
+            assert!(Instant::now() < deadline, "worker did not recover");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+    #[test]
+    fn broken_stderr_does_not_end_sessions() {
+        use std::io::Write;
+        use std::os::fd::FromRawFd;
+        if std::env::var_os("MOBILESPEAK_TEST_BROKEN_STDERR").is_some() {
+            // An orphaned terminal returns the exact EIO (os error 5) from the
+            // phone's report. Run in a child so no other test's stderr changes.
+            let error = std::io::stderr().write(b"stderr probe\n").unwrap_err();
+            assert_eq!(error.raw_os_error(), Some(5));
+            let server = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+            let connect = json!({"type":"connect","address":server.local_addr().unwrap().to_string(),"name":"test"}).to_string();
+            let bridge = Bridge::new();
+            for _ in 0..2 {
+                bridge.send(&connect).unwrap();
+                wait_until(|| bridge.output.lock().unwrap().snapshot["status"] == "connecting");
+                bridge.avatar_store.revision.fetch_add(1, Ordering::Release);
+                bridge.tx.blocking_send(Command::AvatarChanged).unwrap();
+                wait_until(|| {
+                    let out = bridge.output.lock().unwrap();
+                    if let Some(error) = out.events.iter().find(|e| e["type"] == "error") {
+                        println!("native worker error: {}", error["detail"]);
+                        panic!("diagnostic I/O ended a connection");
+                    }
+                    out.events
+                        .iter()
+                        .any(|e| e["type"] == "avatar_sync" && e["status"] == "idle")
+                });
+                assert_eq!(bridge.poll()["snapshot"]["status"], "connecting");
+                bridge.send(r#"{"type":"disconnect"}"#).unwrap();
+                wait_until(|| bridge.output.lock().unwrap().snapshot["status"] == "disconnected");
+                assert!(!bridge.poll()["events"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|e| e["type"] == "error"));
+            }
+            bridge.send(r#"{"type":"shutdown"}"#).unwrap();
+            wait_until(|| bridge.tx.is_closed());
+            return;
+        }
+        #[cfg_attr(target_os = "linux", link(name = "util"))]
+        extern "C" {
+            fn openpty(
+                master: *mut i32,
+                slave: *mut i32,
+                name: *mut c_char,
+                term: *const std::ffi::c_void,
+                size: *const std::ffi::c_void,
+            ) -> i32;
+        }
+        let (mut master, mut slave) = (-1, -1);
+        // SAFETY: openpty initializes both descriptors; each is owned by one File.
+        let (master, slave) = unsafe {
+            assert_eq!(
+                openpty(
+                    &mut master,
+                    &mut slave,
+                    std::ptr::null_mut(),
+                    std::ptr::null(),
+                    std::ptr::null()
+                ),
+                0
+            );
+            (fs::File::from_raw_fd(master), fs::File::from_raw_fd(slave))
+        };
+        drop(master);
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "tests::broken_stderr_does_not_end_sessions",
+                "--nocapture",
+            ])
+            .env("MOBILESPEAK_TEST_BROKEN_STDERR", "1")
+            .stderr(slave)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+    }
     #[test]
     fn session_panic_disconnects_and_keeps_the_bridge_reusable() {
-        fn wait_until(mut ready: impl FnMut() -> bool) {
-            let deadline = Instant::now() + Duration::from_secs(5);
-            while !ready() {
-                assert!(Instant::now() < deadline, "worker did not recover");
-                std::thread::sleep(Duration::from_millis(10));
-            }
-        }
         // An unresponsive loopback socket keeps the handshake pending without a real server.
         let server = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
         let connect = json!({"type":"connect","address":server.local_addr().unwrap().to_string(),"name":"test"}).to_string();
@@ -2241,6 +2366,32 @@ mod tests {
         assert_eq!(count.load(Ordering::SeqCst), 1);
         out.event(json!({"type":"error","code":"core_error","detail":"test"}));
         assert_eq!(count.load(Ordering::SeqCst), 2);
+        let now = Instant::now();
+        let mut history = network_quality::History::new(now);
+        let mut stats = tsclientlib::ConnectionStats::default();
+        stats.rtt = Duration::from_millis(42);
+        stats.rtt_dev = Duration::from_millis(6);
+        let quality = history.update(Some(&stats), now);
+        out.set_network_quality(quality); // Offline updates must not revive a session.
+        assert_eq!(count.load(Ordering::SeqCst), 2);
+        out.status("connected");
+        out.set_network_quality(quality);
+        out.set_network_quality(quality);
+        assert_eq!(count.load(Ordering::SeqCst), 4);
+        assert_eq!(out.snapshot["networkQuality"]["packetLossPercent"], 0.0);
+        assert_eq!(
+            out.snapshot["networkQuality"]["samples"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+        out.set_snapshot(json!({"status":"connected","channels":[],"clients":[]}));
+        assert_eq!(count.load(Ordering::SeqCst), 4); // Audio/bookkeeping snapshots retain network data.
+        out.status("reconnecting");
+        assert!(out.snapshot["networkQuality"].is_null());
+        assert!(out.network_quality.is_none());
+        assert_eq!(count.load(Ordering::SeqCst), 5);
     }
     #[test]
     fn retired_audio_settings_migrate_without_changing_other_config() {

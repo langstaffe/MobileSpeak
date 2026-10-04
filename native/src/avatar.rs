@@ -360,7 +360,7 @@ fn candidates(root: &Path) -> Result<Desired, String> {
 
 impl AvatarSync {
     fn log(&self, event: &str, detail: Option<&str>) {
-        eprintln!("avatar session={} version={} candidate={} transfer={:?} download={:?} bytes={} stage={} event={} elapsed_ms={} detail={}",
+        diagnostic!("avatar session={} version={} candidate={} transfer={:?} download={:?} bytes={} stage={} event={} elapsed_ms={} detail={}",
             self.token.session, self.token.version, self.next_candidate,
             self.upload.as_ref().map(|u| u.handle.0), self.upload.as_ref().and_then(|u| u.download.map(|h| h.0)),
             self.upload.as_ref().map_or(0, |u| u.bytes.len()), self.stage.name(), event,
