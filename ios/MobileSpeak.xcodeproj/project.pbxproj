@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A10000000000000000000001 /* ChannelFiles.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000002 /* ChannelFiles.swift */; };
 		111111111111111111111111 /* Localization.swift in Sources */ = {isa = PBXBuildFile; fileRef = 211111111111111111111111 /* Localization.swift */; };
 		111111111111111111111112 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = 211111111111111111111112 /* Localizable.xcstrings */; };
 		111111111111111111111113 /* InfoPlist.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = 211111111111111111111113 /* InfoPlist.xcstrings */; };
@@ -51,6 +52,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		A10000000000000000000002 /* ChannelFiles.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelFiles.swift; sourceTree = "<group>"; };
 		1C1AAF64A80E5FFD5457D916 /* Assets.xcassets */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		211111111111111111111111 /* Localization.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = Localization.swift; sourceTree = "<group>"; };
 		211111111111111111111112 /* Localizable.xcstrings */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
@@ -143,6 +145,7 @@
 			isa = PBXGroup;
 			children = (
 				37A3535BB9D060841FB2CEEC /* Client.swift */,
+				A10000000000000000000002 /* ChannelFiles.swift */,
 				211111111111111111111111 /* Localization.swift */,
 				A7D2572E637A1C51E30A4519 /* MobileSpeakApp.swift */,
 				8BD3729E0DF38C8A25D988B4 /* PhoneAudio.swift */,
@@ -274,6 +277,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				13E8F9300ACA15717F4C749C /* Client.swift in Sources */,
+				A10000000000000000000001 /* ChannelFiles.swift in Sources */,
 				111111111111111111111111 /* Localization.swift in Sources */,
 				165C073EA77147B1676EE3C0 /* MobileSpeakApp.swift in Sources */,
 				F466C91B6C090487C9883AA8 /* PhoneAudio.swift in Sources */,
@@ -367,6 +371,7 @@
 			buildSettings = {
 				ARCHS = arm64;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GENERATE_ASSET_SYMBOLS = NO;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CLANG_ENABLE_OBJC_WEAK = NO;
 				CODE_SIGN_ENTITLEMENTS = NativeApp/MobileSpeak.entitlements;
@@ -485,6 +490,7 @@
 			buildSettings = {
 				ARCHS = arm64;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GENERATE_ASSET_SYMBOLS = NO;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CLANG_ENABLE_OBJC_WEAK = NO;
 				CODE_SIGN_ENTITLEMENTS = NativeApp/MobileSpeak.entitlements;

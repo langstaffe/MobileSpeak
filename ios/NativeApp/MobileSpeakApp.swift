@@ -25,7 +25,7 @@ enum Palette {
 
 // PDF templates inherit the surrounding state color. Explicit sizes stay fixed;
 // otherwise follow the body text size, as the former unconfigured symbols did.
-private struct AppIcon: View {
+struct AppIcon: View {
     let name: String
     var size: CGFloat? = nil
     var originalTint: UIColor?
@@ -805,6 +805,11 @@ private final class VoiceDrawerController: UIViewController, UIGestureRecognizer
     }
     func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
         let velocity = pan.velocity(in: view)
+        var touched = host.view.hitTest(pan.location(in: host.view), with: nil)
+        while let current = touched {
+            if current is UIScrollView { return false }
+            touched = current.superview
+        }
         return connected && travel > 0 && abs(velocity.y) > abs(velocity.x)
     }
     @objc private func drag(_ recognizer: UIPanGestureRecognizer) {
@@ -1230,6 +1235,7 @@ struct HomeView: View {
                         .accessibilityLabel(L10n.string("settings_language"))
                         .accessibilityValue(L10n.string(language.selection.titleKey))
                         .accessibilityHint(L10n.string("accessibility_choose_language"))
+                    FileCacheSettings(client: client)
                     NavigationLink(destination: SettingsDetailPage(page: .about)) {
                         SettingsEntry(title: L10n.string("settings_about"))
                     }.buttonStyle(.plain)
@@ -1258,13 +1264,29 @@ struct HomeView: View {
                     .accessibilityLabel(L10n.string(drawerExpanded && client.connected ? "voice_drawer_collapse" : "voice_drawer_expand"))
                     .accessibilityValue(L10n.string(drawerExpanded && client.connected ? "voice_drawer_expanded" : "voice_drawer_collapsed"))
                 }
-                Spacer(minLength: 0)
-                    .frame(maxWidth: .infinity)
-                    .overlay(alignment: .top) {
-                        NetworkQualityPanel(quality: client.state.networkQuality ?? NetworkQuality())
-                            .fixedSize(horizontal: false, vertical: true)
+                Group {
+                    if client.channelFiles.open { ChannelFilesDrawer(client: client) }
+                    else {
+                        VStack(spacing: 0) {
+                            NetworkQualityPanel(quality: client.state.networkQuality ?? NetworkQuality()).fixedSize(horizontal: false, vertical: true)
+                            VStack(alignment: .leading, spacing: 12) {
+                                Text(L10n.string("files_tools")).font(.caption).foregroundStyle(Palette.muted)
+                                Button { client.openChannelFiles() } label: {
+                                    HStack(spacing: 14) {
+                                        AppIcon(name: "folder", scaledSize: 26).foregroundStyle(Palette.accent)
+                                        VStack(alignment: .leading, spacing: 4) {
+                                            Text(L10n.string("files_title")).foregroundStyle(.white)
+                                            Text(L10n.string("files_subtitle")).font(.caption).foregroundStyle(Palette.muted)
+                                        }.frame(maxWidth: .infinity, alignment: .leading)
+                                        AppIcon(name: "chevron-right", size: 18).foregroundStyle(Palette.muted)
+                                    }.padding(16).frame(minHeight: 72).background(Palette.card).clipShape(RoundedRectangle(cornerRadius: 14))
+                                }.buttonStyle(.plain).disabled(!client.connected || client.state.ownClient == nil)
+                                .accessibilityIdentifier("channel-files-tool")
+                            }.padding(16).dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+                            Spacer(minLength: 0)
+                        }
                     }
-                    .clipped()
+                }.frame(maxWidth: .infinity, minHeight: 0, maxHeight: .infinity, alignment: .top).clipped()
                     .accessibilityHidden(!drawerExpanded || !client.connected)
             }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 .foregroundStyle(Color(hex: 0xF2F3F5)).background(Palette.bottom)

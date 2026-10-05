@@ -158,6 +158,13 @@ data class Bookmark(
 
 data class SessionUiState(
     val snapshot: Snapshot = Snapshot(),
+    val channelFiles: ChannelFilesState = ChannelFilesState(),
+    val channelFilesLocalError: String? = null,
+    val fileCache: FileCacheState = FileCacheState(),
+    val fileImporting: Boolean = false,
+    val fileCacheClearing: Boolean = false,
+    val fileCachePending: Boolean = false,
+    val fileCacheMessage: String? = null,
     val messages: List<ChatMessage> = emptyList(),
     val unread: Unread = Unread(),
     val bookmarks: List<Bookmark> = emptyList(),

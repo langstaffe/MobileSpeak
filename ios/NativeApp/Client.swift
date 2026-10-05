@@ -2,6 +2,7 @@ import Foundation
 import Combine
 import Security
 import UIKit
+import OSLog
 
 struct Channel: Decodable, Identifiable, Equatable {
     enum SpacerAlignment: Equatable { case left, center, right, repeatFill }
@@ -193,8 +194,19 @@ private func coreChanged(_ context: Int) {
 @MainActor final class Client: ObservableObject {
     // One application-lifetime instance keeps FFI callback/audio ownership simple.
     static let shared = Client()
+    private let connectionLogger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "MobileSpeak", category: "connection")
+    private var connectionStarted: TimeInterval?
     let handle: UnsafeMutableRawPointer
     @Published var state = Snapshot()
+    @Published var channelFiles = ChannelFilesState()
+    @Published var channelFilesLocalError: String?
+    @Published var fileCache = FileCacheState()
+    @Published var fileImporting = false
+    @Published private(set) var fileCacheClearing = false
+    @Published private(set) var fileCachePending = false
+    @Published private(set) var fileCacheMessage: String?
+    private var fileCacheRequest: UInt64 = 0
+    private var fileCacheClearRequest: UInt64?
     @Published var error: String?
     @Published private(set) var avatarPreview: UIImage?
     @Published private(set) var avatarStatus = "idle"
@@ -288,7 +300,12 @@ private func coreChanged(_ context: Int) {
         } catch { self.error = error.localizedDescription }
     }
     func connectBookmark(_ bookmark: Bookmark) {
-        do { connect(host: bookmark.host, port: String(bookmark.port), nickname: bookmark.nickname, password: try bookmarkPassword(bookmark)) }
+        let started = ProcessInfo.processInfo.systemUptime
+        do {
+            let password = try bookmarkPassword(bookmark)
+            connectionLogger.info("Connection startup phase=bookmark_password elapsed_ms=\(Int((ProcessInfo.processInfo.systemUptime - started) * 1000))")
+            connect(host: bookmark.host, port: String(bookmark.port), nickname: bookmark.nickname, password: password)
+        }
         catch { self.error = error.localizedDescription }
     }
     private var acceptingConnection = false
@@ -452,8 +469,24 @@ private func coreChanged(_ context: Int) {
             let envelope = try JSONSerialization.jsonObject(with: data) as! [String: Any]
             for event in envelope["events"] as? [[String: Any]] ?? [] {
                 if event["type"] as? String == "identity", let identity = event["value"] {
+                    let started = ProcessInfo.processInfo.systemUptime
                     do { try saveIdentity(JSONSerialization.data(withJSONObject: identity)) }
                     catch { self.error = error.localizedDescription }
+                    connectionLogger.info("Connection startup phase=identity_save elapsed_ms=\(Int((ProcessInfo.processInfo.systemUptime - started) * 1000))")
+                } else if event["type"] as? String == "file_cache_result" {
+                    let request = (event["requestId"] as? NSNumber)?.uint64Value
+                    if request == fileCacheRequest {
+                        fileCachePending = false
+                        let clearing = request == fileCacheClearRequest
+                        if clearing { fileCacheClearing = false; fileCacheClearRequest = nil }
+                        if let error = event["error"] as? String {
+                            let detail = error.hasPrefix("files_") ? L10n.string(error) : error
+                            fileCacheMessage = L10n.withDetail(clearing ? "files_cache_clear_failed" : "files_cache_read_failed", detail)
+                        } else if clearing {
+                            let bytes = (event["removedBytes"] as? NSNumber)?.uint64Value ?? 0
+                            fileCacheMessage = L10n.format("files_cache_cleared", ByteCountFormatter.string(fromByteCount: Int64(clamping: bytes), countStyle: .file))
+                        }
+                    }
                 } else if event["type"] as? String == "error" {
                     error = L10n.coreError(event["code"] as? String, detail: event["detail"] as? String ?? event["message"] as? String)
                 } else if event["type"] as? String == "audio_processing",
@@ -493,26 +526,53 @@ private func coreChanged(_ context: Int) {
             if let chats = envelope["chats"], !(chats is NSNull) {
                 messages = try JSONDecoder().decode([ChatMessage].self, from: JSONSerialization.data(withJSONObject: chats))
             }
+            if let cache = envelope["fileCache"], !(cache is NSNull) {
+                fileCache = try JSONDecoder().decode(FileCacheState.self, from: JSONSerialization.data(withJSONObject: cache))
+            }
             let next = try JSONDecoder().decode(Snapshot.self, from: JSONSerialization.data(withJSONObject: envelope["snapshot"]!))
             guard acceptingConnection || next.status == "disconnected" else { return }
             if let value = envelope["unread"], !(value is NSNull) {
                 let updated = try JSONDecoder().decode(UnreadSnapshot.self, from: JSONSerialization.data(withJSONObject: value))
                 if updated != unread { unread = updated }
             }
+            if let files = envelope["channelFiles"], !(files is NSNull) {
+                let updated = try JSONDecoder().decode(ChannelFilesState.self, from: JSONSerialization.data(withJSONObject: files))
+                if updated != channelFiles { channelFiles = updated }
+            }
             let wasConnected = connected
             let wasInSession = connected || reconnecting
             if next != state { state = next }
+            if connected && !wasConnected, let started = connectionStarted {
+                connectionLogger.info("Connection startup phase=connected_snapshot total_ms=\(Int((ProcessInfo.processInfo.systemUptime - started) * 1000))")
+            }
+            if state.status == "disconnected", let started = connectionStarted {
+                connectionLogger.info("Connection startup phase=disconnected total_ms=\(Int((ProcessInfo.processInfo.systemUptime - started) * 1000))")
+                connectionStarted = nil
+            }
             if connected, let serverName = state.server { updateAutomaticBookmarkTitle(serverName) }
             if connected && !wasConnected {
-                do {
-                    try audio.start()
-                    audio.listening = !deafened
-                    Task { await setAudio() }
-                } catch {
-                    self.error = L10n.withDetail("error_audio_start", error.localizedDescription)
-                    try? send(["type": "mute", "input": true, "output": deafened])
+                let currentIntent = intent
+                let started = connectionStarted
+                Task {
+                    guard connected && currentIntent == intent && !audioInterrupted else { return }
+                    do {
+                        try await audio.start()
+                        guard connected && currentIntent == intent && !audioInterrupted else { return }
+                        if let started {
+                            connectionLogger.info("Connection startup phase=audio_ready total_ms=\(Int((ProcessInfo.processInfo.systemUptime - started) * 1000))")
+                        }
+                        audio.setListening(!deafened)
+                        await setAudio()
+                    } catch {
+                        guard connected && currentIntent == intent && !audioInterrupted,
+                              !(error is CancellationError) else { return }
+                        self.error = L10n.withDetail("error_audio_start", error.localizedDescription)
+                        try? send(["type": "mute", "input": true, "output": deafened])
+                    }
                 }
+                connectionStarted = nil
             } else if !connected && !reconnecting && wasInSession {
+                intent += 1; audioBusy = false
                 audioInterrupted = false
                 audio.stop()
             }
@@ -526,14 +586,19 @@ private func coreChanged(_ context: Int) {
               !host.contains("/"), let port = UInt16(port), port > 0, !nickname.isEmpty else {
             error = L10n.string("error_server_invalid"); return
         }
+        let started = ProcessInfo.processInfo.systemUptime
+        connectionLogger.info("Connection startup begin")
         do {
             let identity = try loadIdentity()
+            connectionLogger.info("Connection startup phase=identity_load elapsed_ms=\(Int((ProcessInfo.processInfo.systemUptime - started) * 1000)) stored=\(identity != nil)")
             address = "\(host.contains(":") ? "[\(host)]" : host):\(port)"
             name = nickname
             error = nil
             audioInterrupted = false
             try send(["type": "connect", "address": address, "name": name, "password": password,
                       "identity": try identity.map { try JSONSerialization.jsonObject(with: $0) } ?? NSNull()])
+            connectionStarted = started
+            connectionLogger.info("Connection startup phase=command_submitted total_ms=\(Int((ProcessInfo.processInfo.systemUptime - started) * 1000))")
             state.status = "connecting"
             acceptingConnection = true; intent += 1
             UserDefaults.standard.set(address, forKey: "mobilespeak.server.address")
@@ -541,13 +606,33 @@ private func coreChanged(_ context: Int) {
         } catch { self.error = error.localizedDescription }
     }
     func disconnect() {
+        connectionStarted = nil
         acceptingConnection = false; intent += 1
+        audioBusy = false
         audioInterrupted = false
         audio.stop()
         do { try send(["type": "disconnect"]) } catch { self.error = error.localizedDescription }
         state = Snapshot()
         messages = []
         unread = UnreadSnapshot()
+    }
+    func refreshFileCache() {
+        guard !fileCachePending && !fileCache.working && !fileImporting && !fileCache.busy else { return }
+        fileCacheRequest += 1
+        fileCachePending = true
+        fileCacheMessage = nil
+        do { try send(["type": "file_cache_inspect", "request_id": fileCacheRequest]) }
+        catch { fileCachePending = false; fileCacheMessage = L10n.withDetail("files_cache_read_failed", error.localizedDescription) }
+    }
+    func clearFileCache() {
+        guard fileCache.canClear && !fileImporting && !fileCachePending else { return }
+        fileCacheRequest += 1
+        fileCacheClearRequest = fileCacheRequest
+        fileCacheClearing = true
+        fileCachePending = true
+        fileCacheMessage = nil
+        do { try send(["type": "file_cache_clear", "request_id": fileCacheRequest]) }
+        catch { fileCachePending = false; fileCacheClearing = false; fileCacheClearRequest = nil; fileCacheMessage = L10n.withDetail("files_cache_clear_failed", error.localizedDescription) }
     }
     func join(_ channel: Channel, password: String = "") {
         do { try send(["type": "join", "channel": channel.id, "password": password]) }
@@ -595,8 +680,8 @@ private func coreChanged(_ context: Int) {
             return
         }
         audioBusy = true
-        defer { audioBusy = false }
         let currentIntent = intent
+        defer { if currentIntent == intent { audioBusy = false } }
         do {
             if audioInterrupted {
                 do {
@@ -605,7 +690,8 @@ private func coreChanged(_ context: Int) {
                 } catch { self.error = error.localizedDescription }
                 return
             }
-            try audio.ensureRunning()
+            try await audio.ensureRunning()
+            guard connected && currentIntent == intent && !audioInterrupted else { return }
             if next.inputMuted { audio.stopCapture() }
             else {
                 let allowed = await audio.permission()
@@ -618,18 +704,24 @@ private func coreChanged(_ context: Int) {
                     return
                 }
                 guard allowed else { throw NSError(domain: "MobileSpeak", code: 1, userInfo: [NSLocalizedDescriptionKey: L10n.string("error_microphone_permission")]) }
-                try audio.startCapture()
+                try await audio.startCapture()
+                guard connected && currentIntent == intent && !audioInterrupted else { return }
             }
             try send(["type": "mute", "input": next.inputMuted, "output": next.deafened])
-            audio.listening = !next.deafened
+            audio.setListening(!next.deafened)
             microphoneMuted = next.microphoneMuted; deafened = next.deafened
         } catch {
+            guard connected && currentIntent == intent && !audioInterrupted,
+                  !(error is CancellationError) else { return }
             let failure = error
             do {
-                if muted { audio.stopCapture() } else { try audio.startCapture() }
+                if muted { audio.stopCapture() } else { try await audio.startCapture() }
             } catch {
+                guard connected && currentIntent == intent && !audioInterrupted,
+                      !(error is CancellationError) else { return }
                 audio.stopCapture(); microphoneMuted = true
             }
+            guard connected && currentIntent == intent && !audioInterrupted else { return }
             try? send(["type": "mute", "input": muted, "output": deafened])
             self.error = failure.localizedDescription
         }
@@ -654,30 +746,41 @@ private func coreChanged(_ context: Int) {
     func audioDidBecomeActive() {
         guard connected || reconnecting else { return }
         audioInterrupted = false
-        if connected && (!audio.isRunning || (!muted && !audio.isCapturing)) { recoverAudio() }
+        if connected { recoverAudio() }
     }
     func audioRouteChanged() {
         guard connected || reconnecting else { return }
-        audio.stopCapture()
         recoverAudio()
     }
     func audioConfigurationChanged() {
         guard connected || reconnecting else { return }
-        audio.stopCapture()
         recoverAudio()
     }
     private func recoverAudio() {
         guard connected && !audioInterrupted else { return }
-        do {
-            audio.stopCapture()
-            try audio.ensureRunning()
-            audio.listening = !deafened
-            if !muted { try audio.startCapture() }
-            try send(["type": "mute", "input": muted, "output": deafened])
-        } catch {
-            audio.stopCapture()
-            self.error = L10n.withDetail("error_audio_recovery", error.localizedDescription)
-            try? send(["type": "mute", "input": true, "output": deafened])
+        let currentIntent = intent
+        audio.stopCapture()
+        Task {
+            guard connected && currentIntent == intent && !audioInterrupted else { return }
+            do {
+                try await audio.ensureRunning()
+                guard connected && currentIntent == intent && !audioInterrupted else { return }
+                audio.setListening(!deafened)
+                if !muted {
+                    let allowed = await audio.permission()
+                    guard connected && currentIntent == intent && !audioInterrupted else { return }
+                    guard allowed else { throw NSError(domain: "MobileSpeak", code: 1, userInfo: [NSLocalizedDescriptionKey: L10n.string("error_microphone_permission")]) }
+                    if !muted { try await audio.startCapture() }
+                }
+                guard connected && currentIntent == intent && !audioInterrupted else { return }
+                try send(["type": "mute", "input": muted, "output": deafened])
+            } catch {
+                guard connected && currentIntent == intent && !audioInterrupted,
+                      !(error is CancellationError) else { return }
+                audio.stopCapture()
+                self.error = L10n.withDetail("error_audio_recovery", error.localizedDescription)
+                try? send(["type": "mute", "input": true, "output": deafened])
+            }
         }
     }
     private var identityQuery: [String: Any] {

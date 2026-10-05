@@ -55,6 +55,29 @@ internal object UiIcons {
     val ChevronRight: ImageVector
         @Composable get() = ImageVector.vectorResource(R.drawable.ic_chevron_right)
 
+    val Folder: ImageVector
+        @Composable get() = ImageVector.vectorResource(R.drawable.ic_folder)
+    val File: ImageVector
+        @Composable get() = ImageVector.vectorResource(R.drawable.ic_file)
+    val FileText: ImageVector
+        @Composable get() = ImageVector.vectorResource(R.drawable.ic_file_text)
+    val FileImage: ImageVector
+        @Composable get() = ImageVector.vectorResource(R.drawable.ic_file_image)
+    val FileAudio: ImageVector
+        @Composable get() = ImageVector.vectorResource(R.drawable.ic_file_audio)
+    val FileArchive: ImageVector
+        @Composable get() = ImageVector.vectorResource(R.drawable.ic_file_archive)
+    val Upload: ImageVector
+        @Composable get() = ImageVector.vectorResource(R.drawable.ic_upload)
+    val Download: ImageVector
+        @Composable get() = ImageVector.vectorResource(R.drawable.ic_download)
+    val Sort: ImageVector
+        @Composable get() = ImageVector.vectorResource(R.drawable.ic_sort)
+    val Info: ImageVector
+        @Composable get() = ImageVector.vectorResource(R.drawable.ic_info)
+    val Share: ImageVector
+        @Composable get() = ImageVector.vectorResource(R.drawable.ic_share)
+
     val Back = ImageVector.Builder("Back", 24.dp, 24.dp, 24f, 24f).apply {
         addPath(addPathNodes("M15 3L6 12L15 21"), stroke = SolidColor(Color.White), strokeLineWidth = 1.65f,
             strokeLineCap = StrokeCap.Round, strokeLineJoin = StrokeJoin.Round)

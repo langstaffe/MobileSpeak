@@ -13,6 +13,7 @@ mod audio_models;
 mod audio_processing;
 mod avatar;
 mod badges;
+mod channel_files;
 mod network_quality;
 mod playback;
 // Fixed upstream receive module with the queued-packet recovery patch.
@@ -104,6 +105,49 @@ pub enum Command {
     AvatarSet {
         selection: u64,
         image: Option<String>,
+    },
+    FilesOpen {
+        server: String,
+        channel: u64,
+    },
+    FilesBack {
+        server: String,
+        channel: u64,
+        directory: String,
+    },
+    FilesList {
+        server: String,
+        channel: u64,
+        directory: String,
+        path: String,
+    },
+    FilesSort {
+        server: String,
+        channel: u64,
+        directory: String,
+        newest: bool,
+    },
+    FilesDownload {
+        server: String,
+        channel: u64,
+        path: String,
+        name: String,
+    },
+    FilesUpload {
+        server: String,
+        channel: u64,
+        path: String,
+        name: String,
+        source: String,
+    },
+    FilesRetry {
+        id: u64,
+    },
+    FileCacheInspect {
+        request_id: u64,
+    },
+    FileCacheClear {
+        request_id: u64,
     },
     Disconnect,
     Shutdown,
@@ -210,6 +254,62 @@ impl Command {
                 || token.len() > 64 =>
             {
                 Err("Invalid chat view")
+            }
+            Self::FilesList { path, .. } if !channel_files::valid_path(path) => {
+                Err("Invalid file path")
+            }
+            Self::FilesBack {
+                server,
+                channel,
+                directory,
+            }
+            | Self::FilesList {
+                server,
+                channel,
+                directory,
+                ..
+            }
+            | Self::FilesSort {
+                server,
+                channel,
+                directory,
+                ..
+            } if server.is_empty()
+                || server.len() > 256
+                || *channel == 0
+                || !channel_files::valid_path(directory) =>
+            {
+                Err("Invalid file context")
+            }
+            Self::FilesOpen { server, channel }
+                if server.is_empty() || server.len() > 256 || *channel == 0 =>
+            {
+                Err("Invalid file context")
+            }
+            Self::FilesDownload {
+                server,
+                channel,
+                path,
+                name,
+            }
+            | Self::FilesUpload {
+                server,
+                channel,
+                path,
+                name,
+                ..
+            } if server.is_empty()
+                || server.len() > 256
+                || *channel == 0
+                || !channel_files::valid_path(path)
+                || !channel_files::valid_name(name) =>
+            {
+                Err("Invalid file request")
+            }
+            Self::FilesUpload { source, .. }
+                if source.len() > 4096 || !Path::new(source).is_absolute() =>
+            {
+                Err("Invalid upload source")
             }
             _ => Ok(()),
         }
@@ -389,6 +489,8 @@ struct Output {
     snapshot: Value,
     network_quality: Option<Value>,
     chat_snapshot: Option<Value>,
+    channel_files: Value,
+    file_cache: Value,
     unread: Value,
     events: VecDeque<Value>,
     notifier: Option<(extern "C" fn(usize), usize)>,
@@ -953,6 +1055,7 @@ async fn download_badge(request: &BadgeRequest) -> Result<(), String> {
 
 enum PendingOperation {
     Chat(String),
+    FilesList,
     Avatar(avatar::Token),
     AvatarInfo(avatar::Token),
     AvatarDelete(avatar::Token),
@@ -1248,6 +1351,9 @@ async fn session(
     processing: &mut AudioProcessingState,
     processor: &mut audio_processing::Processor,
     avatar_store: &Arc<avatar::Store>,
+    files: &mut channel_files::Files,
+    files_tx: &mpsc::UnboundedSender<channel_files::Update>,
+    files_rx: &mut mpsc::UnboundedReceiver<channel_files::Update>,
 ) -> Result<bool, Box<dyn std::error::Error>> {
     let Command::Connect {
         address,
@@ -1258,6 +1364,8 @@ async fn session(
     else {
         return Ok(false);
     };
+    let connection_started = Instant::now();
+    diagnostic!("Connection startup phase=worker_begin");
     out.lock().unwrap().status("connecting");
     out.lock().unwrap().set_chats(json!([]));
     let mut unread = UnreadState {
@@ -1270,6 +1378,10 @@ async fn session(
         Some(value) => serde_json::from_value::<Identity>(value)?,
         None => Identity::create(),
     };
+    diagnostic!(
+        "Connection startup phase=identity_ready total_ms={}",
+        connection_started.elapsed().as_millis()
+    );
     out.lock()
         .unwrap()
         .event(json!({"type":"identity","value":identity}));
@@ -1282,6 +1394,10 @@ async fn session(
         .input_hardware_enabled(true)
         .output_hardware_enabled(true)
         .connect()?;
+    diagnostic!(
+        "Connection startup phase=handshake_begin total_ms={}",
+        connection_started.elapsed().as_millis()
+    );
     let mut audio = AudioHandler::new();
     let mut receive_traces = HashMap::<tsclientlib::ClientId, playback::ReceiveTrace>::new();
     let audio_trace_start = Instant::now();
@@ -1408,6 +1524,7 @@ async fn session(
             _ = &mut deadline, if first_connection => return Err("Connection timed out after 30 seconds".into()),
             event = async { con.events().next().await } => match event {
                 Some(Ok(StreamItem::BookEvents(events))) => {
+                    files.observe(&con, out);
                     avatar.observe(avatar_store, out);
                     let channel = con.get_state().ok().and_then(|state| state.clients.get(&state.own_client).map(|me| (me.channel, state.channels.get(&me.channel).map(|channel| channel.codec))));
                     if channel != voice_channel {
@@ -1434,7 +1551,9 @@ async fn session(
                         operations.insert(handle, PendingOperation::Other("channel_subscribe_failed"));
                         subscribed = true;
                     }
-                    if current_channel_conversation(&con).is_some() {
+                    let initial_connection = first_connection && current_channel_conversation(&con).is_some();
+                    if initial_connection {
+                        diagnostic!("Connection startup phase=protocol_ready total_ms={}", connection_started.elapsed().as_millis());
                         first_connection = false;
                     }
                     let connected_server = server_id(&con);
@@ -1470,14 +1589,19 @@ async fn session(
                     }
                     out.lock().unwrap().set_unread(unread.snapshot());
                     snapshot(&con, out, &audio, voice.speaking(), storage.as_deref());
+                    if initial_connection {
+                        diagnostic!("Connection startup phase=snapshot_published total_ms={}", connection_started.elapsed().as_millis());
+                    }
                     if subscribed { avatar.check(&mut con, storage.as_deref(), &avatar_tx, &mut operations, out); }
                     schedule_media(&mut con, storage.as_deref(), &mut media_active, &mut media_failed, &mut transfers);
                     schedule_badges(&con, storage.as_deref(), &mut badge_active, &badge_failed, &badge_tx);
                 },
                 Some(Ok(StreamItem::IdentityLevelIncreased)) => {
+                    diagnostic!("Connection startup phase=identity_level_ready total_ms={}", connection_started.elapsed().as_millis());
                     out.lock().unwrap().event(json!({"type":"identity","value":con.get_options().get_identity()}));
                 },
                 Some(Ok(StreamItem::IdentityLevelIncreasing(level))) => {
+                    diagnostic!("Connection startup phase=identity_level_increasing level={level} total_ms={}", connection_started.elapsed().as_millis());
                     if level > 24 { con.cancel_identity_level_increase(); return Err("Server requires identity level above 24; import a higher-level identity".into()); }
                 },
                 Some(Ok(StreamItem::AudioChange(change))) => {
@@ -1518,6 +1642,7 @@ async fn session(
                     }
                 },
                 Some(Ok(StreamItem::MessageResult(handle, result))) => match operations.remove(&handle) {
+                    Some(PendingOperation::FilesList) => { files.list_result(handle, result, out); files.pump(&mut con, &mut operations); },
                     Some(PendingOperation::Chat(id)) => {
                         match result {
                             Ok(()) => chats.finish(&id, ChatStatus::Sent, None),
@@ -1558,15 +1683,19 @@ async fn session(
                 },
                 Some(Ok(StreamItem::MessageEvent(msg))) => {
                     avatar.observe(avatar_store, out);
+                    files.message(&msg, storage.as_deref(), out);
+                    files.pump(&mut con, &mut operations);
                     avatar.info(&msg, &mut con, out);
                     if subscribed { avatar.check(&mut con, storage.as_deref(), &avatar_tx, &mut operations, out); }
                 },
                 Some(Ok(StreamItem::FileUpload(handle, transfer))) => {
+                    if files.owns(handle) { files.upload(handle, transfer, &files_tx, out); continue; }
                     avatar.observe(avatar_store, out);
                     avatar.file_upload(handle, transfer, &avatar_tx, out);
                     if subscribed { avatar.check(&mut con, storage.as_deref(), &avatar_tx, &mut operations, out); }
                 },
                 Some(Ok(StreamItem::FileDownload(handle, download))) => {
+                    if files.owns(handle) { files.download(handle, download, &files_tx, out); continue; }
                     avatar.observe(avatar_store, out);
                     let mut download = Some(download);
                     if avatar.file_download(handle, &mut download, &avatar_tx, out) {
@@ -1597,6 +1726,7 @@ async fn session(
                     }
                 },
                 Some(Ok(StreamItem::FiletransferFailed(handle, error))) => {
+                    if files.owns(handle) { files.failed(handle, error, out); continue; }
                     avatar.observe(avatar_store, out);
                     if avatar.file_failed(handle, error, out) {
                         avatar.finish_upload(&mut con, &mut operations, out);
@@ -1615,6 +1745,7 @@ async fn session(
                     out.lock().unwrap().set_network_quality(quality);
                 },
                 Some(Ok(StreamItem::DisconnectedTemporarily(_))) => {
+                    files.disconnected(out);
                     network = network_quality::History::new(Instant::now());
                     avatar.observe(avatar_store, out);
                     if chats.fail_pending("message_unconfirmed_after_reconnect") {
@@ -1645,6 +1776,7 @@ async fn session(
                 publish_chat(out, &chats, storage.as_deref(), current_server.as_deref());
                 schedule_media(&mut con, storage.as_deref(), &mut media_active, &mut media_failed, &mut transfers);
             },
+            Some(update) = files_rx.recv() => { files.update(update, out); files.pump(&mut con, &mut operations); },
             Some(completion) = avatar_rx.recv() => {
                 avatar.observe(avatar_store, out);
                 avatar.completed(completion, &mut con, &mut operations, out);
@@ -1657,6 +1789,11 @@ async fn session(
                 schedule_badges(&con, storage.as_deref(), &mut badge_active, &badge_failed, &badge_tx);
             },
             received = rx.recv() => match received {
+                Some(Command::FileCacheInspect { request_id }) => { files.cache_command(request_id, false, storage.as_deref(), files_tx, out); },
+                Some(Command::FileCacheClear { request_id }) => { files.cache_command(request_id, true, storage.as_deref(), files_tx, out); },
+                Some(command @ (Command::FilesOpen { .. } | Command::FilesBack { .. } | Command::FilesList { .. } | Command::FilesSort { .. } | Command::FilesDownload { .. } | Command::FilesUpload { .. } | Command::FilesRetry { .. })) => {
+                    files.command(command, &mut con, storage.as_deref(), &mut operations, out);
+                },
                 Some(Command::Disconnect) | None => {
                     avatar.disconnected();
                     invalidate_capture(processor, capture_epoch); let _ = voice.interrupt(|codec, data| send_voice(&mut con, codec, data));
@@ -1694,6 +1831,7 @@ async fn session(
                     out.lock().unwrap().set_unread(unread.snapshot());
                 },
                 Some(Command::Join { channel, password }) => {
+                    files.join_password(channel, password.clone());
                     if !subscribed { report_code(out, "connection_recovering", None); continue; }
                     let state = con.get_state()?;
                     if state.clients.get(&state.own_client).is_some_and(|client| client.channel.0 == channel) { continue; }
@@ -1825,6 +1963,7 @@ async fn session(
                 }
             },
             _ = clock.tick() => {
+                files.tick(&mut con, &mut operations, out);
                 if let Some(quality) = network.expire(Instant::now()) {
                     out.lock().unwrap().set_network_quality(quality);
                 }
@@ -1898,8 +2037,12 @@ impl Bridge {
                 let mut app_active = false;
                 let mut processing = AudioProcessingState::default();
                 let mut processor = audio_processing::Processor::new();
+                let mut files = channel_files::Files::default();
+                let (files_tx, mut files_rx) = mpsc::unbounded_channel();
+                files.publish(&worker_output);
                 loop {
                     let request = tokio::select! {
+                        Some(update)=files_rx.recv()=>{files.update(update,&worker_output);continue},
                         event=processor.events.recv()=>{if let Some(event)=event{processing.completed(event,&worker_output);}continue},
                         request=rx.recv()=>match request{Some(r)=>r,None=>break},
                     };
@@ -1929,6 +2072,9 @@ impl Bridge {
                                 &mut processing,
                                 &mut processor,
                                 &worker_avatar_store,
+                                &mut files,
+                                &files_tx,
+                                &mut files_rx,
                             ))
                             .catch_unwind()
                             .await
@@ -1943,6 +2089,7 @@ impl Bridge {
                                 }
                                 _ => {}
                             }
+                            files.disconnected(&worker_output);
                             worker_playback.clear();
                             invalidate_capture(&mut processor, &worker_capture_epoch);
                             worker_output.lock().unwrap().status("disconnected");
@@ -1955,6 +2102,11 @@ impl Bridge {
                         }
                         Command::AvatarChanged => {
                             avatar::offline(&worker_avatar_store, &worker_output).await
+                        }
+                        Command::FileCacheInspect { request_id } => files.cache_command(request_id, false, storage.as_deref(), &files_tx, &worker_output),
+                        Command::FileCacheClear { request_id } => files.cache_command(request_id, true, storage.as_deref(), &files_tx, &worker_output),
+                        command @ (Command::FilesOpen { .. } | Command::FilesBack { .. } | Command::FilesList { .. } | Command::FilesSort { .. } | Command::FilesDownload { .. } | Command::FilesUpload { .. } | Command::FilesRetry { .. }) => {
+                            files.offline(&command, storage.as_deref(), &worker_output);
                         }
                         _ => {}
                     }
@@ -2009,7 +2161,7 @@ impl Bridge {
         let mut out = self.output.lock().unwrap();
         let events: Vec<_> = out.events.drain(..).collect();
         let chats = out.chat_snapshot.take().unwrap_or(Value::Null);
-        json!({"snapshot":out.snapshot,"events":events,"chats":chats,"unread":out.unread})
+        json!({"snapshot":out.snapshot,"events":events,"chats":chats,"unread":out.unread,"channelFiles":out.channel_files,"fileCache":out.file_cache})
     }
 }
 impl Default for Bridge {
@@ -2115,6 +2267,53 @@ mod tests {
             assert!(Instant::now() < deadline, "worker did not recover");
             std::thread::sleep(Duration::from_millis(10));
         }
+    }
+    #[test]
+    fn file_cache_commands_work_offline_and_preserve_other_app_data() {
+        let root = std::env::temp_dir().join(format!("cache-bridge-{}", received_id()));
+        fs::create_dir_all(root.join("channel-files/server/1")).unwrap();
+        fs::create_dir_all(root.join("file-uploads")).unwrap();
+        fs::write(root.join("channel-files/server/1/中文.txt"), b"download").unwrap();
+        fs::write(root.join("file-uploads/source"), b"stage").unwrap();
+        fs::write(root.join("original-export.txt"), b"keep").unwrap();
+        let bridge = Bridge::new();
+        bridge
+            .send(&json!({"type":"configure","storage":root}).to_string())
+            .unwrap();
+        bridge
+            .send(r#"{"type":"file_cache_inspect","request_id":1}"#)
+            .unwrap();
+        wait_until(|| bridge.output.lock().unwrap().file_cache["status"] == "ready");
+        assert_eq!(bridge.poll()["fileCache"]["bytes"], 13);
+        bridge
+            .send(r#"{"type":"file_cache_clear","request_id":2}"#)
+            .unwrap();
+        wait_until(|| {
+            bridge
+                .output
+                .lock()
+                .unwrap()
+                .events
+                .iter()
+                .any(|event| event["type"] == "file_cache_result" && event["requestId"] == 2)
+        });
+        let result = bridge.poll();
+        assert_eq!(result["snapshot"]["status"], "disconnected");
+        assert_eq!(result["fileCache"]["status"], "ready");
+        assert_eq!(result["fileCache"]["bytes"], 0);
+        assert_eq!(result["fileCache"]["items"], 0);
+        let event = result["events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|event| event["requestId"] == 2)
+            .unwrap();
+        assert!(event["error"].is_null());
+        assert_eq!(event["removedBytes"], 13);
+        assert_eq!(fs::read(root.join("original-export.txt")).unwrap(), b"keep");
+        bridge.send(r#"{"type":"shutdown"}"#).unwrap();
+        wait_until(|| bridge.tx.is_closed());
+        fs::remove_dir_all(root).unwrap();
     }
     #[test]
     fn broken_stderr_does_not_end_sessions() {

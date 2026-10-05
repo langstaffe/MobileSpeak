@@ -840,6 +840,7 @@ internal fun SettingsScreen(ui: SessionUiState, requestPermissions: () -> Unit, 
                     modifier = Modifier.semantics { liveRegion = androidx.compose.ui.semantics.LiveRegionMode.Polite }) }
             }
             SettingsEntry(stringResource(R.string.settings_language), stringResource(selectedLanguage.title), stringResource(R.string.accessibility_choose_language)) { onPage("language") }
+            FileCacheSettings(ui)
             SettingsEntry(stringResource(R.string.settings_about)) { onPage("about") }
 
         }
@@ -941,10 +942,10 @@ internal fun VoiceDrawer(ui: SessionUiState, requestPermissions: () -> Unit, exp
             }
         }
     }
-    val drag = Modifier.pointerInput(session) {
+    val drag = Modifier.pointerInput(session, ui.channelFiles.open) {
         awaitEachGesture {
             val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
-            if (!connected || travel == 0f) return@awaitEachGesture
+            if (!connected || travel == 0f || (ui.channelFiles.open && down.position.y >= with(density) { 64.dp.toPx() })) return@awaitEachGesture
             val closingOnPress = currentAutomaticClose
             if (!closingOnPress) {
                 held = true
@@ -1017,7 +1018,7 @@ internal fun VoiceDrawer(ui: SessionUiState, requestPermissions: () -> Unit, exp
         }
         Box(Modifier.weight(1f).fillMaxWidth().clipToBounds()) {
             if (visibleOffset > 0f) {
-                NetworkQualityPanel(ui.snapshot.networkQuality ?: NetworkQuality(), Modifier.wrapContentHeight(align = Alignment.Top, unbounded = true))
+                ChannelFileTools(ui)
             }
         }
     }

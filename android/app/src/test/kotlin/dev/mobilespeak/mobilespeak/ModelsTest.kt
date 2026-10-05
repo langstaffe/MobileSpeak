@@ -5,6 +5,18 @@ import org.junit.Assert.assertThrows
 import org.junit.Test
 
 class ModelsTest {
+    @Test fun fileCacheRequiresKnownIdleSizeAndAllowsZeroByteFiles() {
+        assertEquals(false, FileCacheState().canClear)
+        assertEquals(false, FileCacheState(bytes = 0, status = "ready").canClear)
+        val cache = FileCacheState(bytes = 0, status = "ready", items = 1)
+        assertEquals(true, cache.canClear)
+        assertEquals(false, cache.copy(busy = true).canClear)
+        for (status in listOf("loading", "clearing")) {
+            assertEquals(false, cache.copy(status = status).canClear)
+        }
+        assertEquals(false, cache.copy(bytes = null).canClear)
+        assertEquals(true, cache.copy(bytes = 6, status = "failed", error = "partial cleanup").canClear)
+    }
     @Test fun networkNumbersKeepPrecisionAndDoNotOverflowAtLargeValues() {
         val previous = java.util.Locale.getDefault()
         try {

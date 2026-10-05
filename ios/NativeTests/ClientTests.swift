@@ -7,6 +7,53 @@ import Combine
 @testable import MobileSpeak
 
 final class ClientTests: XCTestCase {
+    @MainActor func testFileCacheSettingsLayoutsAtLargeTextSizes() async throws {
+        let client = Client.shared
+        guard !client.connected, !client.busy else { throw XCTSkip("Requires an offline test profile") }
+        let savedCache = client.fileCache
+        let savedImporting = client.fileImporting
+        let savedLanguage = UserDefaults.standard.string(forKey: AppLanguage.preferenceKey)
+        client.fileImporting = true // A layout fixture must never query or delete actual app files.
+        defer {
+            client.fileCache = savedCache; client.fileImporting = savedImporting
+            if let savedLanguage { UserDefaults.standard.set(savedLanguage, forKey: AppLanguage.preferenceKey) }
+            else { UserDefaults.standard.removeObject(forKey: AppLanguage.preferenceKey) }
+        }
+        try await Task.sleep(nanoseconds: 200_000_000)
+        for language in ["en", "zh-Hans"] {
+            UserDefaults.standard.set(language, forKey: AppLanguage.preferenceKey)
+            for category in [ContentSizeCategory.large, .accessibilityExtraExtraExtraLarge] {
+                client.fileCache = FileCacheState(bytes: 16_454_096, items: 2, status: "ready")
+                let host = UIHostingController(rootView: ScrollView {
+                    FileCacheSettings(client: client).padding(20)
+                }.foregroundStyle(.white).background(Palette.background).environment(\.sizeCategory, category))
+                let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 320, height: 568))
+                window.rootViewController = host; window.makeKeyAndVisible()
+                defer { window.isHidden = true }
+                try await Task.sleep(nanoseconds: 150_000_000)
+                host.view.layoutIfNeeded()
+                let image = UIGraphicsImageRenderer(size: host.view.bounds.size).image { _ in host.view.drawHierarchy(in: host.view.bounds, afterScreenUpdates: true) }
+                let name = "file-cache-\(language)-\(category)"
+                try image.pngData()?.write(to: FileManager.default.temporaryDirectory.appendingPathComponent(name + ".png"))
+                let attachment = XCTAttachment(image: image); attachment.name = name; attachment.lifetime = .keepAlways; add(attachment)
+                XCTAssertFalse(client.fileCachePending)
+                XCTAssertEqual(client.fileCache.bytes, 16_454_096)
+            }
+        }
+    }
+
+    func testFileCacheRequiresKnownIdleSizeAndAllowsZeroByteFiles() throws {
+        XCTAssertFalse(FileCacheState().canClear)
+        var cache = try JSONDecoder().decode(FileCacheState.self, from: Data(#"{"bytes":0,"items":1,"status":"ready","busy":false,"error":null}"#.utf8))
+        XCTAssertTrue(cache.canClear)
+        cache.busy = true; XCTAssertFalse(cache.canClear); cache.busy = false
+        for status in ["loading", "clearing"] { cache.status = status; XCTAssertFalse(cache.canClear) }
+        cache.status = "failed"; cache.error = "partial cleanup"; XCTAssertTrue(cache.canClear)
+        cache.items = 0; XCTAssertFalse(cache.canClear)
+        cache.bytes = 6; XCTAssertTrue(cache.canClear)
+        cache.bytes = nil; XCTAssertFalse(cache.canClear)
+    }
+
     func testNetworkQualityBridgeAndNumberFormatting() throws {
         let data = Data(#"{"status":"connected","channels":[],"clients":[],"networkQuality":{"rttMs":42.5,"deviationMs":6.05,"packetLossPercent":4.0,"rttGrade":"good","deviationGrade":"good","packetLossGrade":"poor","iconGrade":"poor","axisMaxMs":2000,"nowSecond":31,"samples":[{"second":29,"rttMs":1234,"grade":"poor"},{"second":31,"rttMs":42.5,"grade":"good"}]}}"#.utf8)
         let snapshot = try JSONDecoder().decode(Snapshot.self, from: data)
@@ -93,6 +140,10 @@ final class ClientTests: XCTestCase {
         guard !client.connected, !client.busy else { throw XCTSkip("Requires an offline test profile") }
         // No serverId: chat navigation exercises the UI without sending core commands.
         let original = client.state
+        // Keep this synthetic connection fixture isolated from local cache notifications.
+        let originalImporting = client.fileImporting
+        client.fileImporting = true
+        defer { client.fileImporting = originalImporting }
         let channels = (1...160).map { Channel(id: UInt64($0), parent: 0, order: UInt64($0 - 1), name: "Scroll channel \($0)", password: false, permanent: true, key: "\($0)", icon: nil, iconPath: nil) }
         let members = (1...160).map { Member(id: UInt64($0), channel: 20, uid: "scroll-\($0)", name: "Scroll member \($0)", avatarHash: "", avatarPath: nil, badges: [], serverGroupIcons: [], channelGroupIcon: nil, muted: false, deafened: false, speaking: false) }
         let quality = NetworkQuality(rttMs: 96, deviationMs: 35, packetLossPercent: 0.8,
@@ -109,7 +160,8 @@ final class ClientTests: XCTestCase {
         container.addChild(host); container.view.addSubview(host.view)
         host.view.frame = CGRect(x: 0, y: 0, width: 320, height: 568); host.didMove(toParent: container)
         window.makeKeyAndVisible()
-        defer { window.isHidden = true; client.state = original }
+        let savedFiles = client.channelFiles
+        defer { window.isHidden = true; client.state = original; client.channelFiles = savedFiles }
         try await Task.sleep(nanoseconds: 200_000_000) // Let initial core configuration settle.
         client.state = snapshot
         try await Task.sleep(nanoseconds: 150_000_000)
@@ -141,11 +193,11 @@ final class ClientTests: XCTestCase {
             let element = try XCTUnwrap(buttons.first { $0.accessibilityLabel == label } ?? buttons.first { $0.accessibilityLabel?.contains(label) == true }, label + ": " + accessibleElements().compactMap(\.accessibilityLabel).joined(separator: " | "))
             XCTAssertTrue(element.accessibilityActivate(), label)
         }
+        func drawer(_ view: UIView) -> UIView? {
+            if view.accessibilityIdentifier == "voice-drawer" { return view }
+            return view.subviews.lazy.compactMap(drawer).first
+        }
         func checkDrawerHeader(expanded: Bool, screenshot: String) throws {
-            func drawer(_ view: UIView) -> UIView? {
-                if view.accessibilityIdentifier == "voice-drawer" { return view }
-                return view.subviews.lazy.compactMap(drawer).first
-            }
             let pane = try XCTUnwrap(drawer(host.view))
             let frame = UIAccessibility.convertToScreenCoordinates(pane.bounds, in: pane)
             let elements = accessibleElements()
@@ -201,6 +253,46 @@ final class ClientTests: XCTestCase {
         try activate(L10n.string("voice_drawer_expand"))
         try await Task.sleep(nanoseconds: 500_000_000)
         try checkDrawerHeader(expanded: true, screenshot: "drawer-network-expanded")
+        let originalFiles = client.channelFiles
+        client.channelFiles = ChannelFilesState(open: true, server: "fixture", channel: 20, channelName: "Scroll channel 20", path: "/", status: "ready",
+            entries: (0..<40).map { ChannelFileEntry(name: "频道文件 \($0).pdf", size: 0, timestamp: 1700000000, directory: false, icon: "file-text") })
+        try await Task.sleep(nanoseconds: 150_000_000)
+        let fileScroll = try XCTUnwrap(scrolls(host.view).first { scroll in !homeScrolls.contains(where: { $0 === scroll }) })
+        let filesPane = try XCTUnwrap(drawer(host.view))
+        XCTAssertGreaterThanOrEqual(fileScroll.convert(fileScroll.bounds, to: filesPane).minY, 64)
+        XCTAssertLessThanOrEqual(fileScroll.convert(fileScroll.bounds, to: filesPane).maxY, filesPane.bounds.maxY + 1)
+        fileScroll.setContentOffset(CGPoint(x: 0, y: 100), animated: false)
+        XCTAssertEqual(fileScroll.contentOffset.y, 100, accuracy: 0.5)
+        let filesImage = UIGraphicsImageRenderer(size: host.view.bounds.size).image { _ in host.view.drawHierarchy(in: host.view.bounds, afterScreenUpdates: true) }
+        let filesAttachment = XCTAttachment(image: filesImage); filesAttachment.name = "channel-files-in-existing-drawer"; filesAttachment.lifetime = .keepAlways; add(filesAttachment)
+        let local = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("MobileSpeak/channel-files/ui-test/20/file/native-share.txt")
+        try FileManager.default.createDirectory(at: local.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("Shared file".utf8).write(to: local)
+        defer { try? FileManager.default.removeItem(at: local) }
+        client.channelFiles.entries[0].localPath = local.path
+        fileScroll.setContentOffset(.zero, animated: false)
+        try await Task.sleep(nanoseconds: 150_000_000)
+        func presented(_ controller: UIViewController, name: String) -> UIViewController? {
+            if String(describing: type(of: controller)).contains(name) { return controller }
+            if let child = controller.presentedViewController, let result = presented(child, name: name) { return result }
+            return controller.children.lazy.compactMap { presented($0, name: name) }.first
+        }
+        try activate(L10n.string("files_share"))
+        try await Task.sleep(nanoseconds: 400_000_000)
+        let sharing = try XCTUnwrap(presented(container, name: "UIActivityViewController") as? UIActivityViewController)
+        sharing.completionWithItemsHandler?(nil, false, nil, nil)
+        sharing.dismiss(animated: false)
+        try await Task.sleep(nanoseconds: 500_000_000)
+        try activate(L10n.string("files_open"))
+        try await Task.sleep(nanoseconds: 700_000_000)
+        XCTAssertTrue(presented(container, name: "ChannelFileOpenController") != nil || client.channelFilesLocalError != nil,
+            "Open must present the native document menu or report unavailable handlers in the drawer")
+        container.presentedViewController?.dismiss(animated: false)
+        host.presentedViewController?.dismiss(animated: false)
+        client.channelFilesLocalError = nil
+        client.channelFiles = originalFiles
+        try await Task.sleep(nanoseconds: 150_000_000)
+
         for (deviation, grade, name) in [(70.0, NetworkGrade.fair, "mobile"), (120.0, NetworkGrade.poor, "poor")] {
             client.state.networkQuality = NetworkQuality(rttMs: 30, deviationMs: deviation, packetLossPercent: 0,
                 rttGrade: .good, deviationGrade: grade, packetLossGrade: .good, iconGrade: grade,
@@ -344,8 +436,54 @@ final class ClientTests: XCTestCase {
         XCTAssertEqual(homeScrolls[2].contentOffset.y, offsets[2], accuracy: 0.5)
     }
 
+    @MainActor func testChannelFilesDecodeAndRenderScrollableRowsAtLargeTextSizes() async throws {
+        let client = Client.shared
+        guard !client.connected, !client.busy else { throw XCTSkip("Requires an offline test profile") }
+        let original = client.state
+        let originalFiles = client.channelFiles
+        let originalLanguage = UserDefaults.standard.string(forKey: AppLanguage.preferenceKey)
+        UserDefaults.standard.set("zh-Hans", forKey: AppLanguage.preferenceKey)
+        defer {
+            client.state = original; client.channelFiles = originalFiles
+            if let originalLanguage { UserDefaults.standard.set(originalLanguage, forKey: AppLanguage.preferenceKey) }
+            else { UserDefaults.standard.removeObject(forKey: AppLanguage.preferenceKey) }
+        }
+        let data = Data(#"{"open":true,"server":"fixture","channel":7,"channelName":"当前实际加入的频道","path":"/文档","sort":"name","status":"ready","error":null,"entries":[{"name":"很长的中文文件名称用于确认扩展名仍然保留.pdf","size":0,"timestamp":1700000000,"directory":false,"icon":"file-text","localPath":null}],"transfers":[]}"#.utf8)
+        let decoded = try JSONDecoder().decode(ChannelFilesState.self, from: data)
+        XCTAssertEqual(decoded.entries.first?.size, 0)
+        XCTAssertEqual(decoded.channel, 7)
+        let view = ChannelFilesDrawer(client: client).frame(height: 340).foregroundStyle(.white)
+            .background(Palette.bottom).tint(Palette.accent).environment(\.locale, Locale(identifier: "zh-Hans"))
+        let host = UIHostingController(rootView: AnyView(view))
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 320, height: 568))
+        window.rootViewController = host; window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+        try await Task.sleep(nanoseconds: 200_000_000)
+        client.state = Snapshot(status: "connected", server: "Fixture", ownClient: 1,
+            channels: [Channel(id: 7, parent: 0, order: 0, name: "当前实际加入的频道", password: false, permanent: true, key: "7", icon: nil, iconPath: nil)],
+            clients: [Member(id: 1, channel: 7, uid: "self", name: "Self", avatarHash: "", avatarPath: nil, badges: [], serverGroupIcons: [], channelGroupIcon: nil, muted: false, deafened: false, speaking: false)])
+        for category in [ContentSizeCategory.large, .accessibilityExtraExtraExtraLarge] {
+            client.channelFiles = decoded
+            client.channelFiles.entries += (0..<40).map { ChannelFileEntry(name: "文件 \($0).txt", size: 42, timestamp: 1700000000, directory: false, icon: "file-text") }
+            host.rootView = AnyView(view.environment(\.sizeCategory, category))
+            try await Task.sleep(nanoseconds: 200_000_000)
+            host.view.layoutIfNeeded()
+            func scrolls(_ view: UIView) -> [UIScrollView] { (view as? UIScrollView).map { [$0] } ?? view.subviews.flatMap(scrolls) }
+            let scroll = try XCTUnwrap(scrolls(host.view).first)
+            XCTAssertGreaterThan(scroll.contentSize.height, scroll.bounds.height)
+            let old = scroll.contentOffset.y
+            scroll.setContentOffset(CGPoint(x: 0, y: old + 100), animated: false)
+            XCTAssertGreaterThan(scroll.contentOffset.y, old)
+            scroll.setContentOffset(.zero, animated: false)
+            let image = UIGraphicsImageRenderer(size: host.view.bounds.size).image { _ in host.view.drawHierarchy(in: host.view.bounds, afterScreenUpdates: true) }
+            let name = "channel-files-\(category)"
+            try image.pngData()?.write(to: FileManager.default.temporaryDirectory.appendingPathComponent(name + ".png"))
+            let attachment = XCTAttachment(image: image); attachment.name = name; attachment.lifetime = .keepAlways; add(attachment)
+        }
+    }
+
     @MainActor func testIconAssetsKeepTemplateTintAndOffOriginalColors() throws {
-        let names = "avatar-placeholder channel-chat channels checkmark chevron-right error headphones lock members mic-off mic-on more off pencil plus trash send settings speaker-off speaker-on waveform".split(separator: " ")
+        let names = "avatar-placeholder channel-chat channels checkmark chevron-right error headphones lock members mic-off mic-on more off pencil plus trash send settings speaker-off speaker-on waveform folder file file-text file-image file-audio file-archive upload download sort info share".split(separator: " ")
         for name in names {
             let image = try XCTUnwrap(UIImage(named: "Icon-" + name))
             let off = name == "off"
@@ -429,7 +567,8 @@ final class ClientTests: XCTestCase {
             try await Task.sleep(nanoseconds: 10_000_000_000)
             XCTAssertTrue(client.connected)
             XCTAssertTrue(client.audio === audio)
-            XCTAssertTrue(audio.isRunning)
+            let running = await audio.isRunning
+            XCTAssertTrue(running)
             XCTAssertEqual(client.handle, handle)
             XCTAssertEqual(client.microphoneMuted, muted)
             XCTAssertEqual(client.deafened, deafened)
@@ -626,7 +765,8 @@ final class ClientTests: XCTestCase {
         XCTAssertEqual(try String(contentsOf: root.appendingPathComponent("default-avatar-current"), encoding: .utf8), "clear")
         XCTAssertEqual(client.state.clients.first { $0.id == client.state.ownClient }?.avatarHash, "")
         XCTAssertTrue(client.connected)
-        XCTAssertTrue(client.audio.isRunning)
+        let running = await client.audio.isRunning
+        XCTAssertTrue(running)
         XCTAssertEqual(client.handle, handle); XCTAssertTrue(client.audio === audio)
         print("AvatarClearAcceptance: authorized server command and empty own avatar confirmed")
         try await Task.sleep(nanoseconds: 30_000_000_000)
@@ -1084,26 +1224,63 @@ final class ClientTests: XCTestCase {
         #else
         let audio = PhoneAudio(handle: Client.shared.handle)
         defer { audio.stop() }
-        try audio.start()
-        XCTAssertTrue(audio.isVoiceProcessingEnabled)
-        let format = try XCTUnwrap(audio.inputFormat)
+        try await audio.start()
+        let voiceProcessing = await audio.isVoiceProcessingEnabled
+        XCTAssertTrue(voiceProcessing)
+        let inputFormat = await audio.inputFormat
+        let format = try XCTUnwrap(inputFormat)
         XCTAssertGreaterThan(format.sampleRate, 0)
         XCTAssertGreaterThan(format.channelCount, 0)
-        try audio.ensureRunning()
+        try await audio.ensureRunning()
         // No connection: PCM is never transmitted or saved by this hardware check.
-        try audio.startCapture()
+        try await audio.startCapture()
         try await Task.sleep(nanoseconds: 500_000_000)
         XCTAssertGreaterThan(audio.frameCounts.rendered, 0)
         XCTAssertGreaterThan(audio.frameCounts.captured, 0)
         let beforeResume = audio.frameCounts
         audio.pauseForInterruption()
-        try audio.ensureRunning()
-        try audio.startCapture()
+        try await audio.ensureRunning()
+        try await audio.startCapture()
         try await Task.sleep(nanoseconds: 500_000_000)
         XCTAssertGreaterThan(audio.frameCounts.rendered, beforeResume.rendered)
         XCTAssertGreaterThan(audio.frameCounts.captured, beforeResume.captured)
         audio.stopCapture()
+        audio.stop()
+        let running = await audio.isRunning
+        XCTAssertFalse(running)
         #endif
+    }
+    @MainActor func testDisconnectRemainsResponsiveDuringAudioInitializationAndCancelsLateWork() async throws {
+        let client = Client.shared
+        guard !client.connected && !client.busy else { throw XCTSkip("Do not replace an existing connection") }
+        let original = client.state
+        defer { client.state = original }
+        let entered = expectation(description: "Hardware work runs off the main thread")
+        let release = DispatchSemaphore(value: 0)
+        defer { release.signal() }
+        let work = Task {
+            try await client.audio.perform {
+                XCTAssertFalse(Thread.isMainThread)
+                entered.fulfill()
+                _ = release.wait(timeout: .now() + 5)
+            }
+        }
+        await fulfillment(of: [entered], timeout: 2)
+        client.state.status = "connecting"
+        let started = ProcessInfo.processInfo.systemUptime
+        client.disconnect()
+        XCTAssertEqual(client.state.status, "disconnected")
+        XCTAssertLessThan(ProcessInfo.processInfo.systemUptime - started, 0.5)
+        release.signal()
+        do {
+            try await work.value
+            XCTFail("Stopped audio work must not complete as a successful startup")
+        } catch { XCTAssertTrue(error is CancellationError) }
+        // The same queue remains reusable after the canceled operation and stop.
+        try await client.audio.perform { XCTAssertFalse(Thread.isMainThread) }
+        let running = await client.audio.isRunning
+        let capturing = await client.audio.isCapturing
+        XCTAssertFalse(running); XCTAssertFalse(capturing)
     }
     @MainActor func testChannelOrderingHandlesPredecessorsAndCycles() throws {
         let client = Client.shared

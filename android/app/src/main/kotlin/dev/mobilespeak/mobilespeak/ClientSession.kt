@@ -38,6 +38,9 @@ internal object ClientSession {
     private var initialized = false
     private val audioRequest = AtomicLong()
     private val audioLock = Any()
+    private val fileCacheLock = Any()
+    private var fileCacheRequest = 0L
+    private var fileCacheClearRequest: Long? = null
     private var activeBookmarkId: String? = null
     @Volatile private var acceptingConnection = false
     val appActive = mutableAppActive.asStateFlow()
@@ -350,6 +353,18 @@ internal object ClientSession {
         for (index in 0 until events.length()) {
             val event = events.getJSONObject(index)
             when (event.getString("type")) {
+                "file_cache_result" -> synchronized(fileCacheLock) {
+                    if (event.optLong("requestId") == fileCacheRequest) {
+                        val clearing = fileCacheClearRequest == fileCacheRequest
+                        if (clearing) fileCacheClearRequest = null
+                        val error = event.stringOrNull("error")
+                        val message = if (error != null) context.localized(R.string.error_with_detail,
+                            context.localized(if (clearing) R.string.files_cache_clear_failed else R.string.files_cache_read_failed), context.fileError(error))
+                        else if (clearing) context.localized(R.string.files_cache_cleared, android.text.format.Formatter.formatFileSize(context, event.optLong("removedBytes")))
+                        else state.value.fileCacheMessage
+                        mutableState.update { it.copy(fileCachePending = false, fileCacheClearing = if (clearing) false else it.fileCacheClearing, fileCacheMessage = message) }
+                    }
+                }
                 "identity" -> {
                     val identity = event.getJSONObject("value")
                     runCatching { store.saveIdentity(identity) }.onFailure {
@@ -398,6 +413,7 @@ internal object ClientSession {
                 ) }
             }
         }
+        envelope.optJSONObject("fileCache")?.let { cache -> mutableState.update { it.copy(fileCache = cache.fileCache()) } }
         val nextSnapshot = envelope.getJSONObject("snapshot").snapshot()
         if (!acceptingConnection && nextSnapshot.status != "disconnected") return
         val chats = if (envelope.get("chats") == JSONObject.NULL) null else envelope.getJSONArray("chats").objects().map {
@@ -415,6 +431,7 @@ internal object ClientSession {
         mutableState.update { latest ->
             latest.copy(
                 snapshot = nextSnapshot,
+                channelFiles = envelope.optJSONObject("channelFiles")?.channelFiles() ?: latest.channelFiles,
                 messages = chats ?: latest.messages,
                 unread = unread,
                 error = eventError ?: latest.error,
@@ -430,6 +447,75 @@ internal object ClientSession {
         } else if (nextSnapshot.status == "disconnected") {
             acceptingConnection = false
         }
+    }
+
+    fun fileLocalError(message: String?) { mutableState.update { it.copy(channelFilesLocalError = message) } }
+    fun refreshFileCache() = synchronized(fileCacheLock) {
+        val ui = state.value
+        if (ui.fileCachePending || ui.fileCache.working || ui.fileImporting || ui.fileCache.busy) return@synchronized
+        fileCacheRequest += 1
+        mutableState.update { it.copy(fileCachePending = true, fileCacheMessage = null) }
+        if (!send(JSONObject().put("type", "file_cache_inspect").put("request_id", fileCacheRequest))) {
+            mutableState.update { it.copy(fileCachePending = false, fileCacheMessage = context.localized(R.string.files_cache_read_failed)) }
+        }
+    }
+    fun clearFileCache() = synchronized(fileCacheLock) {
+        val ui = state.value
+        if (!ui.fileCache.canClear || ui.fileImporting || ui.fileCachePending) return@synchronized
+        fileCacheRequest += 1
+        fileCacheClearRequest = fileCacheRequest
+        mutableState.update { it.copy(fileCachePending = true, fileCacheClearing = true, fileCacheMessage = null) }
+        if (!send(JSONObject().put("type", "file_cache_clear").put("request_id", fileCacheRequest))) {
+            fileCacheClearRequest = null
+            mutableState.update { it.copy(fileCachePending = false, fileCacheClearing = false, fileCacheMessage = context.localized(R.string.files_cache_clear_failed)) }
+        }
+    }
+    fun fileCommand(type: String, fields: JSONObject = JSONObject()): Boolean {
+        if (state.value.snapshot.status != "connected") { fileLocalError(context.localized(R.string.files_disconnected)); return false }
+        fileLocalError(null)
+        val files = state.value.channelFiles
+        if (!fields.has("server")) fields.put("server", files.server)
+        if (!fields.has("channel")) fields.put("channel", files.channel)
+        if (!fields.has("directory")) fields.put("directory", files.path)
+        val sent = send(fields.put("type", type))
+        if (!sent) fileLocalError(context.localized(R.string.error_operation_submit))
+        return sent
+    }
+    fun openChannelFiles() {
+        val snapshot = state.value.snapshot
+        val own = snapshot.clients.firstOrNull { it.id == snapshot.ownClient } ?: return
+        if (snapshot.status != "connected") return
+        val server = snapshot.serverId ?: return
+        fileCommand("files_open", JSONObject().put("server", server).put("channel", own.channel))
+    }
+    fun downloadChannelFile(name: String, target: ChannelFileTarget) {
+        fileCommand("files_download", target.command().put("name", name))
+    }
+    suspend fun uploadChannelFile(uri: android.net.Uri, target: ChannelFileTarget) {
+        val importing = synchronized(fileCacheLock) {
+            val ui = state.value
+            if (ui.fileImporting || ui.fileCacheClearing || ui.fileCache.status == "clearing") false
+            else { mutableState.update { it.copy(fileImporting = true) }; true }
+        }
+        if (!importing) { fileLocalError(context.localized(R.string.files_cache_busy)); return }
+        try {
+            runCatching {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    val name = context.contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
+                        check(it.moveToFirst()); it.getString(0)
+                    } ?: error("Invalid file name")
+                    require(name.isNotEmpty() && name != "." && name != ".." && name.toByteArray().size <= 255 && name.none { it == '/' || it == '\\' || it.isISOControl() })
+                    val root = File(context.filesDir, "core/file-uploads").apply { check(isDirectory || mkdirs()) }
+                    val staged = File(root, UUID.randomUUID().toString())
+                    try {
+                        context.contentResolver.openInputStream(uri).use { input ->
+                            checkNotNull(input); staged.outputStream().use { input.copyTo(it, 64 * 1024) }
+                        }
+                        if (!fileCommand("files_upload", target.command().put("name", name).put("source", staged.absolutePath))) staged.delete()
+                    } catch (error: Exception) { staged.delete(); throw error }
+                }
+            }.onFailure { fileLocalError(context.localized(R.string.error_with_detail, context.localized(R.string.files_choose_failed), it.message.orEmpty())) }
+        } finally { synchronized(fileCacheLock) { mutableState.update { it.copy(fileImporting = false) } } }
     }
 
     fun captureStopped() { if (initialized) send(JSONObject().put("type", "capture_stopped")) }
