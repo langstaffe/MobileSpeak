@@ -10,7 +10,7 @@ class UiPresentationTest {
     @Test fun networkPaletteDoesNotUseTheGlobalSpeakingColor() {
         assertEquals(androidx.compose.ui.graphics.Color(0xFF3DBE78), NetworkGrade.GOOD.networkColor())
         assertEquals(androidx.compose.ui.graphics.Color(0xFFE9B44C), NetworkGrade.FAIR.networkColor())
-        assertEquals(androidx.compose.ui.graphics.Color(0xFFA8449A), NetworkGrade.POOR.networkColor())
+        assertEquals(androidx.compose.ui.graphics.Color(0xFFFF375F), NetworkGrade.POOR.networkColor())
         assertEquals(Palette.muted, null.networkColor())
     }
     @Test fun voiceDrawerGeometryResistanceAndDistanceVelocitySettling() {
