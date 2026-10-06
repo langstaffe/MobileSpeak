@@ -190,6 +190,7 @@ struct ChannelFilesDrawer: View {
     private var files: ChannelFilesState { client.channelFiles }
     var body: some View {
         let target = client.channelFileTarget
+        let canRefresh = target != nil && files.status != "loading" && client.connected
         VStack(spacing: 0) {
             HStack(spacing: 4) {
                 Button {
@@ -197,6 +198,7 @@ struct ChannelFilesDrawer: View {
                 } label: {
                     HStack(spacing: 2) { AppIcon(name: "chevron-right", size: 18).scaleEffect(x: -1, y: 1); Text(L10n.string("action_back")) }
                         .frame(minWidth: 64, minHeight: 44)
+                        .foregroundStyle(Palette.accent)
                 }
                 .accessibilityIdentifier("files-back")
                 VStack(spacing: 2) {
@@ -204,21 +206,25 @@ struct ChannelFilesDrawer: View {
                     Text(files.channelName ?? "").font(.system(size: min(chromeSize, 16))).foregroundStyle(Palette.muted).lineLimit(1)
                 }.frame(maxWidth: .infinity)
                 Button { uploadTarget = target; choosing = uploadTarget != nil } label: {
-                    HStack(spacing: 4) { AppIcon(name: "upload", size: 18); Text(L10n.string("files_upload")) }.frame(minWidth: 64, minHeight: 44)
+                    HStack(spacing: 4) { AppIcon(name: "upload", size: 18); Text(L10n.string("files_upload")) }.frame(minWidth: 64, minHeight: 44).foregroundStyle(Palette.accent)
                 }.disabled(files.status != "ready" || preparing || !client.connected)
                 .accessibilityIdentifier("files-upload")
             }.font(.system(size: min(actionSize, 20))).padding(.horizontal, 8)
-            HStack {
+            HStack(spacing: 6) {
                 AppIcon(name: "folder", size: 18).foregroundStyle(Palette.muted)
                 Text(files.path).font(.system(size: min(chromeSize, 18))).lineLimit(1).truncationMode(.middle).frame(maxWidth: .infinity, alignment: .leading)
+                Button { client.fileCommand("files_list", fields: target?.command ?? [:]) } label: {
+                    HStack(spacing: 5) { AppIcon(name: "refresh", size: 18); Text(L10n.string("files_reload")).font(.system(size: min(chromeSize, 18))) }
+                        .frame(minWidth: 44, minHeight: 44).padding(.horizontal, 4).foregroundStyle(Palette.accent)
+                }.fixedSize(horizontal: true, vertical: false).disabled(!canRefresh)
+                .accessibilityIdentifier("files-refresh")
                 Menu {
                     Button(L10n.string("files_sort_name")) { client.fileCommand("files_sort", fields: (target?.command ?? [:]).merging(["newest": false]) { _, new in new }) }
                     Button(L10n.string("files_sort_newest")) { client.fileCommand("files_sort", fields: (target?.command ?? [:]).merging(["newest": true]) { _, new in new }) }
-                    Divider()
-                    Button(L10n.string("files_reload")) { client.fileCommand("files_list", fields: target?.command ?? [:]) }
                 } label: {
-                    HStack(spacing: 5) { AppIcon(name: "sort", size: 18); Text(L10n.string(files.sort == "newest" ? "files_sort_newest" : "files_sort_name")).font(.system(size: min(chromeSize, 18))) }.frame(minHeight: 44)
-                }
+                    HStack(spacing: 5) { AppIcon(name: "sort", size: 18); Text(L10n.string(files.sort == "newest" ? "files_sort_newest" : "files_sort_name")).font(.system(size: min(chromeSize, 18))) }.frame(minHeight: 44).foregroundStyle(Palette.accent)
+                }.fixedSize(horizontal: true, vertical: false)
+                .accessibilityIdentifier("files-sort")
             }.padding(.horizontal, 14)
             Divider().overlay(Palette.border)
             ScrollView {
@@ -239,7 +245,8 @@ struct ChannelFilesDrawer: View {
                         else if files.status == "failed" {
                             AppIcon(name: "error", size: 32).foregroundStyle(Palette.disconnect).padding(.top, 24)
                             Text(L10n.string("files_load_failed")).padding(8)
-                            Button(L10n.string("files_reload")) { client.fileCommand("files_list", fields: target?.command ?? [:]) }.frame(minHeight: 44)
+                            Button(L10n.string("files_reload")) { client.fileCommand("files_list", fields: target?.command ?? [:]) }.frame(minHeight: 44).disabled(!canRefresh)
+                                .accessibilityIdentifier("files-refresh-retry")
                         } else if files.status == "ready" && files.entries.isEmpty {
                             AppIcon(name: "folder", size: 40).foregroundStyle(Palette.muted).padding(.top, 24)
                             Text(L10n.string("files_empty")).foregroundStyle(Palette.muted).padding(8)

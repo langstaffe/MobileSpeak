@@ -482,8 +482,90 @@ final class ClientTests: XCTestCase {
         }
     }
 
+    @MainActor func testChannelFilesRefreshAndSortControlsKeepLayoutAndRetryState() async throws {
+        #if targetEnvironment(simulator)
+        let library = try XCTUnwrap(dlopen("/usr/lib/libAccessibility.dylib", RTLD_NOW))
+        let automation = unsafeBitCast(try XCTUnwrap(dlsym(library, "_AXSSetAutomationEnabled")), to: (@convention(c) (Bool) -> Void).self)
+        let enabled = unsafeBitCast(try XCTUnwrap(dlsym(library, "_AXSAutomationEnabled")), to: (@convention(c) () -> Bool).self)()
+        automation(true)
+        defer { automation(enabled); dlclose(library) }
+        #else
+        throw XCTSkip("Native accessibility fixture requires the simulator")
+        #endif
+        let client = Client.shared
+        guard !client.connected, !client.busy else { throw XCTSkip("Requires an offline test profile") }
+        let savedState = client.state, savedFiles = client.channelFiles
+        let savedLanguage = UserDefaults.standard.string(forKey: AppLanguage.preferenceKey)
+        let host = UIHostingController(rootView: AnyView(EmptyView()))
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 320, height: 568))
+        window.rootViewController = host; window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true; client.state = savedState; client.channelFiles = savedFiles
+            if let savedLanguage { UserDefaults.standard.set(savedLanguage, forKey: AppLanguage.preferenceKey) }
+            else { UserDefaults.standard.removeObject(forKey: AppLanguage.preferenceKey) }
+        }
+        func elements(_ object: NSObject) -> [NSObject] {
+            var visited = Set<ObjectIdentifier>()
+            func collect(_ object: NSObject) -> [NSObject] {
+                guard visited.insert(ObjectIdentifier(object)).inserted, !object.accessibilityElementsHidden else { return [] }
+                if let view = object as? UIView, view.isHidden || view.alpha < 0.01 { return [] }
+                let elements = object.accessibilityElements as? [NSObject]
+                let count = object.accessibilityElementCount()
+                let children = elements ?? (count > 0 && count < 1_000 ? (0..<count).compactMap { object.accessibilityElement(at: $0) as? NSObject } : [])
+                if elements == nil, count == NSNotFound, !object.isAccessibilityElement { return ((object as? UIView)?.subviews ?? []).flatMap(collect) }
+                return (object.isAccessibilityElement ? [object] : []) + children.flatMap(collect)
+            }
+            return collect(object)
+        }
+        for language in ["en", "zh-Hans"] {
+            UserDefaults.standard.set(language, forKey: AppLanguage.preferenceKey)
+            XCTAssertEqual(L10n.string("files_reload"), language == "en" ? "Refresh" : "刷新")
+            XCTAssertEqual(L10n.string("files_sort_name"), language == "en" ? "Name" : "名称")
+            XCTAssertEqual(L10n.string("files_sort_newest"), language == "en" ? "Time" : "时间")
+            for category in [ContentSizeCategory.large, .accessibilityExtraExtraExtraLarge] {
+                for (index, fixture) in [("/", "ready", "name", true), ("/文档/a very long folder path/子目录", "ready", "newest", true),
+                    ("/empty", "ready", "name", true), ("/文档", "loading", "newest", true), ("/文档", "failed", "newest", true), ("/文档", "failed", "name", false)].enumerated() {
+                    let (path, status, sort, connected) = fixture
+                    client.state = Snapshot(status: connected ? "connected" : "disconnected")
+                    client.channelFiles = ChannelFilesState(open: true, server: "fixture", channel: 7, channelName: "频道 Channel", path: path, sort: sort, status: status)
+                    if index < 2 { client.channelFiles.entries = [ChannelFileEntry(name: "folder", size: 0, timestamp: 0, directory: true, icon: "folder")] }
+                    host.rootView = AnyView(ChannelFilesDrawer(client: client).foregroundStyle(.white).background(Palette.bottom)
+                        .environment(\.sizeCategory, category).environment(\.locale, Locale(identifier: language)))
+                    try await Task.sleep(nanoseconds: 200_000_000)
+                    host.view.layoutIfNeeded()
+                    let image = UIGraphicsImageRenderer(size: host.view.bounds.size).image { _ in host.view.drawHierarchy(in: host.view.bounds, afterScreenUpdates: true) }
+                    let attachment = XCTAttachment(image: image); attachment.name = "files-controls-\(language)-\(category)-\(index)"; attachment.lifetime = .keepAlways; add(attachment)
+                    let all = elements(host.view)
+                    let refresh = try XCTUnwrap(all.first { $0.accessibilityTraits.contains(.button) && $0.accessibilityLabel == L10n.string("files_reload") })
+                    let sorting = try XCTUnwrap(all.first { $0.accessibilityTraits.contains(.button) && $0.accessibilityLabel == L10n.string(sort == "newest" ? "files_sort_newest" : "files_sort_name") })
+                    XCTAssertEqual(refresh.accessibilityLabel, L10n.string("files_reload"))
+                    XCTAssertEqual(sorting.accessibilityLabel, L10n.string(sort == "newest" ? "files_sort_newest" : "files_sort_name"))
+                    XCTAssertEqual(refresh.accessibilityTraits.contains(.notEnabled), !connected || status == "loading")
+                    for button in [refresh, sorting] {
+                        XCTAssertGreaterThanOrEqual(button.accessibilityFrame.height, 44)
+                        XCTAssertGreaterThanOrEqual(button.accessibilityFrame.minX, window.frame.minX)
+                        XCTAssertLessThanOrEqual(button.accessibilityFrame.maxX, window.frame.maxX)
+                    }
+                    XCTAssertLessThanOrEqual(refresh.accessibilityFrame.maxX, sorting.accessibilityFrame.minX)
+                    let pathElement = try XCTUnwrap(all.first { $0.accessibilityLabel == path })
+                    XCTAssertLessThanOrEqual(pathElement.accessibilityFrame.maxX, refresh.accessibilityFrame.minX)
+                    if connected {
+                        let command = try XCTUnwrap(client.channelFileTarget).command
+                        XCTAssertEqual(command["server"] as? String, "fixture"); XCTAssertEqual(command["channel"] as? UInt64, 7)
+                        XCTAssertEqual(command["path"] as? String, path); XCTAssertEqual(command["directory"] as? String, path)
+                    }
+                    if status == "failed" {
+                        let retry = try XCTUnwrap(all.last { $0.accessibilityTraits.contains(.button) && $0.accessibilityLabel == L10n.string("files_reload") })
+                        XCTAssertFalse(retry === refresh)
+                        XCTAssertEqual(retry.accessibilityTraits.contains(.notEnabled), !connected)
+                    }
+                }
+            }
+        }
+    }
+
     @MainActor func testIconAssetsKeepTemplateTintAndOffOriginalColors() throws {
-        let names = "avatar-placeholder channel-chat channels checkmark chevron-right error headphones lock members mic-off mic-on more off pencil plus trash send settings speaker-off speaker-on waveform folder file file-text file-image file-audio file-archive upload download sort info share".split(separator: " ")
+        let names = "avatar-placeholder channel-chat channels checkmark chevron-right error headphones lock members mic-off mic-on more off pencil plus trash send settings speaker-off speaker-on waveform folder file file-text file-image file-audio file-archive upload download sort refresh info share".split(separator: " ")
         for name in names {
             let image = try XCTUnwrap(UIImage(named: "Icon-" + name))
             let off = name == "off"

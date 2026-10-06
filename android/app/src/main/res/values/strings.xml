@@ -221,10 +221,10 @@
     <string name="files_share">Share</string>
     <string name="files_open">Open</string>
     <string name="files_sort_name">Name</string>
-    <string name="files_sort_newest">Newest first</string>
+    <string name="files_sort_newest">Time</string>
     <string name="files_loading">Loading…</string>
     <string name="files_empty">No files</string>
-    <string name="files_reload">Reload</string>
+    <string name="files_reload">Refresh</string>
     <string name="files_downloaded">Downloaded</string>
     <string name="files_running">Transferring</string>
     <string name="files_complete">Complete</string>

@@ -155,6 +155,7 @@ private fun fileDate(timestamp: Long, context: android.content.Context) = DateFo
     val files = ui.channelFiles
     val context = LocalContext.current
     val target = if (files.server != null && files.channel != null) ChannelFileTarget(files.server, files.channel, files.path) else null
+    val canRefresh = target != null && files.status != "loading" && ui.snapshot.status == "connected"
     fun command(type: String, fields: JSONObject = JSONObject()) {
         val bound = target?.command() ?: JSONObject()
         fields.keys().forEach { key -> bound.put(key, fields.get(key)) }
@@ -195,16 +196,23 @@ private fun fileDate(timestamp: Long, context: android.content.Context) = DateFo
             Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
                 Icon(UiIcons.Folder, null, Modifier.size(18.dp), tint = Palette.muted)
                 Text(files.path, Modifier.weight(1f).padding(horizontal = 6.dp), color = Palette.muted, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                TextButton(onClick = { command("files_list") }, enabled = canRefresh,
+                    modifier = Modifier.heightIn(min = 48.dp).testTag("files-refresh"),
+                    colors = ButtonDefaults.textButtonColors(contentColor = Palette.accent), contentPadding = PaddingValues(8.dp)) {
+                    Icon(UiIcons.Refresh, null, Modifier.size(18.dp)); Spacer(Modifier.width(4.dp))
+                    Text(stringResource(R.string.files_reload), style = MaterialTheme.typography.labelSmall, maxLines = 1)
+                }
+                Spacer(Modifier.width(4.dp))
                 Box {
-                    TextButton(onClick = { sortMenu = true }) {
+                    TextButton(onClick = { sortMenu = true }, modifier = Modifier.heightIn(min = 48.dp).testTag("files-sort"),
+                        colors = ButtonDefaults.textButtonColors(contentColor = Palette.accent), contentPadding = PaddingValues(start = 12.dp, top = 8.dp, bottom = 8.dp)) {
                         Icon(UiIcons.Sort, null, Modifier.size(18.dp)); Spacer(Modifier.width(4.dp))
-                        Text(stringResource(if (files.sort == "newest") R.string.files_sort_newest else R.string.files_sort_name), style = MaterialTheme.typography.labelSmall)
+                        Text(stringResource(if (files.sort == "newest") R.string.files_sort_newest else R.string.files_sort_name), style = MaterialTheme.typography.labelSmall, maxLines = 1)
                     }
                     DropdownMenu(expanded = sortMenu, onDismissRequest = { sortMenu = false }) {
                         for ((key, newest) in listOf(R.string.files_sort_name to false, R.string.files_sort_newest to true)) {
                             DropdownMenuItem(text = { Text(stringResource(key)) }, onClick = { sortMenu = false; command("files_sort", JSONObject().put("newest", newest)) })
                         }
-                        DropdownMenuItem(text = { Text(stringResource(R.string.files_reload)) }, onClick = { sortMenu = false; command("files_list") })
                     }
                 }
             }
@@ -237,7 +245,7 @@ private fun fileDate(timestamp: Long, context: android.content.Context) = DateFo
                     "failed" -> item { Column(Modifier.fillMaxWidth().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                         Icon(UiIcons.Error, null, Modifier.size(32.dp), tint = Palette.disconnect)
                         Text(stringResource(R.string.files_load_failed), color = Palette.text)
-                        TextButton(onClick = { command("files_list", JSONObject().put("path", files.path)) }) { Text(stringResource(R.string.files_reload)) }
+                        TextButton(onClick = { command("files_list") }, enabled = canRefresh, modifier = Modifier.testTag("files-refresh-retry")) { Text(stringResource(R.string.files_reload)) }
                     } }
                     "ready" -> if (files.entries.isEmpty()) item { Column(Modifier.fillMaxWidth().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                         Icon(UiIcons.Folder, null, Modifier.size(40.dp), tint = Palette.muted)

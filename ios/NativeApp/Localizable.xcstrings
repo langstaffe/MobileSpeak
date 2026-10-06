@@ -3604,13 +3604,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Reload"
+            "value" : "Refresh"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "重新加载"
+            "value" : "刷新"
           }
         }
       }
@@ -3695,7 +3695,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "名称排序"
+            "value" : "名称"
           }
         }
       }
@@ -3706,13 +3706,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Newest first"
+            "value" : "Time"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "最新在前"
+            "value" : "时间"
           }
         }
       }

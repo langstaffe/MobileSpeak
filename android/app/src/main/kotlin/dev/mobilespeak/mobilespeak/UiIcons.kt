@@ -73,6 +73,8 @@ internal object UiIcons {
         @Composable get() = ImageVector.vectorResource(R.drawable.ic_download)
     val Sort: ImageVector
         @Composable get() = ImageVector.vectorResource(R.drawable.ic_sort)
+    val Refresh: ImageVector
+        @Composable get() = ImageVector.vectorResource(R.drawable.ic_refresh)
     val Info: ImageVector
         @Composable get() = ImageVector.vectorResource(R.drawable.ic_info)
     val Share: ImageVector

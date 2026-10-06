@@ -19,7 +19,7 @@ class IconResourcesTest {
             R.drawable.ic_waveform, R.drawable.ic_pencil, R.drawable.ic_trash,
             R.drawable.ic_folder, R.drawable.ic_file, R.drawable.ic_file_text, R.drawable.ic_file_image,
             R.drawable.ic_file_audio, R.drawable.ic_file_archive, R.drawable.ic_upload, R.drawable.ic_download,
-            R.drawable.ic_sort, R.drawable.ic_info, R.drawable.ic_share)
+            R.drawable.ic_sort, R.drawable.ic_refresh, R.drawable.ic_info, R.drawable.ic_share)
         for (id in icons) {
             val off = id == R.drawable.ic_off
             val size = if (off) 34 else 24
