@@ -4,8 +4,15 @@ version = "0.1.0"
 edition = "2021"
 license = "MIT"
 
+[workspace]
+members = ["patched/tsproto"]
+resolver = "2"
+
 [lib]
 crate-type = ["cdylib", "staticlib", "rlib"]
+
+[features]
+network-diagnostics = ["dep:tsproto"]
 
 [dependencies]
 earshot = "=1.2.2"
@@ -13,6 +20,7 @@ rubato = { version = "=0.16.2", default-features = false }
 libloading = "=0.9.0"
 tsclientlib = { git = "https://github.com/ReSpeak/tsclientlib", rev = "ee3bc6f45a7137db7793ba5593a321df400d53e5", default-features = false, features = ["audio", "unstable"] }
 tsproto-packets = { git = "https://github.com/ReSpeak/tsclientlib", rev = "ee3bc6f45a7137db7793ba5593a321df400d53e5" }
+tsproto = { git = "https://github.com/ReSpeak/tsclientlib", rev = "ee3bc6f45a7137db7793ba5593a321df400d53e5", optional = true }
 audiopus = "0.3.0-rc.0"
 audiopus_sys = { version = "0.2", features = ["static"] }
 nnnoiseless = { version = "0.5.2", default-features = false }
@@ -31,3 +39,6 @@ jni = "0.22.4"
 
 [build-dependencies]
 cc = "=1.4.6"
+
+[patch."https://github.com/ReSpeak/tsclientlib"]
+tsproto = { path = "patched/tsproto" }

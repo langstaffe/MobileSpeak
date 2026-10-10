@@ -73,6 +73,7 @@ listOf("arm64-v8a", "x86_64").forEach { abi ->
         commandLine("bash", "tool/build_android_core.sh", abi)
         inputs.files(fileTree("../../native/src"), file("../../native/Cargo.toml"), file("../../native/build.rs"), fileTree("../../native/models"), file("../../tool/prepare_audio_runtime.py"), file("../../tool/build_sherpa_fft.py"), file("../../tool/sherpa-onnx-fft.patch"), file("../../native/Cargo.lock"),
             file("../../native/.cargo/config.toml"), file("../../tool/build_android_core.sh"), file("../../tool/android.cmake"))
+        inputs.files(fileTree("../../native/patched") { include("**/*.rs", "**/Cargo.toml") })
         outputs.dir("src/main/jniLibs/$abi")
     }
     val prepareTask = if (abi == "arm64-v8a") "preBuild" else "preDebugBuild"

@@ -3,6 +3,9 @@ import Combine
 import Security
 import UIKit
 import OSLog
+#if DEBUG
+import Network
+#endif
 
 struct Channel: Decodable, Identifiable, Equatable {
     enum SpacerAlignment: Equatable { case left, center, right, repeatFill }
@@ -195,6 +198,10 @@ private func coreChanged(_ context: Int) {
     // One application-lifetime instance keeps FFI callback/audio ownership simple.
     static let shared = Client()
     private let connectionLogger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "MobileSpeak", category: "connection")
+    #if DEBUG
+    private let networkLogger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "MobileSpeak", category: "network")
+    private let networkPathMonitor = NWPathMonitor()
+    #endif
     private var connectionStarted: TimeInterval?
     let handle: UnsafeMutableRawPointer
     @Published var state = Snapshot()
@@ -386,6 +393,14 @@ private func coreChanged(_ context: Int) {
         } catch { self.error = L10n.withDetail("error_cache_prepare", error.localizedDescription) }
         do { try send(["type": "set_noise_suppression", "mode": noiseSuppression.rawValue, "request_id": audioRequest]) }
         catch { self.audioProcessingError = L10n.withDetail("error_noise_suppression", error.localizedDescription) }
+        #if DEBUG
+        let logger = networkLogger
+        networkPathMonitor.pathUpdateHandler = { path in
+            let wallMs = Int64(Date().timeIntervalSince1970 * 1000)
+            logger.info("NetworkDiag phase=path wall_ms=\(wallMs) status=\(String(describing: path.status), privacy: .public) wifi=\(path.usesInterfaceType(.wifi)) cellular=\(path.usesInterfaceType(.cellular)) expensive=\(path.isExpensive) constrained=\(path.isConstrained)")
+        }
+        networkPathMonitor.start(queue: DispatchQueue(label: "MobileSpeak.NetworkDiagnostics"))
+        #endif
     }
     func send(_ command: [String: Any]) throws {
         let data = try JSONSerialization.data(withJSONObject: command)
@@ -541,6 +556,12 @@ private func coreChanged(_ context: Int) {
             }
             let wasConnected = connected
             let wasInSession = connected || reconnecting
+            #if DEBUG
+            if next.status != state.status || next.networkQuality != state.networkQuality {
+                let wallMs = Int64(Date().timeIntervalSince1970 * 1000)
+                networkLogger.info("NetworkDiag phase=ui wall_ms=\(wallMs) status=\(next.status, privacy: .public) rtt_ms=\(next.networkQuality?.latencyText ?? "—", privacy: .public) deviation_ms=\(next.networkQuality?.deviationText ?? "—", privacy: .public)")
+            }
+            #endif
             if next != state { state = next }
             if connected && !wasConnected, let started = connectionStarted {
                 connectionLogger.info("Connection startup phase=connected_snapshot total_ms=\(Int((ProcessInfo.processInfo.systemUptime - started) * 1000))")

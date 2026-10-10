@@ -14,6 +14,8 @@ mod audio_processing;
 mod avatar;
 mod badges;
 mod channel_files;
+#[cfg(feature = "network-diagnostics")]
+mod network_diagnostics;
 mod network_quality;
 mod playback;
 // Fixed upstream receive module with the queued-packet recovery patch.
@@ -1410,6 +1412,8 @@ async fn session(
     let mut first_connection = true;
     let mut current_server: Option<String> = None;
     let mut network = network_quality::History::new(Instant::now());
+    #[cfg(feature = "network-diagnostics")]
+    let mut network_trace: Option<network_diagnostics::Diagnostics> = None;
     let mut chats = ChatStore::default();
     let mut chat_writable = true;
     let mut operations = HashMap::<MessageHandle, PendingOperation>::new();
@@ -1522,8 +1526,15 @@ async fn session(
                 }
             },
             _ = &mut deadline, if first_connection => return Err("Connection timed out after 30 seconds".into()),
-            event = async { con.events().next().await } => match event {
+            event = std::future::poll_fn(|cx| {
+                let event = con.events().poll_next_unpin(cx);
+                #[cfg(feature = "network-diagnostics")]
+                if let Some(trace) = &network_trace { trace.observe(&con); }
+                event
+            }) => match event {
                 Some(Ok(StreamItem::BookEvents(events))) => {
+                    #[cfg(feature = "network-diagnostics")]
+                    if network_trace.is_none() { network_trace = network_diagnostics::Diagnostics::attach(&mut con); }
                     files.observe(&con, out);
                     avatar.observe(avatar_store, out);
                     let channel = con.get_state().ok().and_then(|state| state.clients.get(&state.own_client).map(|me| (me.channel, state.channels.get(&me.channel).map(|channel| channel.codec))));
@@ -1740,11 +1751,15 @@ async fn session(
                     schedule_media(&mut con, storage.as_deref(), &mut media_active, &mut media_failed, &mut transfers);
                 },
                 Some(Ok(StreamItem::NetworkStatsUpdated)) => {
+                    #[cfg(feature = "network-diagnostics")]
+                    if let Some(trace) = &network_trace { trace.snapshot(&con); }
                     let stats = if current_channel_conversation(&con).is_some() { con.get_network_stats().ok() } else { None };
                     let quality = network.update(stats, Instant::now());
                     out.lock().unwrap().set_network_quality(quality);
                 },
                 Some(Ok(StreamItem::DisconnectedTemporarily(_))) => {
+                    #[cfg(feature = "network-diagnostics")]
+                    { network_trace = None; }
                     files.disconnected(out);
                     network = network_quality::History::new(Instant::now());
                     avatar.observe(avatar_store, out);
@@ -1854,6 +1869,8 @@ async fn session(
                         let update = con.get_state()?.client_update()
                             .set_input_muted(input)
                             .set_output_muted(output);
+                        #[cfg(feature = "network-diagnostics")]
+                        if let Some(trace) = &network_trace { trace.queued_mute(&con, input, output); }
                         match update.send_with_result(&mut con) {
                             Ok(handle) => { operations.insert(handle, PendingOperation::Other("update_audio_state_failed")); },
                             Err(error) => report_code(out, "update_audio_state_failed", Some(error.to_string())),
@@ -2570,6 +2587,8 @@ mod tests {
         let mut stats = tsclientlib::ConnectionStats::default();
         stats.rtt = Duration::from_millis(42);
         stats.rtt_dev = Duration::from_millis(6);
+        stats.rtt_measurements = 1;
+        stats.rtt_measured_at = Some(now.into());
         let quality = history.update(Some(&stats), now);
         out.set_network_quality(quality); // Offline updates must not revive a session.
         assert_eq!(count.load(Ordering::SeqCst), 2);

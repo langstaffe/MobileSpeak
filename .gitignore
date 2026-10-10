@@ -144,3 +144,7 @@ credentials/
 
 # Fixed native audio runtimes prepared by tool/prepare_audio_runtime.py
 native/vendor/
+
+# Attribution for the fixed protocol dependency is part of the source tree.
+!/native/patched/tsproto/README.md
+!/native/patched/tsproto/MOBILESPEAK.md

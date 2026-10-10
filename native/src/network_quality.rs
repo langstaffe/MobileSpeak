@@ -8,8 +8,9 @@ use tsclientlib::ConnectionStats;
 
 const WINDOW: u64 = 30;
 const RECOVERY: Duration = Duration::from_secs(5);
-// StatsUpdated is emitted every second. A gap must not count as healthy time.
+// Statistics arrive every second; allow a few missed one-second RTT probes.
 const FRESHNESS: Duration = Duration::from_secs(2);
+const RTT_FRESHNESS: Duration = Duration::from_secs(5);
 const AXIS_STEPS: [f64; 9] = [10.0, 50.0, 100.0, 200.0, 300.0, 400.0, 500.0, 750.0, 1000.0];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
@@ -89,7 +90,8 @@ pub(crate) struct History {
     wall_baseline: (Instant, SystemTime),
     sleep_time: Duration,
     last_event: Option<Instant>,
-    measured_rtt: bool,
+    rtt_measurements: Option<u64>,
+    last_rtt: Option<Instant>,
     icon_recovery: Option<(Grade, Instant)>,
     axis_recovery: Option<(f64, Instant)>,
     quality: Quality,
@@ -135,7 +137,8 @@ impl History {
             wall_baseline: (now, SystemTime::now()),
             sleep_time: Duration::ZERO,
             last_event: None,
-            measured_rtt: false,
+            rtt_measurements: None,
+            last_rtt: None,
             icon_recovery: None,
             axis_recovery: None,
             quality: Quality {
@@ -159,6 +162,7 @@ impl History {
         if let Some(gap) = sleep_gap {
             self.sleep_time = self.sleep_time.saturating_add(gap - monotonic_gap);
             self.last_event = None;
+            self.last_rtt = None;
         }
         self.wall_baseline = (now, wall);
         self.quality.now_second = self.second(now);
@@ -173,6 +177,12 @@ impl History {
             .is_none_or(|last| now.duration_since(last) > FRESHNESS)
         {
             self.quality.reading = Reading::default();
+        }
+        if self.quality.reading.rtt_ms.is_none() || !self.rtt_fresh(now) {
+            self.quality.reading.rtt_ms = None;
+            self.quality.reading.deviation_ms = None;
+            self.quality.reading.rtt_grade = None;
+            self.quality.reading.deviation_grade = None;
             self.quality.icon_grade = None;
             self.icon_recovery = None;
             self.axis_recovery = None;
@@ -185,20 +195,38 @@ impl History {
             .as_secs()
     }
 
+    fn rtt_fresh(&self, now: Instant) -> bool {
+        self.last_rtt
+            .is_some_and(|last| now.duration_since(last) <= RTT_FRESHNESS)
+    }
+
     pub(crate) fn update(&mut self, stats: Option<&ConnectionStats>, now: Instant) -> &Quality {
         self.advance(now, SystemTime::now());
         self.last_event = Some(now);
-        // Upstream has no public RTT-measurement counter. Its initial RTT/deviation
-        // are both zero; require evidence of a measurement once per connection.
-        // Afterwards genuine zeros (and rounded display zeros) remain valid.
+        let mut new_measurement = false;
         if let Some(stats) = stats {
-            self.measured_rtt |= !stats.rtt.is_zero() || !stats.rtt_dev.is_zero();
+            if self.rtt_measurements != Some(stats.rtt_measurements) {
+                self.rtt_measurements = Some(stats.rtt_measurements);
+                self.last_rtt = stats.rtt_measured_at.map(|time| time.into_std());
+                new_measurement = self.last_rtt.is_some();
+            }
         }
-        let reading = stats.filter(|_| self.measured_rtt).and_then(|stats| {
+        let reading = stats.and_then(|stats| {
             // get_packetloss() returns a fraction for the library's current window.
             Reading::from_stats(stats.rtt, stats.rtt_dev, stats.get_packetloss())
         });
-        if let Some(reading) = reading {
+        if let Some(mut reading) = reading {
+            if !self.rtt_fresh(now) {
+                reading.rtt_ms = None;
+                reading.deviation_ms = None;
+                reading.rtt_grade = None;
+                reading.deviation_grade = None;
+                self.quality.reading = reading;
+                self.quality.icon_grade = None;
+                self.icon_recovery = None;
+                self.axis_recovery = None;
+                return &self.quality;
+            }
             let worst = reading
                 .rtt_grade
                 .max(reading.deviation_grade)
@@ -208,18 +236,17 @@ impl History {
                 Some(current) => buffered(current, worst, &mut self.icon_recovery, now),
                 None => worst,
             });
-            // At most one real observation per second; never synthesize missing buckets.
-            if self
-                .quality
-                .samples
-                .back()
-                .is_none_or(|sample| sample.second != self.quality.now_second)
-            {
-                self.quality.samples.push_back(Sample {
-                    second: self.quality.now_second,
+            // Publish only accepted measurements, including unchanged or zero RTTs.
+            if new_measurement {
+                let sample = Sample {
+                    second: self.second(self.last_rtt.unwrap()),
                     rtt_ms: reading.rtt_ms.unwrap(),
                     grade: reading.rtt_grade.unwrap(),
-                });
+                };
+                match self.quality.samples.back_mut() {
+                    Some(last) if last.second == sample.second => *last = sample,
+                    _ => self.quality.samples.push_back(sample),
+                }
             }
             self.quality.reading = reading;
             let peak = self
@@ -249,8 +276,13 @@ impl History {
         if self
             .last_event
             .is_some_and(|last| now.duration_since(last) > FRESHNESS)
-            && self.second(now) != self.quality.now_second
+            || self
+                .last_rtt
+                .is_some_and(|last| now.duration_since(last) > RTT_FRESHNESS)
         {
+            if self.second(now) == self.quality.now_second {
+                return None;
+            }
             self.advance(now, SystemTime::now());
             Some(&self.quality)
         } else {
@@ -267,11 +299,15 @@ impl History {
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn stats(rtt: f64, dev: f64) -> ConnectionStats {
-        let mut stats = ConnectionStats::default();
-        stats.rtt = Duration::from_secs_f64(rtt / 1000.0);
-        stats.rtt_dev = Duration::from_secs_f64(dev / 1000.0);
-        stats
+    impl History {
+        fn measure(&mut self, rtt: f64, dev: f64, now: Instant) -> &Quality {
+            let mut stats = ConnectionStats::default();
+            stats.rtt = Duration::from_secs_f64(rtt / 1000.0);
+            stats.rtt_dev = Duration::from_secs_f64(dev / 1000.0);
+            stats.rtt_measurements = self.rtt_measurements.unwrap_or(0).wrapping_add(1);
+            stats.rtt_measured_at = Some(now.into());
+            self.update(Some(&stats), now)
+        }
     }
     #[test]
     fn raw_thresholds_units_defaults_and_real_zeros() {
@@ -328,10 +364,10 @@ mod tests {
             .reading
             .rtt_ms
             .is_none());
-        let q = history.update(Some(&stats(42.49, 6.05)), now + Duration::from_secs(1));
+        let q = history.measure(42.49, 6.05, now + Duration::from_secs(1));
         assert_eq!(q.reading.rtt_ms, Some(42.49));
         assert_eq!(q.reading.packet_loss_percent, Some(0.0));
-        let q = history.update(Some(&stats(0.0, 0.0)), now + Duration::from_secs(2));
+        let q = history.measure(0.0, 0.0, now + Duration::from_secs(2));
         assert_eq!(q.reading.rtt_ms, Some(0.0));
         assert_eq!(q.icon_grade, Some(Grade::Good));
     }
@@ -339,45 +375,42 @@ mod tests {
     fn recovery_is_immediate_up_five_seconds_down_and_gaps_reset_it() {
         let start = Instant::now();
         let mut history = History::new(start);
-        history.update(Some(&stats(250.0, 0.0)), start);
+        history.measure(250.0, 0.0, start);
         for second in 1..6 {
             assert_eq!(
                 history
-                    .update(Some(&stats(42.0, 0.0)), start + Duration::from_secs(second))
+                    .measure(42.0, 0.0, start + Duration::from_secs(second))
                     .icon_grade,
                 Some(Grade::Poor)
             );
         }
         assert_eq!(
             history
-                .update(Some(&stats(42.0, 0.0)), start + Duration::from_secs(6))
+                .measure(42.0, 0.0, start + Duration::from_secs(6))
                 .icon_grade,
             Some(Grade::Good)
         );
         assert_eq!(
             history
-                .update(Some(&stats(42.0, 70.0)), start + Duration::from_secs(7))
+                .measure(42.0, 70.0, start + Duration::from_secs(7))
                 .icon_grade,
             Some(Grade::Fair)
         );
         assert_eq!(
             history
-                .update(Some(&stats(42.0, 100.0)), start + Duration::from_secs(8))
+                .measure(42.0, 100.0, start + Duration::from_secs(8))
                 .icon_grade,
             Some(Grade::Poor)
         );
         for second in 9..14 {
-            let q = history.update(
-                Some(&stats(42.0, 70.0)),
-                start + Duration::from_secs(second),
-            );
+            let q = history.measure(42.0, 70.0, start + Duration::from_secs(second));
             assert_eq!(q.reading.deviation_grade, Some(Grade::Fair));
             assert_eq!(q.icon_grade, Some(Grade::Poor));
             assert_eq!(q.samples.back().unwrap().grade, Grade::Good);
         }
         assert_eq!(
             history
-                .update(Some(&stats(42.0, 70.0)), start + Duration::from_secs(14))
+                .measure(42.0, 70.0, start + Duration::from_secs(14))
                 .icon_grade,
             Some(Grade::Fair)
         );
@@ -485,13 +518,10 @@ mod tests {
         }
         let start = Instant::now();
         let mut history = History::new(start);
-        assert_eq!(
-            history.update(Some(&stats(450.0, 0.0)), start).axis_max_ms,
-            500.0
-        );
+        assert_eq!(history.measure(450.0, 0.0, start).axis_max_ms, 500.0);
         // Duplicate events cannot add another bar; a missing second stays missing.
-        history.update(Some(&stats(450.0, 0.0)), start + Duration::from_millis(500));
-        history.update(Some(&stats(42.0, 0.0)), start + Duration::from_secs(2));
+        history.measure(450.0, 0.0, start + Duration::from_millis(500));
+        history.measure(42.0, 0.0, start + Duration::from_secs(2));
         assert_eq!(
             history
                 .quality
@@ -502,19 +532,19 @@ mod tests {
             [0, 2]
         );
         for second in 3..35 {
-            history.update(Some(&stats(42.0, 0.0)), start + Duration::from_secs(second));
+            history.measure(42.0, 0.0, start + Duration::from_secs(second));
         }
         assert_eq!(history.quality.samples.len(), 30);
         assert_eq!(history.quality.axis_max_ms, 500.0);
         assert_eq!(
             history
-                .update(Some(&stats(42.0, 0.0)), start + Duration::from_secs(35))
+                .measure(42.0, 0.0, start + Duration::from_secs(35))
                 .axis_max_ms,
             50.0
         );
         assert_eq!(
             history
-                .update(Some(&stats(500.0, 0.0)), start + Duration::from_secs(36))
+                .measure(500.0, 0.0, start + Duration::from_secs(36))
                 .axis_max_ms,
             750.0
         );
@@ -540,7 +570,7 @@ mod tests {
     fn system_sleep_does_not_preserve_old_history_or_recovery_time() {
         let start = Instant::now();
         let mut history = History::new(start);
-        history.update(Some(&stats(450.0, 40.0)), start);
+        history.measure(450.0, 40.0, start);
         let wall = history.wall_baseline.1;
         // Only 100 ms of monotonic time passed during a minute of system sleep.
         history.advance(
@@ -555,7 +585,7 @@ mod tests {
         assert_eq!(history.quality.axis_max_ms, 10.0);
         assert_eq!(history.quality.now_second, 60);
         let mut brief = History::new(start);
-        brief.update(Some(&stats(42.0, 0.0)), start);
+        brief.measure(42.0, 0.0, start);
         let wall = brief.wall_baseline.1;
         brief.advance(
             start + Duration::from_millis(100),
@@ -564,5 +594,62 @@ mod tests {
         assert_eq!(brief.quality.now_second, 3);
         assert_eq!(brief.quality.samples.len(), 1); // Still a real sample within 30 seconds.
         assert!(brief.quality.icon_grade.is_none());
+    }
+
+    #[test]
+    fn statistics_ticks_cannot_refresh_rtt_or_duplicate_bars() {
+        let start = Instant::now();
+        let mut history = History::new(start);
+        let mut stats = ConnectionStats::default();
+        stats.rtt = Duration::from_millis(33);
+        stats.rtt_dev = Duration::from_millis(5);
+        stats.rtt_measurements = 1;
+        stats.rtt_measured_at = Some(start.into());
+        history.update(Some(&stats), start);
+        for second in 1..=8 {
+            let quality = history.update(Some(&stats), start + Duration::from_secs(second));
+            assert_eq!(quality.samples.len(), 1);
+            assert_eq!(quality.reading.rtt_ms, (second <= 5).then_some(33.0));
+            assert_eq!(quality.reading.packet_loss_percent, Some(0.0));
+        }
+        // Identical values with a new accepted measurement are still fresh.
+        stats.rtt_measurements = 2;
+        stats.rtt_measured_at = Some((start + Duration::from_secs(8)).into());
+        let quality = history.update(Some(&stats), start + Duration::from_secs(9));
+        assert_eq!(quality.reading.rtt_ms, Some(33.0));
+        assert_eq!(
+            quality
+                .samples
+                .iter()
+                .map(|sample| sample.second)
+                .collect::<Vec<_>>(),
+            [0, 8]
+        );
+        history.update(Some(&stats), start + Duration::from_secs(13));
+        assert!(history
+            .expire(start + Duration::from_secs(14))
+            .unwrap()
+            .reading
+            .rtt_ms
+            .is_none());
+    }
+
+    #[test]
+    fn waking_cannot_republish_a_pre_sleep_measurement() {
+        let start = Instant::now();
+        let mut history = History::new(start);
+        let mut stats = ConnectionStats::default();
+        stats.rtt_measurements = 1;
+        stats.rtt_measured_at = Some(start.into());
+        history.update(Some(&stats), start);
+        let wall = history.wall_baseline.1;
+        let now = start + Duration::from_millis(100);
+        history.advance(now, wall + Duration::from_secs(60));
+        assert!(history.update(Some(&stats), now).reading.rtt_ms.is_none());
+        assert!(history.quality.samples.is_empty());
+        stats.rtt_measurements = 2;
+        stats.rtt_measured_at = Some(now.into());
+        assert_eq!(history.update(Some(&stats), now).reading.rtt_ms, Some(0.0));
+        assert_eq!(history.quality.samples.len(), 1);
     }
 }
