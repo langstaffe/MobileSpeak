@@ -27,6 +27,7 @@
     <tr><td style="vertical-align: middle; text-align: center;">服务器密码保存</td><td style="vertical-align: middle; text-align: center;">✅</td><td style="vertical-align: middle; text-align: center;">✅</td></tr>
     <tr><td style="vertical-align: middle; text-align: center;">身份认证与身份持久化</td><td style="vertical-align: middle; text-align: center;">✅</td><td style="vertical-align: middle; text-align: center;">✅</td></tr>
     <tr><td style="vertical-align: middle; text-align: center;">断线自动重连</td><td style="vertical-align: middle; text-align: center;">✅</td><td style="vertical-align: middle; text-align: center;">✅</td></tr>
+    <tr><td style="vertical-align: middle; text-align: center;">网络连接质量显示</td><td style="vertical-align: middle; text-align: center;">✅</td><td style="vertical-align: middle; text-align: center;">✅</td></tr>
     <tr><td style="vertical-align: middle; text-align: center;">公共社区发现、搜索与加入（仅 TeamSpeak 6）</td><td style="vertical-align: middle; text-align: center;">✅</td><td style="vertical-align: middle; text-align: center;">❌</td></tr>
     <tr><td style="vertical-align: middle; text-align: center;">频道与子频道浏览</td><td style="vertical-align: middle; text-align: center;">✅</td><td style="vertical-align: middle; text-align: center;">✅</td></tr>
     <tr><td style="vertical-align: middle; text-align: center;">加入频道</td><td style="vertical-align: middle; text-align: center;">✅</td><td style="vertical-align: middle; text-align: center;">✅</td></tr>
@@ -49,7 +50,7 @@
     <tr><td style="vertical-align: middle; text-align: center;">头像、徽章与服务器/频道组图标</td><td style="vertical-align: middle; text-align: center;">✅</td><td style="vertical-align: middle; text-align: center;">✅</td></tr>
     <tr><td style="vertical-align: middle; text-align: center;">修改个人头像</td><td style="vertical-align: middle; text-align: center;">✅</td><td style="vertical-align: middle; text-align: center;">✅</td></tr>
     <tr><td style="vertical-align: middle; text-align: center;">文件、图片与链接分享（仅 TeamSpeak 6）</td><td style="vertical-align: middle; text-align: center;">✅</td><td style="vertical-align: middle; text-align: center;">❌</td></tr>
-    <tr><td style="vertical-align: middle; text-align: center;">文件传输</td><td style="vertical-align: middle; text-align: center;">✅</td><td style="vertical-align: middle; text-align: center;">❌</td></tr>
+    <tr><td style="vertical-align: middle; text-align: center;">文件传输</td><td style="vertical-align: middle; text-align: center;">✅</td><td style="vertical-align: middle; text-align: center;">✅</td></tr>
     <tr><td style="vertical-align: middle; text-align: center;">频道与子频道创建/管理</td><td style="vertical-align: middle; text-align: center;">✅</td><td style="vertical-align: middle; text-align: center;">❌</td></tr>
     <tr><td style="vertical-align: middle; text-align: center;">层级权限系统</td><td style="vertical-align: middle; text-align: center;">✅</td><td style="vertical-align: middle; text-align: center;">❌</td></tr>
     <tr><td style="vertical-align: middle; text-align: center;">服务器组与频道组管理</td><td style="vertical-align: middle; text-align: center;">✅</td><td style="vertical-align: middle; text-align: center;">❌</td></tr>
