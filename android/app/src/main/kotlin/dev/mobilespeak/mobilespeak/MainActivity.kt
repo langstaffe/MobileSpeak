@@ -837,7 +837,6 @@ internal fun SettingsScreen(ui: SessionUiState, requestPermissions: () -> Unit, 
                 if (enabled && !ClientSession.microphonePermission) requestPermissions()
                 else ClientSession.setAudio(inputMuted = !enabled)
             }
-            Text(stringResource(R.string.settings_microphone_help), fontSize = 13.sp, lineHeight = 16.sp, color = Palette.muted)
             SettingSwitch(stringResource(R.string.settings_listening), !ui.deafened) { ClientSession.setAudio(deafened = !it) }
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 SettingSwitch(stringResource(R.string.settings_receive_agc), ui.receiveAgc, onChange = ClientSession::setReceiveAgc)

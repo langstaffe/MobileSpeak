@@ -1279,7 +1279,6 @@ struct HomeView: View {
                     }
                     .avatarSelectionSheet(selection: $avatarSelection)
                     Toggle(L10n.string("settings_microphone"), isOn: Binding(get: { !client.microphoneMuted }, set: { value in Task { await client.setAudio(input: !value) } })).disabled(client.audioBusy || client.deafened)
-                    Text(L10n.string("settings_microphone_help")).font(.footnote).foregroundStyle(Palette.muted)
                     Toggle(L10n.string("settings_listening"), isOn: Binding(get: { !client.deafened }, set: { value in Task { await client.setAudio(output: !value) } })).disabled(client.audioBusy)
                     VStack(alignment: .leading, spacing: 4) {
                         Toggle(L10n.string("settings_receive_agc"), isOn: Binding(get: { client.receiveAgc }, set: client.setReceiveAgc))
