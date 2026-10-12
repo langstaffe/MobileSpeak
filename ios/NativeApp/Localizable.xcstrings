@@ -1439,13 +1439,13 @@
               "one" : {
                 "stringUnit" : {
                   "state" : "translated",
-                  "value" : "%1$@ · %2$lld member online"
+                  "value" : "· %lld member online"
                 }
               },
               "other" : {
                 "stringUnit" : {
                   "state" : "translated",
-                  "value" : "%1$@ · %2$lld members online"
+                  "value" : "· %lld members online"
                 }
               }
             }
@@ -1457,7 +1457,7 @@
               "other" : {
                 "stringUnit" : {
                   "state" : "translated",
-                  "value" : "%1$@ · %2$lld 人在线"
+                  "value" : "· %lld 人在线"
                 }
               }
             }
@@ -2362,23 +2362,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已静音"
-          }
-        }
-      }
-    },
-    "member_name_separator" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : ", "
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "、"
           }
         }
       }

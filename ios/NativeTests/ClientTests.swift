@@ -7,6 +7,87 @@ import Combine
 @testable import MobileSpeak
 
 final class ClientTests: XCTestCase {
+    func testChannelPreviewOnlyIncludesCompleteAvatarsAndReservesSummary() {
+        let count = ChannelMemberPreview.avatarCount
+        XCTAssertEqual(count(1_000, 70, 0), 0)
+        XCTAssertEqual(count(99, 70, 1), 1)
+        XCTAssertEqual(count(215, 70, 5), 5)
+        XCTAssertEqual(count(186, 70, 5), 4)
+        XCTAssertEqual(count(CGFloat(186).nextDown, 70, 5), 3)
+        XCTAssertEqual(count(98, 70, 5), 0)
+        XCTAssertEqual(count(69, 70, 5), 0)
+        XCTAssertEqual(count(1_000, 70, 1), 1)
+    }
+    @MainActor func testChannelCardsAdaptToWidthLanguageAndMembership() async throws {
+        let client = Client.shared
+        guard !client.connected, !client.busy else { throw XCTSkip("Requires an offline test profile") }
+        let saved = client.state, savedImporting = client.fileImporting
+        let stored = UserDefaults.standard.object(forKey: AppLanguage.preferenceKey)
+        client.fileImporting = true
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let window = UIWindow(windowScene: scene)
+        let host = UIHostingController(rootView: AnyView(EmptyView()))
+        let container = UIViewController()
+        window.rootViewController = container
+        container.addChild(host); container.view.addSubview(host.view); host.didMove(toParent: container)
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true; client.state = saved; client.fileImporting = savedImporting
+            if let stored { UserDefaults.standard.set(stored, forKey: AppLanguage.preferenceKey) }
+            else { UserDefaults.standard.removeObject(forKey: AppLanguage.preferenceKey) }
+        }
+        try await Task.sleep(nanoseconds: 200_000_000)
+        let names = ["Current channel", "Ordinary channel", "Empty channel", "Empty child", "Deep channel"]
+        let channels: [Channel] = (1...5).map { (id: Int) -> Channel in
+            let parent: UInt64 = id == 1 ? 0 : UInt64(id - 1)
+            return Channel(id: UInt64(id), parent: parent, order: 0, name: names[id - 1],
+                password: false, permanent: true, key: "fixture-\(id)", icon: nil, iconPath: nil)
+        }
+        func labels(_ view: UIView) -> [UILabel] { (view as? UILabel).map { [$0] } ?? view.subviews.flatMap(labels) }
+        for language in ["en", "zh-Hans"] {
+            UserDefaults.standard.set(language, forKey: AppLanguage.preferenceKey)
+            for (width, category, weight) in [(CGFloat(320), ContentSizeCategory.large, LegibilityWeight.regular),
+                                               (280, .large, .regular), (390, .accessibilityLarge, .bold)] {
+                host.view.frame = CGRect(x: 0, y: 0, width: width, height: 844)
+                host.rootView = AnyView(NavigationView { HomeView(client: client) }.navigationViewStyle(.stack)
+                    .environmentObject(LanguageSettings()).environment(\.sizeCategory, category).environment(\.legibilityWeight, weight)
+                    .preferredColorScheme(.dark).tint(Palette.accent))
+                for total in [5, 9, 10, 100, 5] {
+                    let members = [(1, 1), (2, total), (5, 10)].flatMap { (channel, count) in
+                        (0..<count).map { Member(id: UInt64(channel * 1000 + $0), channel: UInt64(channel), uid: "fixture-\(channel)-\($0)",
+                            name: "A\($0) User", avatarHash: "", avatarPath: nil, badges: [], serverGroupIcons: [], channelGroupIcon: nil,
+                            muted: false, deafened: false, speaking: $0 == 0) }
+                    }
+                    client.state = Snapshot(status: "connected", server: "Preview fixture", ownClient: 1000, channels: channels, clients: members)
+                    try await Task.sleep(nanoseconds: 150_000_000)
+                    host.view.layoutIfNeeded()
+                    let summaries = labels(host.view).filter { $0.text?.hasPrefix("· ") == true }.sorted {
+                        $0.convert($0.bounds, to: host.view).minY < $1.convert($1.bounds, to: host.view).minY
+                    }
+                    XCTAssertEqual(summaries.count, 3, "Empty channels have no preview")
+                    let format = UIGraphicsImageRendererFormat(); format.scale = 1
+                    let image = UIGraphicsImageRenderer(size: host.view.bounds.size, format: format).image { _ in
+                        host.view.drawHierarchy(in: host.view.bounds, afterScreenUpdates: true)
+                    }
+                    for (index, label) in summaries.enumerated() {
+                        let channel = [1, 2, 5][index], count = [1, total, 10][index]
+                        XCTAssertEqual(label.text, L10n.channelMembers(count: count))
+                        let rect = label.convert(label.bounds, to: host.view)
+                        let start = 58 + CGFloat(channel - 1) * 10
+                        let available = width - 138 - CGFloat(channel - 1) * 10
+                        let expected = ChannelMemberPreview.avatarCount(width: available, textWidth: label.intrinsicContentSize.width, memberCount: count)
+                        XCTAssertEqual(rect.minX, start + CGFloat(expected) * 29, accuracy: 1)
+                        XCTAssertLessThanOrEqual(rect.maxX, start + available + 1)
+                    }
+                    if total == 5 {
+                        let name = "channel-preview-\(language)-\(Int(width))-\(category)-\(weight)"
+                        try image.pngData()?.write(to: FileManager.default.temporaryDirectory.appendingPathComponent(name + ".png"))
+                        let attachment = XCTAttachment(image: image); attachment.name = name; attachment.lifetime = .keepAlways; add(attachment)
+                    }
+                }
+            }
+        }
+    }
     func testUserVolumeBridgeDefaultsAndIdentityToken() throws {
         let old = #"{"id":7,"channel":9,"uid":"stable","name":"User","avatarHash":"","avatarPath":null,"badges":[],"serverGroupIcons":[],"channelGroupIcon":null,"muted":false,"deafened":false,"speaking":false}"#
         let member = try JSONDecoder().decode(Member.self,from:Data(old.utf8))
@@ -1462,10 +1543,15 @@ final class ClientTests: XCTestCase {
             else { UserDefaults.standard.removeObject(forKey: AppLanguage.preferenceKey) }
         }
         UserDefaults.standard.set("en", forKey: AppLanguage.preferenceKey)
-        XCTAssertEqual(L10n.channelMembers("Alice", count: 1), "Alice · 1 member online")
-        XCTAssertEqual(L10n.channelMembers("Alice, Bob", count: 2), "Alice, Bob · 2 members online")
+        XCTAssertEqual(L10n.channelMembers(count: 1), "· 1 member online")
+        XCTAssertEqual(L10n.channelMembers(count: 2), "· 2 members online")
+        XCTAssertEqual(L10n.channelMembers(count: 100), "· 100 members online")
         XCTAssertEqual(L10n.coreError("join_channel_failed"), "Couldn’t join the channel.")
         XCTAssertEqual(L10n.coreError("future_code", detail: "safe detail"), "Something went wrong. safe detail")
+        UserDefaults.standard.set("zh-Hans", forKey: AppLanguage.preferenceKey)
+        XCTAssertEqual(L10n.channelMembers(count: 1), "· 1 人在线")
+        XCTAssertEqual(L10n.channelMembers(count: 5), "· 5 人在线")
+        XCTAssertEqual(L10n.channelMembers(count: 100), "· 100 人在线")
     }
     @MainActor func testNoiseSuppressionDefaultsPersistsAndSwitches() async throws {
         let suite = "MobileSpeakTests.\(UUID().uuidString)"

@@ -41,14 +41,13 @@
     <string name="channel_password">Channel Password</string>
     <string name="password">Password</string>
     <plurals name="channel_members_summary">
-        <item quantity="one">%1$s · %2$d member online</item>
-        <item quantity="other">%1$s · %2$d members online</item>
+        <item quantity="one">· %1$d member online</item>
+        <item quantity="other">· %1$d members online</item>
     </plurals>
     <string name="member_listening_off">Listening Off</string>
     <string name="member_muted">Muted</string>
     <string name="member_speaking">Speaking</string>
     <string name="member_microphone_on">Microphone On</string>
-    <string name="member_name_separator">,\u0020</string>
     <string name="settings_microphone">Microphone</string>
     <string name="avatar_title">Personal avatar</string>
     <string name="avatar_preview">Local personal avatar preview</string>

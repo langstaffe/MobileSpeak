@@ -88,7 +88,6 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.onClick
@@ -663,11 +662,7 @@ internal fun ChannelScreen(ui: SessionUiState, onSelect: (Channel) -> Unit, onCh
                             ChannelIcon(channel)
                             Text(channel.name, fontSize = 15.sp, lineHeight = 18.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
-                        if (members.isNotEmpty()) Row(Modifier.padding(start = 30.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                            members.take(2).forEach { Avatar(it.name, it.avatarPath, it.speaking, 24) }
-                            val names = members.take(2).joinToString(stringResource(R.string.member_name_separator)) { it.name }
-                            Text(pluralStringResource(R.plurals.channel_members_summary, members.size, names, members.size), fontSize = 11.sp, lineHeight = 13.sp, color = Palette.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        }
+                        ChannelMemberPreview(members, Modifier.padding(start = 30.dp))
                     }
                     Box(Modifier.size(48.dp).clickable(interactionSource = null, indication = ToolbarPressFeedback, enabled = selected) { onChat(channel) }) {
                         Box(Modifier.fillMaxSize().clip(RoundedCornerShape(10.dp)).background(Palette.bottom), contentAlignment = Alignment.Center) {

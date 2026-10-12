@@ -5,6 +5,8 @@ import androidx.core.os.LocaleListCompat
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import android.content.res.Configuration
+import java.util.Locale
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -13,6 +15,18 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class LocalizationInstrumentedTest {
+    @Test fun channelSummaryUsesTotalCountAndLocalizedPlural() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        for ((language, expected) in listOf("en" to listOf("· 1 member online", "· 5 members online", "· 100 members online"),
+            "zh-Hans" to listOf("· 1 人在线", "· 5 人在线", "· 100 人在线"))) {
+            val resources = context.createConfigurationContext(Configuration(context.resources.configuration).apply {
+                setLocale(Locale.forLanguageTag(language))
+            }).resources
+            listOf(1, 5, 100).zip(expected).forEach { (count, text) ->
+                assertEquals(text, resources.getQuantityString(R.plurals.channel_members_summary, count, count))
+            }
+        }
+    }
     @Test
     fun appLocalePersistsUsesLocalizedResourcesAndSkipsSameSelection() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()

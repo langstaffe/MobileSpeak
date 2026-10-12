@@ -497,6 +497,58 @@ struct Avatar: View {
             .overlay(Circle().strokeBorder(speaking ? Palette.green : .clear, lineWidth: 3))
     }
 }
+struct ChannelMemberPreview: View {
+    let members: [Member]
+    let summary: String
+    @Environment(\.legibilityWeight) private var legibilityWeight
+
+    static func avatarCount(width: CGFloat, textWidth: CGFloat, memberCount: Int) -> Int {
+        Int(min(CGFloat(max(0, memberCount)), floor(max(0, width - textWidth) / 29)))
+    }
+
+    var body: some View {
+        if !members.isEmpty {
+            let text = ChannelMemberCountText(text: summary,
+                                             font: .systemFont(ofSize: 11, weight: legibilityWeight == .bold ? .semibold : .regular))
+            let textSize = text.size
+            GeometryReader { proxy in
+                HStack(spacing: 5) {
+                    ForEach(Array(members.prefix(Self.avatarCount(width: proxy.size.width, textWidth: textSize.width, memberCount: members.count)))) { member in
+                        Avatar(name: member.name, path: member.avatarPath, speaking: member.speaking, size: 24)
+                    }
+                    text.frame(width: min(textSize.width, proxy.size.width), height: textSize.height)
+                }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            }.frame(height: max(24, textSize.height))
+        }
+    }
+}
+private struct ChannelMemberCountText: UIViewRepresentable {
+    let text: String
+    let font: UIFont
+
+    var size: CGSize {
+        let label = UILabel()
+        configure(label)
+        return label.intrinsicContentSize
+    }
+
+    func makeUIView(context: Context) -> UILabel {
+        let label = UILabel()
+        configure(label)
+        return label
+    }
+
+    func updateUIView(_ label: UILabel, context: Context) { configure(label) }
+
+    private func configure(_ label: UILabel) {
+        label.text = text
+        label.font = font
+        label.textColor = UIColor(Palette.muted)
+        label.lineBreakMode = .byTruncatingTail
+        // Let a text-only row stay within its width when the full summary cannot fit.
+        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+    }
+}
 private struct UnreadBadge: View {
     let count: Int
     var body: some View {
@@ -1084,10 +1136,7 @@ struct HomeView: View {
                                         Spacer(minLength: 0)
                                     }.frame(minHeight: 48)
                                     if !members.isEmpty {
-                                        HStack(spacing: 5) {
-                                            ForEach(Array(members.prefix(2))) { m in Avatar(name: m.name, path: m.avatarPath, speaking: m.speaking, size: 24) }
-                                            Text(L10n.channelMembers(members.prefix(2).map(\.name).joined(separator: L10n.string("member_name_separator")), count: members.count)).font(.system(size: 11)).foregroundStyle(Palette.muted).lineLimit(1)
-                                        }.padding(.leading, 30)
+                                        ChannelMemberPreview(members: members, summary: L10n.channelMembers(count: members.count)).padding(.leading, 30)
                                     }
                                 }.contentShape(Rectangle())
                             }.buttonStyle(.plain)

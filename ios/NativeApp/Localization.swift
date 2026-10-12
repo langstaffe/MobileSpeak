@@ -69,8 +69,8 @@ enum L10n {
         String(format: string(key), locale: locale, arguments: arguments)
     }
 
-    static func channelMembers(_ names: String, count: Int) -> String {
-        format("channel_members_summary", names, count)
+    static func channelMembers(count: Int) -> String {
+        format("channel_members_summary", count)
     }
 
     static func withDetail(_ key: String, _ detail: String?) -> String {
