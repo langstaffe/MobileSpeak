@@ -44,6 +44,7 @@
         <item quantity="other">· %1$d 人在线</item>
     </plurals>
     <string name="member_listening_off">关闭收听</string>
+    <string name="member_away">离开</string>
     <string name="member_muted">已静音</string>
     <string name="member_speaking">正在说话</string>
     <string name="member_microphone_on">麦克风开启</string>

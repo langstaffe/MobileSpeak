@@ -5,6 +5,23 @@ import org.junit.Assert.assertThrows
 import org.junit.Test
 
 class ModelsTest {
+    @Test fun avatarPriorityAndLiveIdentityNeverUseSavedStateOrNicknames() {
+        val saved = Member(7, 9, "stable", "Same name", null, emptyList(), emptyList(), null, true, true, false, away = true)
+        for (away in listOf(false, true)) for (deafened in listOf(false, true)) for (muted in listOf(false, true)) {
+            val member = saved.copy(away = away, deafened = deafened, muted = muted)
+            assertEquals(if (away) "afk" else if (deafened) "speaker-off" else if (muted) "mic-off" else null, member.statusIcon)
+        }
+        var snapshot = Snapshot(status = "connected", clients = listOf(saved, saved.copy(id = 8, uid = "another")))
+        assertEquals(saved, snapshot.onlineMember("stable"))
+        snapshot = snapshot.copy(clients = listOf(saved.copy(away = false, deafened = false, muted = false)))
+        assertEquals(null, snapshot.onlineMember("stable")?.statusIcon)
+        assertEquals(null, snapshot.copy(clients = emptyList()).onlineMember(saved.uid))
+        assertEquals(null, snapshot.onlineMember("unknown"))
+        assertEquals(null, snapshot.onlineMember(null))
+        assertEquals(null, snapshot.onlineMember(""))
+        assertEquals(null, snapshot.copy(status = "reconnecting").onlineMember(saved.uid))
+        assertEquals(null, snapshot.copy(status = "disconnected").onlineMember(saved.uid))
+    }
     @Test fun fileCacheRequiresKnownIdleSizeAndAllowsZeroByteFiles() {
         assertEquals(false, FileCacheState().canClear)
         assertEquals(false, FileCacheState(bytes = 0, status = "ready").canClear)

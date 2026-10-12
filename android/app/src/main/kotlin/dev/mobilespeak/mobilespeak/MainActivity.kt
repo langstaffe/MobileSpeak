@@ -76,11 +76,16 @@ import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.ColorMatrix
+import androidx.compose.ui.graphics.Paint
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
@@ -90,6 +95,7 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.liveRegion
@@ -204,7 +210,7 @@ private data class PageTarget(val chat: ChatTarget? = null, val settings: String
     val key: String get() = chat?.conversation ?: settings ?: "home"
 }
 
-private data class ChatTarget(val conversation: String, val title: String, val channel: Channel? = null, val member: Member? = null)
+internal data class ChatTarget(val conversation: String, val title: String, val channel: Channel? = null, val member: Member? = null)
 
 @Composable
 internal fun MobileSpeakApp(requestPermissions: () -> Unit, openAbout: Boolean = false, consumedAbout: () -> Unit = {}) {
@@ -434,7 +440,7 @@ internal fun Header(ui: SessionUiState) {
                 modifier = Modifier.size(34.dp).clip(RoundedCornerShape(8.dp)),
             )
         } else {
-            Avatar(server, null, false, 34)
+            Avatar(server, null, false, 34, accessible = false)
         }
         Text(server ?: "MobileSpeak", Modifier.weight(1f), fontSize = 16.sp, lineHeight = 19.sp, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.ExtraBold, maxLines = 1)
         if (ui.snapshot.status != "disconnected") {
@@ -499,7 +505,7 @@ internal fun BookmarkScreen(
             var menu by remember { mutableStateOf(false) }
             Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Palette.card).padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                 Row(Modifier.weight(1f).heightIn(min = 64.dp).clickable(interactionSource = null, indication = RowPressFeedback) { onConnect(bookmark) }, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Avatar(bookmark.title, null, false, 34)
+                    Avatar(bookmark.title, null, false, 34, accessible = false)
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                         Text(bookmark.title, fontSize = 17.sp, lineHeight = 20.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Text(bookmark.address, fontSize = 12.sp, lineHeight = 14.sp, color = Palette.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -737,18 +743,16 @@ private fun MemberRow(member: Member, modifier: Modifier = Modifier, unread: Int
     val groups = member.serverGroupIcons.filter { it.iconPath != null || it.iconId in listOf(100L, 300L) }.take((5 - badges.size - if (group == null) 0 else 1).coerceAtLeast(0))
     Row(modifier.fillMaxWidth().heightIn(min = 44.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         Box {
-            Avatar(member.name, member.avatarPath, member.speaking, 34)
+            Avatar(member.name, member.avatarPath, member.speaking, 34, member, accessible = false)
             UnreadBadge(unread, Modifier.align(Alignment.TopEnd).offset(x = 5.dp, y = (-5).dp))
         }
-        Text(member.name, Modifier.weight(1f), fontSize = 17.sp, lineHeight = 20.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+        val description = member.accessibilityLabel(LocalContext.current)
+        Text(member.name, Modifier.weight(1f).clearAndSetSemantics { contentDescription = description }, fontSize = 17.sp, lineHeight = 20.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        if (groups.isNotEmpty() || badges.isNotEmpty() || group != null) Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
             groups.forEach { GroupIconView(it) }
             badges.forEach { BadgeView(it) }
             group?.let { GroupIconView(it) }
         }
-        Icon(if (member.deafened) UiIcons.SpeakerOff else if (member.muted) UiIcons.MicOff else UiIcons.Mic,
-            stringResource(if (member.deafened) R.string.member_listening_off else if (member.muted) R.string.member_muted else if (member.speaking) R.string.member_speaking else R.string.member_microphone_on),
-            Modifier.size(20.dp), tint = if (member.speaking) Palette.green else Palette.muted)
     }
 }
 
@@ -1103,7 +1107,7 @@ private fun VoiceBar(ui: SessionUiState, requestPermissions: () -> Unit) {
 }
 
 @Composable
-private fun ChatScreen(target: ChatTarget, ui: SessionUiState, active: Boolean, onBack: () -> Unit) {
+internal fun ChatScreen(target: ChatTarget, ui: SessionUiState, active: Boolean, onBack: () -> Unit) {
     val context = LocalContext.current
     val messages = ui.messages.filter { it.conversation == target.conversation }
     val token = remember(target.conversation) { UUID.randomUUID().toString() }
@@ -1123,28 +1127,34 @@ private fun ChatScreen(target: ChatTarget, ui: SessionUiState, active: Boolean, 
     LaunchedEffect(messages.size, keyboardHeight) {
         if (messages.isNotEmpty()) listState.scrollToItem(messages.lastIndex)
     }
-    val peer = target.member?.let { saved -> ui.snapshot.clients.firstOrNull { it.uid == saved.uid } ?: saved }
+    val livePeer = ui.snapshot.onlineMember(target.member?.uid)
+    val peer = livePeer ?: target.member
     Column(Modifier.fillMaxSize().background(Palette.background).windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)).navigationBarsPadding().imePadding()) {
         Box(Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = 14.dp)) {
             IconButton(onClick = onBack, modifier = Modifier.align(Alignment.CenterStart).size(44.dp)) {
                 Icon(UiIcons.Back, stringResource(R.string.action_back), Modifier.size(24.dp), tint = Palette.text)
             }
             Row(Modifier.align(Alignment.Center).padding(horizontal = 52.dp).heightIn(min = 56.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                peer?.let { Avatar(it.name, it.avatarPath, false, 30) }
-                Text(peer?.name ?: target.title, fontSize = 17.sp, lineHeight = 20.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                peer?.let { Avatar(it.name, livePeer?.avatarPath ?: target.member?.avatarPath, livePeer?.speaking == true, 30, livePeer, accessible = false) }
+                val description = livePeer?.accessibilityLabel(context) ?: peer?.name ?: target.title
+                Text(peer?.name ?: target.title, Modifier.clearAndSetSemantics { contentDescription = description }, fontSize = 17.sp, lineHeight = 20.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
         BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
             val bubbleWidth = (maxWidth - 28.dp - 38.dp - 46.dp).coerceAtLeast(40.dp)
             LazyColumn(Modifier.fillMaxSize(), state = listState, contentPadding = PaddingValues(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 items(messages, key = { it.id }) { message ->
+                    val sender = ui.snapshot.onlineMember(message.senderUid)
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = if (message.own) Arrangement.End else Arrangement.Start, verticalAlignment = Alignment.Bottom) {
                         if (!message.own) {
-                            Avatar(message.senderName, message.avatarPath, false, 30)
+                            Avatar(message.senderName, sender?.avatarPath ?: message.avatarPath, sender?.speaking == true, 30, sender, accessible = target.channel == null)
                             Spacer(Modifier.width(8.dp))
                         }
                         Column(Modifier.widthIn(max = bubbleWidth), horizontalAlignment = if (message.own) Alignment.End else Alignment.Start, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            if (target.channel != null && !message.own) Text(message.senderName, fontSize = 12.sp, lineHeight = 14.sp, color = Palette.muted)
+                            if (target.channel != null && !message.own) {
+                                val description = sender?.accessibilityLabel(context) ?: message.senderName
+                                Text(message.senderName, Modifier.clearAndSetSemantics { contentDescription = description }, fontSize = 12.sp, lineHeight = 14.sp, color = Palette.muted)
+                            }
                             SelectionContainer {
                                 Text(message.text, Modifier.clip(RoundedCornerShape(14.dp)).background(if (message.own) Palette.accent else Palette.card).padding(horizontal = 12.dp, vertical = 9.dp), fontSize = 17.sp, lineHeight = 20.sp)
                             }
@@ -1156,7 +1166,7 @@ private fun ChatScreen(target: ChatTarget, ui: SessionUiState, active: Boolean, 
                         }
                         if (message.own) {
                             Spacer(Modifier.width(8.dp))
-                            Avatar(message.senderName, message.avatarPath, false, 30)
+                            Avatar(message.senderName, sender?.avatarPath ?: message.avatarPath, sender?.speaking == true, 30, sender)
                         }
                     }
                 }
@@ -1194,14 +1204,30 @@ internal fun RowScope.NavigationItem(label: String, icon: androidx.compose.ui.gr
 }
 
 @Composable
-internal fun Avatar(name: String, path: String?, speaking: Boolean, size: Int) {
+internal fun Avatar(name: String, path: String?, speaking: Boolean, size: Int, member: Member? = null, accessible: Boolean = true) {
+    val description = member?.accessibilityLabel(LocalContext.current) ?: name
+    val away = member?.away == true
     Box(
         Modifier.size(size.dp).clip(CircleShape)
-            .background(Palette.accent),
+            .clearAndSetSemantics { if (accessible) contentDescription = description },
         contentAlignment = Alignment.Center,
     ) {
-        Text(name.take(2).uppercase(), fontWeight = FontWeight.Bold, fontSize = (size * .36).sp)
-        LocalImage(path, Modifier.fillMaxSize().clip(CircleShape))
+        Box(Modifier.fillMaxSize().then(if (away) Modifier.drawWithCache {
+            val paint = Paint().apply { colorFilter = ColorFilter.colorMatrix(ColorMatrix().apply { setToSaturation(0f) }) }
+            onDrawWithContent {
+                drawContext.canvas.saveLayer(Rect(Offset.Zero, this.size), paint)
+                drawContent()
+                drawContext.canvas.restore()
+                drawRect(Color.Black.copy(alpha = .75f))
+            }
+        } else Modifier).background(Palette.accent), contentAlignment = Alignment.Center) {
+            if (member?.statusIcon == null) Text(name.take(2).uppercase(), fontWeight = FontWeight.Bold, fontSize = (size * .36).sp)
+            LocalImage(path, Modifier.fillMaxSize())
+        }
+        member?.statusIcon?.let { icon ->
+            Icon(when (icon) { "afk" -> UiIcons.Afk; "speaker-off" -> UiIcons.SpeakerOff; else -> UiIcons.MicOff }, null,
+                Modifier.size((if (size <= 24) 14 else if (size <= 30) 18 else 20).dp), tint = if (away) Palette.disconnect else Palette.text)
+        }
         if (speaking) Box(Modifier.matchParentSize().border(3.dp, Palette.green, CircleShape))
     }
 }

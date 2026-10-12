@@ -32,7 +32,7 @@ internal fun ChannelMemberPreview(members: List<Member>, modifier: Modifier = Mo
         val count = channelPreviewAvatarCount(width, text.width, members.size, 24.dp.roundToPx() + 5.dp.roundToPx())
         val avatars = subcompose("avatars") {
             Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                members.take(count).forEach { member -> key(member.id) { Avatar(member.name, member.avatarPath, member.speaking, 24) } }
+                members.take(count).forEach { member -> key(member.id) { Avatar(member.name, member.avatarPath, member.speaking, 24, member) } }
             }
         }.single().measure(Constraints(maxWidth = (width - text.width).coerceAtLeast(0)))
         val height = constraints.constrainHeight(maxOf(24.dp.roundToPx(), text.height))

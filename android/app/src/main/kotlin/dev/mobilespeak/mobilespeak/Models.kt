@@ -34,8 +34,10 @@ data class Member(
     val speaking: Boolean,
     val volumePercent: Int = 100,
     val volumeToken: String? = null,
+    val away: Boolean = false,
 ) {
     val conversation get() = uid?.let { "client:$it" }
+    val statusIcon get() = if (away) "afk" else if (deafened) "speaker-off" else if (muted) "mic-off" else null
 }
 
 data class Snapshot(
@@ -47,7 +49,10 @@ data class Snapshot(
     val channels: List<Channel> = emptyList(),
     val clients: List<Member> = emptyList(),
     val networkQuality: NetworkQuality? = null,
-)
+) {
+    fun onlineMember(uid: String?): Member? =
+        if (status == "connected" && !uid.isNullOrEmpty()) clients.firstOrNull { it.uid == uid } else null
+}
 
 enum class NetworkGrade { GOOD, FAIR, POOR }
 data class NetworkSample(
@@ -110,6 +115,7 @@ data class ChatMessage(
     val timestamp: Long,
     val status: String,
     val error: String?,
+    val senderUid: String = "",
 )
 
 data class Unread(
@@ -117,6 +123,11 @@ data class Unread(
     val channel: String? = null,
     val channelCount: Int = 0,
     val privateCounts: Map<String, Int> = emptyMap(),
+)
+
+internal fun JSONObject.chatMessage() = ChatMessage(
+    getString("id"), getString("conversation"), getString("senderName"), stringOrNull("avatarPath"),
+    getBoolean("own"), getString("text"), getLong("timestamp"), getString("status"), stringOrNull("error"), getString("senderUid"),
 )
 
 data class Bookmark(
@@ -243,6 +254,7 @@ internal fun JSONObject.snapshot() = Snapshot(
             client.optJSONObject("channelGroupIcon")?.groupIcon(),
             client.getBoolean("muted"), client.getBoolean("deafened"), client.getBoolean("speaking"),
             client.optInt("volumePercent", 100), client.stringOrNull("volumeToken"),
+            client.optBoolean("away"),
         )
     },
 )

@@ -867,7 +867,7 @@ final class ClientTests: XCTestCase {
     }
 
     @MainActor func testIconAssetsKeepTemplateTintAndOffOriginalColors() throws {
-        let names = "avatar-placeholder channel-chat channels checkmark chevron-right error headphones lock members mic-off mic-on more off pencil plus trash send settings speaker-off speaker-on waveform folder file file-text file-image file-audio file-archive upload download sort refresh info share".split(separator: " ")
+        let names = "afk avatar-placeholder channel-chat channels checkmark chevron-right error headphones lock members mic-off mic-on more off pencil plus trash send settings speaker-off speaker-on waveform folder file file-text file-image file-audio file-archive upload download sort refresh info share".split(separator: " ")
         for name in names {
             let image = try XCTUnwrap(UIImage(named: "Icon-" + name))
             let off = name == "off"
@@ -1689,8 +1689,10 @@ final class ClientTests: XCTestCase {
         client.error = nil
     }
     func testSnapshotAndChatModelsDecodeSharedBridgePayload() throws {
-        let snapshot = try JSONDecoder().decode(Snapshot.self, from: Data(#"{"status":"connected","server":"Test","serverId":"server-uid","ownClient":1,"canSend":true,"channels":[{"id":2,"parent":0,"order":0,"name":"Lobby","password":false,"permanent":true,"key":"id:2","icon":42,"iconPath":"/cache/icon.img"}],"clients":[{"id":1,"channel":2,"uid":"client-uid","name":"Me","avatarHash":"hash","avatarPath":"/cache/avatar.img","badges":[{"id":"badge-id","name":"Badge","description":"Known badge","filename":"badge","iconPath":"/cache/badge.png"}],"serverGroupIcons":[{"id":6,"name":"Server Admin","iconId":300,"iconPath":null},{"id":14,"name":"DJ","iconId":166401896,"iconPath":"/cache/dj.img"}],"channelGroupIcon":{"id":5,"name":"Channel Admin","iconId":100,"iconPath":null},"muted":true,"deafened":false,"speaking":false}]}"#.utf8))
+        let snapshot = try JSONDecoder().decode(Snapshot.self, from: Data(#"{"status":"connected","server":"Test","serverId":"server-uid","ownClient":1,"canSend":true,"channels":[{"id":2,"parent":0,"order":0,"name":"Lobby","password":false,"permanent":true,"key":"id:2","icon":42,"iconPath":"/cache/icon.img"}],"clients":[{"id":1,"channel":2,"uid":"client-uid","name":"Me","avatarHash":"hash","avatarPath":"/cache/avatar.img","badges":[{"id":"badge-id","name":"Badge","description":"Known badge","filename":"badge","iconPath":"/cache/badge.png"}],"serverGroupIcons":[{"id":6,"name":"Server Admin","iconId":300,"iconPath":null},{"id":14,"name":"DJ","iconId":166401896,"iconPath":"/cache/dj.img"}],"channelGroupIcon":{"id":5,"name":"Channel Admin","iconId":100,"iconPath":null},"muted":true,"deafened":false,"away":true,"speaking":false}]}"#.utf8))
         XCTAssertEqual(snapshot.serverId, "server-uid")
+        XCTAssertEqual(snapshot.clients.first?.away, true)
+        XCTAssertEqual(snapshot.clients.first?.statusIcon, "afk")
         XCTAssertEqual(snapshot.channels.first?.conversation, "channel:id:2")
         XCTAssertEqual(snapshot.clients.first?.conversation, "client:client-uid")
         XCTAssertEqual(snapshot.clients.first?.badges.first?.name, "Badge")
@@ -1869,5 +1871,181 @@ extension ClientTests {
             XCTAssertEqual(defaults.string(forKey: "mobilespeak.server.address"), "preserved")
         }
         XCTAssertEqual(NoiseSuppressionMode.allCases, [.dpdfnet2, .rnnoise, .none])
+    }
+}
+extension ClientTests {
+    private func statusMember(_ id: UInt64 = 7, path: String? = nil, muted: Bool = false, deafened: Bool = false, away: Bool = false, speaking: Bool = false) -> Member {
+        Member(id: id, channel: 9, uid: "uid-\(id)", name: "User \(id)", avatarHash: "", avatarPath: path,
+               badges: [], serverGroupIcons: [], channelGroupIcon: nil, muted: muted, deafened: deafened,
+               speaking: speaking, volumeToken: "token-\(id)", away: away)
+    }
+    func testAvatarStatusPriorityAndLiveIdentity() throws {
+        for away in [false, true] { for deafened in [false, true] { for muted in [false, true] {
+            let member = statusMember(muted: muted, deafened: deafened, away: away)
+            XCTAssertEqual(member.statusIcon, away ? "afk" : deafened ? "speaker-off" : muted ? "mic-off" : nil)
+        } } }
+        let saved = statusMember(muted: true, deafened: true, away: true)
+        var snapshot = Snapshot(status: "connected", clients: [saved])
+        XCTAssertEqual(snapshot.onlineMember(uid: saved.uid), saved)
+        snapshot.clients = [statusMember()]
+        XCTAssertNil(snapshot.onlineMember(uid: saved.uid)?.statusIcon)
+        for uid in [nil, "", "unknown"] { XCTAssertNil(snapshot.onlineMember(uid: uid)) }
+        snapshot.clients = []; XCTAssertNil(snapshot.onlineMember(uid: saved.uid))
+        snapshot.clients = [saved]; snapshot.status = "reconnecting"; XCTAssertNil(snapshot.onlineMember(uid: saved.uid))
+        snapshot.status = "disconnected"; XCTAssertNil(snapshot.onlineMember(uid: saved.uid))
+        let old = #"{"id":7,"channel":9,"uid":"uid-7","name":"User 7","avatarHash":"","avatarPath":null,"badges":[],"serverGroupIcons":[],"channelGroupIcon":null,"muted":false,"deafened":false,"speaking":false}"#
+        XCTAssertNil(try JSONDecoder().decode(Member.self, from: Data(old.utf8)).away)
+        let current = String(old.dropLast()) + #", "away":true}"#
+        XCTAssertEqual(try JSONDecoder().decode(Member.self, from: Data(current.utf8)).statusIcon, "afk")
+    }
+    @MainActor func testStatusAvatarsRenderAllSizesAndRestoreBase() async throws {
+        guard !Client.shared.connected, !Client.shared.busy else { throw XCTSkip("Requires an offline fixture profile") }
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let window = UIWindow(windowScene: scene)
+        let host = UIHostingController(rootView: AnyView(EmptyView()))
+        let container = UIViewController(); window.rootViewController = container
+        container.addChild(host); container.view.addSubview(host.view); host.didMove(toParent: container)
+        host.view.frame = CGRect(x: 0, y: 0, width: 390, height: 760); window.makeKeyAndVisible()
+        let stored = UserDefaults.standard.object(forKey: AppLanguage.preferenceKey)
+        defer { window.isHidden = true; if let stored { UserDefaults.standard.set(stored, forKey: AppLanguage.preferenceKey) } else { UserDefaults.standard.removeObject(forKey: AppLanguage.preferenceKey) } }
+        let root = FileManager.default.temporaryDirectory
+        var paths: [String?] = [nil]
+        for (index, color) in [UIColor(red: 1, green: 0.82, blue: 0.35, alpha: 1), UIColor(red: 0.12, green: 0.17, blue: 0.25, alpha: 1), UIColor.white].enumerated() {
+            let image = UIGraphicsImageRenderer(size: CGSize(width: 96, height: 96)).image { context in
+                color.setFill(); context.fill(CGRect(x: 0, y: 0, width: 96, height: 96))
+                if index == 2 { for y in 0..<8 { for x in 0..<8 {
+                    [UIColor.systemBlue, .systemRed, .white, .systemGreen][(x + y) % 4].setFill()
+                    context.fill(CGRect(x: x * 12, y: y * 12, width: 12, height: 12))
+                } } }
+            }
+            let url = root.appendingPathComponent("status-source-\(index).png"); try image.pngData()?.write(to: url); paths.append(url.path)
+        }
+        let originals = try paths.compactMap { try $0.map { try Data(contentsOf: URL(fileURLWithPath: $0)) } }
+        for language in ["en", "zh-Hans"] {
+            UserDefaults.standard.set(language, forKey: AppLanguage.preferenceKey)
+            let rows: [(CGFloat, String?)] = [CGFloat(24), 30, 34].flatMap { size in paths.map { (size, $0) } }
+            host.rootView = AnyView(VStack(alignment: .leading, spacing: 12) {
+                Text("Normal / Mic off / Listening off / AFK").font(.system(size: 14))
+                ForEach(rows.indices, id: \.self) { index in
+                    let (size, path) = rows[index]
+                    HStack(spacing: 30) {
+                        Text("\(Int(size))").font(.system(size: 12)).frame(width: 24)
+                        ForEach(0..<4) { state in
+                            let member = self.statusMember(path: path, muted: state == 1 || state == 3, deafened: state == 2 || state == 3, away: state == 3, speaking: state == 1)
+                            Avatar(name: member.name, path: path, speaking: member.speaking, size: size, member: member)
+                                .overlay(alignment: .topTrailing) { if state == 3 { UnreadBadge(count: 99).offset(x: 5, y: -5) } }
+                        }
+                    }
+                }
+            }.padding(20).frame(width: 390, height: 760, alignment: .topLeading).foregroundStyle(Color(hex: 0xF2F3F5)).background(Palette.background))
+            try await Task.sleep(nanoseconds: 500_000_000)
+            let image = UIGraphicsImageRenderer(size: host.view.bounds.size).image { _ in host.view.drawHierarchy(in: host.view.bounds, afterScreenUpdates: true) }
+            let name = "user-status-grid-\(language)"
+            try image.pngData()?.write(to: root.appendingPathComponent(name + ".png"))
+            let attachment = XCTAttachment(image: image); attachment.name = name; attachment.lifetime = .keepAlways; add(attachment)
+            XCTAssertEqual(statusMember(muted: true, deafened: true, away: true, speaking: true).accessibilityLabel,
+                           language == "en" ? "User 7, Away, Listening Off, Muted, Speaking" : "User 7, 离开, 关闭收听, 已静音, 正在说话")
+        }
+        // Render the same live view through all states, then compare its restored pixels.
+        let live = Client.shared, previous = live.state
+        defer { live.state = previous }
+        let member = statusMember(path: paths[1])
+        host.rootView = AnyView(StatusAvatarFixture(client: live, member: member))
+        func shot() -> Data? { UIGraphicsImageRenderer(size: host.view.bounds.size).image { _ in host.view.drawHierarchy(in: host.view.bounds, afterScreenUpdates: true) }.pngData() }
+        live.state = Snapshot(status: "connected", clients: [member]); try await Task.sleep(nanoseconds: 200_000_000)
+        let normal = shot()
+        for state in [statusMember(path: paths[1], muted: true), statusMember(path: paths[1], deafened: true), statusMember(path: paths[1], away: true)] {
+            live.state.clients = [state]; try await Task.sleep(nanoseconds: 100_000_000); XCTAssertNotEqual(shot(), normal)
+        }
+        live.state.clients = [member]; try await Task.sleep(nanoseconds: 100_000_000); XCTAssertEqual(shot(), normal)
+        live.state.clients = []; try await Task.sleep(nanoseconds: 100_000_000); XCTAssertEqual(shot(), normal)
+        for (index, path) in paths.compactMap({ $0 }).enumerated() { XCTAssertEqual(try Data(contentsOf: URL(fileURLWithPath: path)), originals[index]) }
+    }
+}
+private struct StatusAvatarFixture: View {
+    @ObservedObject var client: Client
+    let member: Member
+    var body: some View {
+        let current = client.state.onlineMember(uid: member.uid)
+        return Avatar(name: member.name, path: current?.avatarPath ?? member.avatarPath, speaking: current?.speaking ?? false, member: current)
+            .frame(width: 390, height: 760).foregroundStyle(Color(hex: 0xF2F3F5)).background(Palette.background)
+    }
+}
+extension ClientTests {
+    @MainActor func testUserStatusPagesBadgesUnreadAndChatLiveUpdates() async throws {
+        let client = Client.shared
+        guard !client.connected, !client.busy else { throw XCTSkip("Requires an offline fixture profile") }
+        let saved = client.state, messages = client.messages, importing = client.fileImporting
+        let stored = UserDefaults.standard.object(forKey: AppLanguage.preferenceKey)
+        client.fileImporting = true
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let window = UIWindow(windowScene: scene)
+        let host = UIHostingController(rootView: AnyView(EmptyView()))
+        let container = UIViewController(); window.rootViewController = container
+        container.addChild(host); container.view.addSubview(host.view); host.didMove(toParent: container)
+        host.view.frame = CGRect(x: 0, y: 0, width: 390, height: 844); window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true; client.state = saved; client.messages = messages; client.fileImporting = importing
+            if let stored { UserDefaults.standard.set(stored, forKey: AppLanguage.preferenceKey) } else { UserDefaults.standard.removeObject(forKey: AppLanguage.preferenceKey) }
+        }
+        let root = FileManager.default.temporaryDirectory
+        let source = root.appendingPathComponent("status-logo.png")
+        try XCTUnwrap(UIImage(named: "AppLogo")?.pngData()).write(to: source)
+        let channel = Channel(id: 9, parent: 0, order: 0, name: "Lobby", password: false, permanent: true, key: "lobby", icon: nil, iconPath: nil)
+        var peer = statusMember(path: source.path, muted: true, deafened: true, away: true)
+        peer = Member(id: peer.id, channel: peer.channel, uid: peer.uid, name: "Long username 完整用户名不能因离开而变暗", avatarHash: "", avatarPath: source.path,
+                      badges: [UserBadge(id: "badge", name: "Badge", description: "Badge", filename: "badge", iconPath: source.path)],
+                      serverGroupIcons: [GroupIcon(id: 1, name: "Server Admin", iconId: 300, iconPath: nil)],
+                      channelGroupIcon: GroupIcon(id: 2, name: "Channel Admin", iconId: 100, iconPath: nil), muted: true, deafened: true, speaking: false, volumeToken: "token-7", away: true)
+        let members = [statusMember(1, away: true), statusMember(2), statusMember(3, muted: true), statusMember(4, deafened: true), peer]
+        let base = Snapshot(status: "connected", server: "Status fixture", serverId: "fixture", ownClient: 1, channels: [channel], clients: members)
+        client.state = base
+        func message(_ own: Bool, conversation: String) -> ChatMessage {
+            ChatMessage(id: own ? "own" : "peer", conversation: conversation, targetId: "uid-7", targetName: peer.name,
+                        senderUid: own ? "uid-1" : "uid-7", senderName: own ? "Me" : peer.name, senderAvatarHash: "", avatarPath: source.path,
+                        own: own, text: "Hello", timestamp: 1, status: own ? .sent : .received, error: nil)
+        }
+        func capture(_ name: String) throws {
+            host.view.layoutIfNeeded()
+            let image = UIGraphicsImageRenderer(size: host.view.bounds.size).image { _ in host.view.drawHierarchy(in: host.view.bounds, afterScreenUpdates: true) }
+            try image.pngData()?.write(to: root.appendingPathComponent("user-status-" + name + ".png"))
+            let attachment = XCTAttachment(image: image); attachment.name = "user-status-" + name; attachment.lifetime = .keepAlways; add(attachment)
+        }
+        for language in ["en", "zh-Hans"] {
+            UserDefaults.standard.set(language, forKey: AppLanguage.preferenceKey)
+            for category in [ContentSizeCategory.large, .accessibilityExtraExtraExtraLarge] {
+                for page in 0..<5 {
+                    client.state = base
+                    let view: AnyView
+                    switch page {
+                    case 0: view = AnyView(NavigationView { HomeView(client: client, tab: 1) }.navigationViewStyle(.stack))
+                    case 1: view = AnyView(NavigationView { HomeView(client: client) }.navigationViewStyle(.stack))
+                    case 2: view = AnyView(UserVolumesDrawer(client: client, onBack: {}))
+                    case 3:
+                        client.messages = [message(false, conversation: "client:uid-7"), message(true, conversation: "client:uid-7")]
+                        view = AnyView(NavigationView { PrivateChatView(client: client, member: peer) }.navigationViewStyle(.stack))
+                    default:
+                        client.messages = [message(false, conversation: "channel:lobby"), message(true, conversation: "channel:lobby")]
+                        view = AnyView(NavigationView { ChannelChatView(client: client, channel: channel) }.navigationViewStyle(.stack))
+                    }
+                    host.rootView = AnyView(view.id("\(language)-\(category)-\(page)").environmentObject(LanguageSettings()).environment(\.sizeCategory, category).preferredColorScheme(.dark).tint(Palette.accent))
+                    try await Task.sleep(nanoseconds: 250_000_000)
+                    try capture("page-\(page)-\(language)-\(category)")
+                    XCTAssertEqual(client.state.onlineMember(uid: peer.uid)?.statusIcon, "afk")
+                    if page == 3 {
+                        for state in [statusMember(muted: true), statusMember(deafened: true), statusMember()] {
+                            client.state.clients = [statusMember(1), state]
+                            try await Task.sleep(nanoseconds: 100_000_000)
+                            XCTAssertEqual(client.state.onlineMember(uid: peer.uid)?.statusIcon, state.statusIcon)
+                            try capture("chat-\(state.statusIcon ?? "normal")-\(language)-\(category)")
+                        }
+                        client.state.clients = []
+                        try await Task.sleep(nanoseconds: 100_000_000)
+                        XCTAssertNil(client.state.onlineMember(uid: peer.uid))
+                        try capture("chat-offline-\(language)-\(category)")
+                    }
+                }
+            }
+        }
     }
 }

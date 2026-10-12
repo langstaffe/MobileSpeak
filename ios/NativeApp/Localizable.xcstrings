@@ -2349,6 +2349,13 @@
         }
       }
     },
+    "member_away" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Away" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "离开" } }
+      }
+    },
     "member_muted" : {
       "extractionState" : "stale",
       "localizations" : {

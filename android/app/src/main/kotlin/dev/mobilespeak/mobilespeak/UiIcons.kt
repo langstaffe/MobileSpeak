@@ -12,6 +12,8 @@ import androidx.compose.ui.unit.dp
 
 /** Resource-backed vectors; state tint remains at each call site. */
 internal object UiIcons {
+    val Afk: ImageVector
+        @Composable get() = ImageVector.vectorResource(R.drawable.ic_afk)
     val Number: ImageVector
         @Composable get() = ImageVector.vectorResource(R.drawable.ic_channels)
     val Plus: ImageVector

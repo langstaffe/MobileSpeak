@@ -68,6 +68,13 @@ struct Member: Decodable, Identifiable, Equatable {
     let speaking: Bool
     var volumePercent: Int? = nil
     var volumeToken: String? = nil
+    var away: Bool? = nil
+    var statusIcon: String? { away == true ? "afk" : deafened ? "speaker-off" : muted ? "mic-off" : nil }
+    var accessibilityLabel: String {
+        ([name] + [(away == true, "member_away"), (deafened, "member_listening_off"),
+                   (muted, "member_muted"), (speaking, "member_speaking")]
+            .compactMap { $0.0 ? L10n.string($0.1) : nil }).joined(separator: ", ")
+    }
     var volumeRowId: String { volumeToken ?? "client:\(id)" }
     var conversation: String? { uid.map { "client:\($0)" } }
 }
@@ -80,6 +87,10 @@ struct Snapshot: Decodable, Equatable {
     var channels: [Channel] = []
     var clients: [Member] = []
     var networkQuality: NetworkQuality?
+    func onlineMember(uid: String?) -> Member? {
+        guard status == "connected", let uid, !uid.isEmpty else { return nil }
+        return clients.first { $0.uid == uid }
+    }
 }
 
 enum NetworkGrade: String, Decodable { case good, fair, poor }

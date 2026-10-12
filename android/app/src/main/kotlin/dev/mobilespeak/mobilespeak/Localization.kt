@@ -61,6 +61,11 @@ internal fun Context.localized(@StringRes id: Int, vararg arguments: Any): Strin
 internal fun Context.localizedQuantity(@PluralsRes id: Int, quantity: Int, vararg arguments: Any): String =
     languageContext().resources.getQuantityString(id, quantity, *arguments)
 
+internal fun Member.accessibilityLabel(context: Context): String =
+    (listOf(name) + listOf(away to R.string.member_away, deafened to R.string.member_listening_off,
+        muted to R.string.member_muted, speaking to R.string.member_speaking)
+        .filter { it.first }.map { context.localized(it.second) }).joinToString(", ")
+
 internal fun Context.localizedCoreError(code: String?, detail: String? = null): String {
     val resource = when (code) {
             "chat_history_read_failed" -> R.string.error_chat_history_read_failed

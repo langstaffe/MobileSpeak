@@ -487,14 +487,29 @@ struct Avatar: View {
     var path: String? = nil
     var speaking = false
     var size: CGFloat = 34
+    var member: Member? = nil
+    private var markSize: CGFloat { size <= 24 ? 14 : size <= 30 ? 18 : 20 }
     var body: some View {
         ZStack {
-            Text(String(name.prefix(2)).uppercased()).font(.system(size: size * 0.36, weight: .bold))
-                .frame(width: size, height: size).background(Palette.accent)
-            if let path { LocalImage(path: path).frame(width: size, height: size) }
+            ZStack {
+                Palette.accent
+                if member?.statusIcon == nil {
+                    Text(String(name.prefix(2)).uppercased()).font(.system(size: size * 0.36, weight: .bold))
+                }
+                if let path { LocalImage(path: path).frame(width: size, height: size) }
+            }
+            .saturation(member?.away == true ? 0 : 1)
+            .overlay { if member?.away == true { Color.black.opacity(0.75) } }
+            .frame(width: size, height: size).clipShape(Circle())
+            if let icon = member?.statusIcon {
+                AppIcon(name: icon, size: markSize)
+                    .foregroundStyle(icon == "afk" ? Palette.disconnect : Color(hex: 0xF2F3F5))
+            }
         }
             .frame(width: size, height: size).clipShape(Circle())
             .overlay(Circle().strokeBorder(speaking ? Palette.green : .clear, lineWidth: 3))
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(member?.accessibilityLabel ?? name)
     }
 }
 struct ChannelMemberPreview: View {
@@ -514,7 +529,7 @@ struct ChannelMemberPreview: View {
             GeometryReader { proxy in
                 HStack(spacing: 5) {
                     ForEach(Array(members.prefix(Self.avatarCount(width: proxy.size.width, textWidth: textSize.width, memberCount: members.count)))) { member in
-                        Avatar(name: member.name, path: member.avatarPath, speaking: member.speaking, size: 24)
+                        Avatar(name: member.name, path: member.avatarPath, speaking: member.speaking, size: 24, member: member)
                     }
                     text.frame(width: min(textSize.width, proxy.size.width), height: textSize.height)
                 }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
@@ -549,7 +564,7 @@ private struct ChannelMemberCountText: UIViewRepresentable {
         label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
     }
 }
-private struct UnreadBadge: View {
+struct UnreadBadge: View {
     let count: Int
     var body: some View {
         if count > 0 {
@@ -943,7 +958,7 @@ struct HomeView: View {
         VStack(spacing: 0) {
             HStack(spacing: 11) {
                 if let server = client.state.server {
-                    Avatar(name: server)
+                    Avatar(name: server).accessibilityHidden(true)
                 } else {
                     Image("AppLogo").resizable().frame(width: 34, height: 34).clipShape(RoundedRectangle(cornerRadius: 8)).accessibilityLabel("MobileSpeak")
                 }
@@ -1071,7 +1086,7 @@ struct HomeView: View {
                             client.connectBookmark(bookmark)
                         } label: {
                             HStack(spacing: 12) {
-                                Avatar(name: bookmark.title)
+                                Avatar(name: bookmark.title).accessibilityHidden(true)
                                 VStack(alignment: .leading, spacing: 5) {
                                     Text(bookmark.title).font(.headline)
                                     Text(bookmark.address).font(.caption).foregroundStyle(Palette.muted)
@@ -1177,11 +1192,12 @@ struct HomeView: View {
         let visibleGroupIcons = m.serverGroupIcons.filter(\.canDisplay)
             .prefix(max(0, 5 - visibleBadges.count - (channelGroupIcon == nil ? 0 : 1)))
         return HStack(spacing: 12) {
-            Avatar(name: m.name, path: m.avatarPath, speaking: m.speaking)
+            Avatar(name: m.name, path: m.avatarPath, speaking: m.speaking, member: m)
+                .accessibilityHidden(true)
                 .overlay(alignment: .topTrailing) {
                     if showUnread { UnreadBadge(count: client.privateUnread(m)).offset(x: 5, y: -5) }
                 }
-            Text(m.name).lineLimit(1).truncationMode(.tail)
+            Text(m.name).lineLimit(1).truncationMode(.tail).accessibilityLabel(m.accessibilityLabel)
             Spacer(minLength: 8)
             if !visibleBadges.isEmpty || !visibleGroupIcons.isEmpty || channelGroupIcon != nil {
                 HStack(spacing: 3) {
@@ -1199,10 +1215,6 @@ struct HomeView: View {
                     if let channelGroupIcon { GroupIconImage(icon: channelGroupIcon) }
                 }.fixedSize()
             }
-            AppIcon(name: m.deafened ? "speaker-off" : m.muted ? "mic-off" : "mic-on", scaledSize: 20)
-                .foregroundStyle(m.speaking ? Palette.green : Palette.muted)
-                .frame(width: 20)
-                .accessibilityLabel(L10n.string(m.deafened ? "member_listening_off" : m.muted ? "member_muted" : m.speaking ? "member_speaking" : "member_microphone_on"))
         }
         .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
         .contentShape(Rectangle())
@@ -1527,8 +1539,9 @@ struct ChatView: View {
             ToolbarItem(placement: .principal) {
                 if let member {
                     HStack(spacing: 8) {
-                        Avatar(name: member.name, path: currentMember?.avatarPath ?? member.avatarPath, size: 30)
-                        Text(member.name).font(.headline)
+                        Avatar(name: currentMember?.name ?? member.name, path: currentMember?.avatarPath ?? member.avatarPath,
+                               speaking: currentMember?.speaking ?? false, size: 30, member: currentMember).accessibilityHidden(true)
+                        Text(currentMember?.name ?? member.name).font(.headline).accessibilityLabel(currentMember?.accessibilityLabel ?? member.name)
                     }
                 } else {
                     Text(title).font(.headline)
@@ -1552,8 +1565,7 @@ struct ChatView: View {
         }
     }
     private var currentMember: Member? {
-        guard let uid = member?.uid else { return nil }
-        return client.state.clients.first { $0.uid == uid }
+        client.state.onlineMember(uid: member?.uid)
     }
     private func send() {
         let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1563,12 +1575,16 @@ struct ChatView: View {
         else if let member = currentMember, client.sendPrivateMessage(value, member: member) { text = "" }
     }
     @ViewBuilder private func messageRow(_ message: ChatMessage) -> some View {
+        let sender = client.state.onlineMember(uid: message.senderUid)
         HStack(alignment: .bottom, spacing: 8) {
             if message.own { Spacer(minLength: 46) }
-            else { Avatar(name: message.senderName, path: liveAvatarPath(message) ?? message.avatarPath, size: 30) }
+            else {
+                Avatar(name: message.senderName, path: sender?.avatarPath ?? message.avatarPath, speaking: sender?.speaking ?? false, size: 30, member: sender)
+                    .accessibilityHidden(channel != nil)
+            }
             VStack(alignment: message.own ? .trailing : .leading, spacing: 4) {
                 if channel != nil && !message.own {
-                    Text(message.senderName).font(.caption).foregroundStyle(Palette.muted)
+                    Text(message.senderName).font(.caption).foregroundStyle(Palette.muted).accessibilityLabel(sender?.accessibilityLabel ?? message.senderName)
                 }
                 Text(message.text)
                     .padding(.horizontal, 12).padding(.vertical, 9)
@@ -1585,12 +1601,9 @@ struct ChatView: View {
                     }.font(.caption2)
                 }
             }
-            if message.own { Avatar(name: message.senderName, path: liveAvatarPath(message) ?? message.avatarPath, size: 30) }
+            if message.own { Avatar(name: message.senderName, path: sender?.avatarPath ?? message.avatarPath, speaking: sender?.speaking ?? false, size: 30, member: sender) }
             else { Spacer(minLength: 46) }
         }
-    }
-    private func liveAvatarPath(_ message: ChatMessage) -> String? {
-        client.state.clients.first { $0.uid == message.senderUid }?.avatarPath
     }
 }
 
@@ -1742,8 +1755,8 @@ private struct UserVolumeRow: View {
     var body: some View {
         VStack(spacing: 2) {
             HStack(spacing: 12) {
-                Avatar(name: member.name, path: member.avatarPath, speaking: member.speaking)
-                Text(member.name).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
+                Avatar(name: member.name, path: member.avatarPath, speaking: member.speaking, member: member).accessibilityHidden(true)
+                Text(member.name).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading).accessibilityLabel(member.accessibilityLabel)
                 Text("\(Int(value))%").foregroundStyle(Palette.muted).monospacedDigit().fixedSize()
             }
             Slider(value: Binding(get: { value }, set: { next in

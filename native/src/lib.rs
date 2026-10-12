@@ -747,6 +747,28 @@ fn send_voice(
     Ok(())
 }
 
+// Display grouping must not feed back into protocol fields or local audio intent.
+#[derive(Debug, PartialEq)]
+struct UserStatus {
+    muted: bool,
+    deafened: bool,
+    away: bool,
+}
+impl UserStatus {
+    fn new(
+        input_muted: bool,
+        output_muted: bool,
+        output_only_muted: bool,
+        away_message: Option<&str>,
+    ) -> Self {
+        Self {
+            muted: input_muted,
+            deafened: output_muted || output_only_muted,
+            away: away_message.is_some(),
+        }
+    }
+}
+
 fn snapshot(
     con: &Connection,
     out: &Arc<Mutex<Output>>,
@@ -815,12 +837,18 @@ fn snapshot(
                 .filter(|group| group.icon.0 != 0)
                 .map(|group| group_icon_snapshot(group.id.0, &group.name, group.icon.0, storage, &server_id));
             let (volume, volume_token) = receive.fields(client.id);
+            let status = UserStatus::new(
+                client.input_muted,
+                client.output_muted,
+                client.output_only_muted,
+                client.away_message.as_deref(),
+            );
             json!({
                 "volumePercent":volume,"volumeToken":volume_token,
                 "id":client.id.0,"channel":client.channel.0,"uid":uid,"name":client.name,
                 "avatarHash":client.avatar_hash,"avatarPath":avatar_path,
                 "badges":badges,"serverGroupIcons":server_group_icons,"channelGroupIcon":channel_group_icon,
-                "muted":client.input_muted,"deafened":client.output_muted,
+                "muted":status.muted,"deafened":status.deafened,"away":status.away,
                 "speaking":if client.id == state.own_client { sending } else { audio.get_queues().contains_key(&client.id) }
             })
         })
@@ -2341,6 +2369,25 @@ pub unsafe extern "C" fn ts_playback(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn user_status_preserves_input_and_groups_both_output_flags_for_display() {
+        for input in [false, true] {
+            for output in [false, true] {
+                for output_only in [false, true] {
+                    for away in [None, Some(""), Some("Back later")] {
+                        assert_eq!(
+                            UserStatus::new(input, output, output_only, away),
+                            UserStatus {
+                                muted: input,
+                                deafened: output || output_only,
+                                away: away.is_some(),
+                            }
+                        );
+                    }
+                }
+            }
+        }
+    }
     #[test]
     fn receive_preferences_bridge_defaults_validation_and_restart() {
         let root = std::env::temp_dir().join(format!("receive-bridge-{}", received_id()));

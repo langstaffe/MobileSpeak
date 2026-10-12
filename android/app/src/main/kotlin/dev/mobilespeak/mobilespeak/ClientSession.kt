@@ -424,13 +424,7 @@ internal object ClientSession {
         envelope.optJSONObject("fileCache")?.let { cache -> mutableState.update { it.copy(fileCache = cache.fileCache()) } }
         val nextSnapshot = envelope.getJSONObject("snapshot").snapshot()
         if (!acceptingConnection && nextSnapshot.status != "disconnected") return
-        val chats = if (envelope.get("chats") == JSONObject.NULL) null else envelope.getJSONArray("chats").objects().map {
-            ChatMessage(
-                it.getString("id"), it.getString("conversation"), it.getString("senderName"),
-                it.stringOrNull("avatarPath"), it.getBoolean("own"), it.getString("text"),
-                it.getLong("timestamp"), it.getString("status"), it.stringOrNull("error"),
-            )
-        }
+        val chats = if (envelope.get("chats") == JSONObject.NULL) null else envelope.getJSONArray("chats").objects().map(JSONObject::chatMessage)
         val unreadJson = envelope.getJSONObject("unread")
         val unread = Unread(
             unreadJson.stringOrNull("serverId"), unreadJson.stringOrNull("channel"),

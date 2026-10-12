@@ -45,6 +45,7 @@
         <item quantity="other">· %1$d members online</item>
     </plurals>
     <string name="member_listening_off">Listening Off</string>
+    <string name="member_away">Away</string>
     <string name="member_muted">Muted</string>
     <string name="member_speaking">Speaking</string>
     <string name="member_microphone_on">Microphone On</string>

@@ -10,7 +10,7 @@ import org.junit.Test
 class IconResourcesTest {
     @Test fun vectorResourcesRenderAndAcceptStateTintExceptOff() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
-        val icons = listOf(R.drawable.ic_avatar_placeholder, R.drawable.ic_channel_chat,
+        val icons = listOf(R.drawable.ic_afk, R.drawable.ic_avatar_placeholder, R.drawable.ic_channel_chat,
             R.drawable.ic_channels, R.drawable.ic_checkmark, R.drawable.ic_chevron_right,
             R.drawable.ic_error, R.drawable.ic_headphones, R.drawable.ic_lock,
             R.drawable.ic_members, R.drawable.ic_mic_off, R.drawable.ic_mic_on,

@@ -451,9 +451,10 @@ private fun fileDate(timestamp: Long, context: android.content.Context) = DateFo
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             val density = LocalDensity.current
             CompositionLocalProvider(LocalDensity provides Density(density.density, 1f)) {
-                Avatar(member.name, member.avatarPath, member.speaking, 34)
+                Avatar(member.name, member.avatarPath, member.speaking, 34, member, accessible = false)
             }
-            Text(member.name, Modifier.weight(1f), color = Palette.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            val description = member.accessibilityLabel(LocalContext.current)
+            Text(member.name, Modifier.weight(1f).clearAndSetSemantics { contentDescription = description }, color = Palette.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text("${value.toInt()}%", color = Palette.muted, maxLines = 1)
         }
         Slider(value, onValueChange = { next ->
