@@ -222,6 +222,14 @@ internal object ClientSession {
         }
     }
 
+    fun setReceiveAgc(enabled: Boolean) { send(JSONObject().put("type", "set_receive_agc").put("enabled", enabled)) }
+    fun openUserVolumes() { mutableState.update { it.copy(userVolumesOpen = true) } }
+    fun closeUserVolumes() { mutableState.update { it.copy(userVolumesOpen = false) } }
+    fun setUserVolume(server: String, member: Member, percent: Int) {
+        val token = member.volumeToken ?: return
+        send(JSONObject().put("type", "set_user_volume").put("server", server).put("client", member.id)
+            .put("uid", member.uid ?: JSONObject.NULL).put("token", token).put("percent", percent))
+    }
     fun setNoiseSuppression(mode: String) {
         if (mode !in setOf("dpdfnet2", "rnnoise", "none")) return
         // Core notifications arrive on another executor, including very fast RNNoise/None loads.
@@ -431,6 +439,8 @@ internal object ClientSession {
         mutableState.update { latest ->
             latest.copy(
                 snapshot = nextSnapshot,
+                receiveAgc = envelope.optJSONObject("receiveAudio")?.optBoolean("agc", true) ?: latest.receiveAgc,
+                userVolumesOpen = latest.userVolumesOpen && nextSnapshot.status == "connected",
                 channelFiles = envelope.optJSONObject("channelFiles")?.channelFiles() ?: latest.channelFiles,
                 messages = chats ?: latest.messages,
                 unread = unread,

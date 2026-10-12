@@ -123,6 +123,14 @@ impl Playback {
         &self,
         audio: &mut crate::tsclientlib_audio::AudioHandler,
     ) -> Vec<tsclientlib::ClientId> {
+        self.refill_with_proc(audio, |_, _| {}, |_| {})
+    }
+    pub fn refill_with_proc(
+        &self,
+        audio: &mut crate::tsclientlib_audio::AudioHandler,
+        mut process: impl FnMut(&tsclientlib::ClientId, &mut [f32]),
+        mut protect: impl FnMut(&mut [f32]),
+    ) -> Vec<tsclientlib::ClientId> {
         let target = self.target.load(Acquire).div_ceil(FRAME) * FRAME;
         let previous = self.reserve.swap(target, Relaxed);
         self.growth_frames
@@ -134,7 +142,8 @@ impl Playback {
         // Snapshot the budget; concurrent callbacks cannot extend this loop.
         for _ in 0..target.saturating_sub(self.available()).div_ceil(FRAME) {
             let mut samples = [0.; FRAME * 2];
-            ended.extend(audio.fill_buffer(&mut samples));
+            ended.extend(audio.fill_buffer_with_proc(&mut samples, &mut process));
+            protect(&mut samples);
             self.push(&samples);
         }
         ended
@@ -144,8 +153,21 @@ impl Playback {
         let write = self.write.load(Relaxed);
         assert!(self.available() + FRAME <= CAPACITY);
         for (i, pair) in samples.chunks_exact(2).enumerate() {
-            let bits = u64::from(pair[0].clamp(-1., 1.).to_bits())
-                | (u64::from(pair[1].clamp(-1., 1.).to_bits()) << 32);
+            let bits = u64::from(
+                if pair[0].is_finite() {
+                    pair[0].clamp(-1., 1.)
+                } else {
+                    0.
+                }
+                .to_bits(),
+            ) | (u64::from(
+                if pair[1].is_finite() {
+                    pair[1].clamp(-1., 1.)
+                } else {
+                    0.
+                }
+                .to_bits(),
+            ) << 32);
             self.samples[(write + i) % CAPACITY].store(bits, Relaxed);
         }
         self.write.store(write + FRAME, Release);

@@ -264,4 +264,14 @@
     <string name="files_cache_clear_failed">Some file cache could not be cleared. Please try again.</string>
     <string name="files_cache_cleared">Cleared %1$s</string>
     <string name="files_cache_reload">Recalculate</string>
+    <string name="network_chart_sample_loss">%1$d seconds ago, packet loss %2$s percent</string>
+    <string name="volume_tools">Server tools</string>
+    <string name="volume_title">Adjust user volume</string>
+    <string name="volume_empty">No other users online</string>
+    <string name="volume_accessibility">Volume for %1$s</string>
+    <string name="settings_receive_agc">Automatic gain control</string>
+    <string name="settings_receive_agc_help">Automatically adjusts other users\' volume</string>
+    <string name="error_receive_audio_read_failed">Unable to read saved audio settings. The existing file was preserved.</string>
+    <string name="error_receive_audio_save_failed">Unable to save audio settings. Changes may not survive a restart.</string>
+    <string name="error_receive_audio_context_changed">This user\'s connection changed. Please adjust their volume again.</string>
 </resources>

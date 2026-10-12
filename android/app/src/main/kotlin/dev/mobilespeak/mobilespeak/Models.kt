@@ -32,6 +32,8 @@ data class Member(
     val muted: Boolean,
     val deafened: Boolean,
     val speaking: Boolean,
+    val volumePercent: Int = 100,
+    val volumeToken: String? = null,
 ) {
     val conversation get() = uid?.let { "client:$it" }
 }
@@ -48,7 +50,13 @@ data class Snapshot(
 )
 
 enum class NetworkGrade { GOOD, FAIR, POOR }
-data class NetworkSample(val second: Long, val rttMs: Double, val grade: NetworkGrade)
+data class NetworkSample(
+    val second: Long, val rttMs: Double, val grade: NetworkGrade,
+    val packetLossPercent: Double? = null, val packetLossGrade: NetworkGrade? = null,
+) {
+    val packetLossFraction: Double? get() = packetLossPercent
+        ?.takeIf { it.isFinite() && it >= 0 && packetLossGrade != null }?.let { minOf(it, 100.0) / 100 }
+}
 data class NetworkQuality(
     val rttMs: Double? = null,
     val deviationMs: Double? = null,
@@ -85,7 +93,8 @@ internal fun JSONObject.networkQuality() = NetworkQuality(
     packetLossGrade = networkGrade("packetLossGrade"), iconGrade = networkGrade("iconGrade"),
     axisMaxMs = getDouble("axisMaxMs"), nowSecond = getLong("nowSecond"),
     samples = getJSONArray("samples").objects().map {
-        NetworkSample(it.getLong("second"), it.getDouble("rttMs"), requireNotNull(it.networkGrade("grade")))
+        NetworkSample(it.getLong("second"), it.getDouble("rttMs"), requireNotNull(it.networkGrade("grade")),
+            if (it.isNull("packetLossPercent")) null else it.getDouble("packetLossPercent"), it.networkGrade("packetLossGrade"))
     },
 )
 private fun JSONObject.networkGrade(key: String): NetworkGrade? =
@@ -171,6 +180,8 @@ data class SessionUiState(
     val error: String? = null,
     val microphoneMuted: Boolean = true,
     val deafened: Boolean = false,
+    val receiveAgc: Boolean = true,
+    val userVolumesOpen: Boolean = false,
     val noiseSuppression: String = "rnnoise",
     val appliedNoise: String = "rnnoise",
     val audioProcessingStatus: String = "ready",
@@ -231,6 +242,7 @@ internal fun JSONObject.snapshot() = Snapshot(
             client.getJSONArray("serverGroupIcons").objects().map(JSONObject::groupIcon),
             client.optJSONObject("channelGroupIcon")?.groupIcon(),
             client.getBoolean("muted"), client.getBoolean("deafened"), client.getBoolean("speaking"),
+            client.optInt("volumePercent", 100), client.stringOrNull("volumeToken"),
         )
     },
 )

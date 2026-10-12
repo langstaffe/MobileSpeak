@@ -263,4 +263,14 @@
     <string name="files_cache_clear_failed">未能完整清理文件缓存，请重试。</string>
     <string name="files_cache_cleared">已清理 %1$s</string>
     <string name="files_cache_reload">重新读取</string>
+    <string name="network_chart_sample_loss">%1$d 秒前，丢包百分之 %2$s</string>
+    <string name="volume_tools">服务器工具</string>
+    <string name="volume_title">调节用户音量</string>
+    <string name="volume_empty">暂无其他在线用户</string>
+    <string name="volume_accessibility">%1$s 的音量</string>
+    <string name="settings_receive_agc">自动增益控制</string>
+    <string name="settings_receive_agc_help">自动调整其他用户的音量</string>
+    <string name="error_receive_audio_read_failed">无法读取已保存的音频设置，已保留原文件。</string>
+    <string name="error_receive_audio_save_failed">无法保存音频设置，重启后可能无法恢复本次更改。</string>
+    <string name="error_receive_audio_context_changed">此用户的连接已改变，请重新调节音量。</string>
 </resources>

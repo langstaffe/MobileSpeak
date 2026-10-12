@@ -12,6 +12,21 @@ class UiPresentationTest {
         assertEquals(androidx.compose.ui.graphics.Color(0xFFE9B44C), NetworkGrade.FAIR.networkColor())
         assertEquals(androidx.compose.ui.graphics.Color(0xFFFF375F), NetworkGrade.POOR.networkColor())
         assertEquals(Palette.muted, null.networkColor())
+        assertEquals(androidx.compose.ui.graphics.Color(0xFF3DBE78), NetworkGrade.GOOD.packetLossColor())
+        assertEquals(androidx.compose.ui.graphics.Color(0xFFFF8000), NetworkGrade.FAIR.packetLossColor())
+        assertEquals(androidx.compose.ui.graphics.Color(0xFF581C87), NetworkGrade.POOR.packetLossColor())
+        assertEquals(Palette.muted, null.packetLossColor())
+    }
+    @Test fun networkLossUsesRawFractionsAndFallsBackWithoutCompleteValidData() {
+        for ((percent, fraction) in listOf(0.0 to 0.0, 2.004 to .02004, 10.0 to .1, 100.0 to 1.0, 120.0 to 1.0, .0001 to .000001)) {
+            val sample = NetworkSample(0, 50.0, NetworkGrade.GOOD, percent, NetworkGrade.POOR)
+            assertEquals(fraction, requireNotNull(sample.packetLossFraction), 1e-12)
+            assertEquals(percent, requireNotNull(sample.packetLossPercent), 0.0)
+        }
+        for (percent in listOf(null, Double.NaN, Double.POSITIVE_INFINITY, -1.0)) {
+            assertNull(NetworkSample(0, 50.0, NetworkGrade.GOOD, percent, NetworkGrade.POOR).packetLossFraction)
+        }
+        assertNull(NetworkSample(0, 50.0, NetworkGrade.GOOD, 2.0).packetLossFraction)
     }
     @Test fun voiceDrawerGeometryResistanceAndDistanceVelocitySettling() {
         val travel = voiceDrawerTravel(650f, 64f)

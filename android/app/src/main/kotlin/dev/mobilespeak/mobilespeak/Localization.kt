@@ -64,6 +64,9 @@ internal fun Context.localizedQuantity(@PluralsRes id: Int, quantity: Int, varar
 internal fun Context.localizedCoreError(code: String?, detail: String? = null): String {
     val resource = when (code) {
             "chat_history_read_failed" -> R.string.error_chat_history_read_failed
+            "receive_audio_read_failed" -> R.string.error_receive_audio_read_failed
+            "receive_audio_save_failed" -> R.string.error_receive_audio_save_failed
+            "receive_audio_context_changed" -> R.string.error_receive_audio_context_changed
             "channel_subscribe_failed" -> R.string.error_channel_subscribe_failed
             "message_unconfirmed_after_restart" -> R.string.error_message_unconfirmed_after_restart
             "message_unconfirmed_after_reconnect" -> R.string.error_message_unconfirmed_after_reconnect

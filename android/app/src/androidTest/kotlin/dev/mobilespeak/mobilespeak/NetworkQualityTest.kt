@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.background
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Button
@@ -339,43 +340,182 @@ class NetworkQualityTest {
         }
     }
     @Test fun bridgePreservesNullsGradesAndMissingSeconds() {
-        val snapshot = JSONObject("""{"status":"connected","channels":[],"clients":[],"networkQuality":{"rttMs":42.5,"deviationMs":6.05,"packetLossPercent":4.0,"rttGrade":"good","deviationGrade":"good","packetLossGrade":"poor","iconGrade":"poor","axisMaxMs":2000,"nowSecond":31,"samples":[{"second":29,"rttMs":1234,"grade":"poor"},{"second":31,"rttMs":42.5,"grade":"good"}]}}""").snapshot()
+        val snapshot = JSONObject("""{"status":"connected","channels":[],"clients":[],"networkQuality":{"rttMs":42.5,"deviationMs":6.05,"packetLossPercent":4.0,"rttGrade":"good","deviationGrade":"good","packetLossGrade":"poor","iconGrade":"poor","axisMaxMs":2000,"nowSecond":33,"samples":[{"second":29,"rttMs":1234,"grade":"poor"},{"second":31,"rttMs":50,"grade":"good","packetLossPercent":null,"packetLossGrade":null},{"second":33,"rttMs":42.5,"grade":"good","packetLossPercent":2.004,"packetLossGrade":"fair"}]}}""").snapshot()
         val q = requireNotNull(snapshot.networkQuality)
         assertEquals("43", q.latencyText); assertEquals("6.1", q.deviationText); assertEquals("4.0", q.lossText)
         assertEquals(NetworkGrade.POOR, q.iconGrade); assertEquals(NetworkGrade.GOOD, q.rttGrade)
-        assertEquals(listOf(29L, 31L), q.samples.map { it.second }); assertEquals(2000.0, q.axisMaxMs, 0.0)
+        assertEquals(listOf(29L, 31L, 33L), q.samples.map { it.second }); assertEquals(2000.0, q.axisMaxMs, 0.0)
+        assertNull(q.samples[0].packetLossFraction); assertNull(q.samples[1].packetLossFraction)
+        assertEquals(2.004, requireNotNull(q.samples[2].packetLossPercent), 0.0)
+        assertEquals(NetworkGrade.FAIR, q.samples[2].packetLossGrade)
+        assertEquals(0.02004, requireNotNull(q.samples[2].packetLossFraction), 1e-12)
+        for (fields in listOf("\"packetLossPercent\":2", "\"packetLossGrade\":\"fair\"", "\"packetLossPercent\":null,\"packetLossGrade\":\"fair\"", "\"packetLossPercent\":2,\"packetLossGrade\":null")) {
+            val json = JSONObject("""{"axisMaxMs":100,"nowSecond":0,"samples":[{"second":0,"rttMs":50,"grade":"good",$fields}]}""")
+            assertNull(json.networkQuality().samples.single().packetLossFraction)
+        }
         assertNull(JSONObject("""{"status":"disconnected","channels":[],"clients":[],"networkQuality":null}""").snapshot().networkQuality)
+    }
+
+    @Test fun historyUsesHardEdgesInsideEachNativeBarAndUpdatesWithState() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val context = instrumentation.targetContext
+        val colors = listOf(0xFF3DBE78.toInt(), 0xFFE9B44C.toInt(), 0xFFFF375F.toInt(), 0xFFFF8000.toInt(), 0xFF581C87.toInt())
+        val losses = mapOf(0L to 0.0, 1L to 2.0, 2L to 10.0, 3L to 100.0, 4L to 2.0, 5L to 120.0,
+            7L to -1.0, 8L to Double.NaN, 9L to Double.POSITIVE_INFINITY, 10L to 2.0, 11L to .0001, 13L to 100.0, 15L to 50.0)
+        var quality by mutableStateOf(NetworkQuality(axisMaxMs = 200.0, nowSecond = 29,
+            samples = (0L..29L).filter { it != 14L }.map { second ->
+                NetworkSample(second, if (second == 4L) 150.0 else if (second == 13L) 0.0 else if (second == 15L) 2.0 else 50.0,
+                    if (second == 4L) NetworkGrade.FAIR else NetworkGrade.GOOD,
+                    if (second == 6L) null else losses[second] ?: 10.0,
+                    if (second == 6L || second == 10L) null else if (second == 1L || second == 4L) NetworkGrade.FAIR else NetworkGrade.POOR)
+            }))
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            lateinit var activity: MainActivity
+            var density = 1f
+            scenario.onActivity {
+                activity = it; density = it.resources.displayMetrics.density
+                it.setContent { MaterialTheme {
+                    Box(Modifier.fillMaxSize().safeDrawingPadding()) {
+                        NetworkChart(quality, Modifier.size(366.dp, 240.dp).background(Palette.bottom).testTag("loss-chart"))
+                    }
+                } }
+            }
+            fun <T> onMain(block: () -> T): T {
+                var result: T? = null
+                instrumentation.runOnMainSync { result = block() }
+                @Suppress("UNCHECKED_CAST") return result as T
+            }
+            fun chartNode(): SemanticsNode {
+                fun root(view: android.view.View): ViewRootForTest? = (view as? ViewRootForTest) ?: (view as? android.view.ViewGroup)?.let { group ->
+                    (0 until group.childCount).firstNotNullOfOrNull { root(group.getChildAt(it)) }
+                }
+                fun collect(node: SemanticsNode): List<SemanticsNode> = listOf(node) + node.children.flatMap(::collect)
+                return collect(requireNotNull(root(activity.window.decorView)).semanticsOwner.unmergedRootSemanticsNode)
+                    .single { it.config.getOrNull(SemanticsProperties.TestTag) == "loss-chart" }
+            }
+            fun render(name: String): android.graphics.Bitmap {
+                android.os.SystemClock.sleep(300); instrumentation.waitForIdleSync()
+                val bounds = onMain { chartNode().let { android.graphics.Rect(it.positionOnScreen.x.toInt(), it.positionOnScreen.y.toInt(), it.positionOnScreen.x.toInt() + it.size.width, it.positionOnScreen.y.toInt() + it.size.height) } }
+                val screen = requireNotNull(instrumentation.uiAutomation.takeScreenshot())
+                val bitmap = android.graphics.Bitmap.createBitmap(screen, bounds.left, bounds.top, bounds.width(), bounds.height())
+                screen.recycle()
+                File(context.getExternalFilesDir(null), "$name.png").outputStream().use { bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
+                return bitmap
+            }
+            fun matches(bitmap: android.graphics.Bitmap, x: Int, y: Int, color: Int): Boolean {
+                val pixel = bitmap.getPixel(x, y)
+                return listOf(16, 8, 0).all { kotlin.math.abs((pixel shr it and 255) - (color shr it and 255)) <= 4 }
+            }
+            fun bars(bitmap: android.graphics.Bitmap): List<IntRange> {
+                val y = bitmap.height - density.toInt() - 2
+                val ranges = mutableListOf<IntRange>()
+                var start: Int? = null
+                for (x in 0..bitmap.width) {
+                    val filled = x < bitmap.width && colors.any { matches(bitmap, x, y, it) }
+                    if (filled && start == null) start = x
+                    if (!filled && start != null) { ranges += start..(x - 1); start = null }
+                }
+                return ranges
+            }
+            val image = render("loss-history-normal")
+            val ranges = bars(image)
+            assertEquals(quality.samples.size, ranges.size)
+            for ((sample, range) in quality.samples.zip(ranges)) {
+                val x = (range.first + range.last) / 2
+                val latency = if (sample.grade == NetworkGrade.FAIR) colors[1] else colors[0]
+                val loss = if (sample.packetLossGrade == NetworkGrade.FAIR) colors[3] else colors[4]
+                val rows = (0 until image.height).filter { y -> colors.any { matches(image, x, y, it) } }
+                val first = rows.first(); val last = rows.last(); val count = last - first + 1
+                val p = sample.packetLossFraction ?: 0.0
+                if (p == 0.0 || p == 1.0) {
+                    assertTrue("Solid sample ${sample.second}", rows.all { matches(image, x, it, if (p == 0.0) latency else loss) })
+                } else {
+                    val boundary = last + 1 - count * p
+                    for (y in first..last) if (kotlin.math.abs(y + .5 - boundary) > 1.5) {
+                        assertTrue("Hard edge sample ${sample.second}, y=$y, boundary=$boundary", matches(image, x, y, if (y + .5 < boundary) latency else loss))
+                    }
+                    assertEquals("Raw ratio sample ${sample.second}", count * p, rows.count { matches(image, x, it, loss) }.toDouble(), 1.5)
+                }
+                if (sample.second == 3L) {
+                    assertFalse("Rounded top corner", matches(image, range.first, first, loss))
+                    assertTrue("Flat baseline", matches(image, range.first, last - 1, loss))
+                }
+                if (sample.second == 13L) assertTrue(count <= density.toInt() + 1)
+            }
+            val firstCenter = (ranges[0].first + ranges[0].last) / 2
+            val secondCenter = (ranges[1].first + ranges[1].last) / 2
+            val gapCenter = secondCenter + (secondCenter - firstCenter) * 13
+            assertFalse("Missing second stays empty", colors.any { matches(image, gapCenter, image.height - density.toInt() - 2, it) })
+            assertTrue(onMain { chartNode().config[SemanticsProperties.ContentDescription].single().contains("2.0") })
+            onMain { quality = quality.copy(nowSecond = 30) }
+            val advanced = render("loss-history-advanced")
+            val advancedRanges = bars(advanced)
+            assertEquals(ranges.size - 1, advancedRanges.size)
+            assertEquals((ranges.last().first + ranges.last().last) / 2.0 - (secondCenter - firstCenter),
+                (advancedRanges.last().first + advancedRanges.last().last) / 2.0, 2.0)
+            onMain { quality = quality.copy(axisMaxMs = 500.0) }
+            val scaled = render("loss-history-axis")
+            val scaledLast = bars(scaled).last(); val scaledX = (scaledLast.first + scaledLast.last) / 2
+            val scaledRows = (0 until scaled.height).filter { y -> colors.any { matches(scaled, scaledX, y, it) } }
+            assertTrue(scaledRows.size < image.height * .12)
+            assertEquals(scaledRows.size * .1, scaledRows.count { matches(scaled, scaledX, it, colors[4]) }.toDouble(), 1.5)
+            onMain { quality = quality.copy(samples = emptyList()) }
+            val empty = render("loss-history-disconnected")
+            assertTrue(bars(empty).isEmpty())
+            onMain { quality = NetworkQuality(axisMaxMs = 100.0, nowSecond = 0, samples = listOf(NetworkSample(0, 50.0, NetworkGrade.GOOD, 100.0, NetworkGrade.POOR))) }
+            val restored = render("loss-history-reconnected")
+            assertEquals(1, bars(restored).size)
+            listOf(image, advanced, scaled, empty, restored).forEach { it.recycle() }
+        }
     }
 
     @Test fun nativePanelRendersLongValuesAtNarrowWidthAndLargeFont() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
-            for (scale in listOf(1f, 2f)) {
+            for ((width, scale) in listOf(320 to 1f, 240 to 1f, 320 to 2f)) {
                 scenario.onActivity { activity ->
                     activity.setContent {
                         val density = LocalDensity.current.density
                         CompositionLocalProvider(LocalDensity provides Density(density, scale)) {
                             MaterialTheme {
-                                NetworkQualityPanel(NetworkQuality(rttMs = 1234.0, deviationMs = 1234.5, packetLossPercent = 4.0,
-                                    rttGrade = NetworkGrade.POOR, deviationGrade = NetworkGrade.POOR, packetLossGrade = NetworkGrade.POOR,
-                                    iconGrade = NetworkGrade.POOR, axisMaxMs = 2000.0, nowSecond = 29,
-                                    samples = (0L..29L).filter { it != 24L }.map { NetworkSample(it, if (it == 20L) 1234.0 else 42.0, if (it == 20L) NetworkGrade.POOR else NetworkGrade.GOOD) }), Modifier.width(320.dp))
+                                Box(Modifier.fillMaxSize().background(Palette.bottom).safeDrawingPadding()) {
+                                    NetworkQualityPanel(NetworkQuality(rttMs = 1234.0, deviationMs = 1234.5, packetLossPercent = 4.0,
+                                        rttGrade = NetworkGrade.POOR, deviationGrade = NetworkGrade.POOR, packetLossGrade = NetworkGrade.POOR,
+                                        iconGrade = NetworkGrade.POOR, axisMaxMs = 2000.0, nowSecond = 29,
+                                        samples = (0L..29L).filter { it != 24L }.map { NetworkSample(it,
+                                            if (it == 20L) 1234.0 else if (it == 25L) 150.0 else 42.0,
+                                            if (it == 20L) NetworkGrade.POOR else if (it == 25L) NetworkGrade.FAIR else NetworkGrade.GOOD,
+                                            if (it == 25L) 2.0 else 10.0, if (it == 25L) NetworkGrade.FAIR else NetworkGrade.POOR) }), Modifier.width(width.dp).background(Palette.bottom))
+                                }
                             }
                         }
                     }
                 }
+                android.os.SystemClock.sleep(300)
                 instrumentation.waitForIdleSync()
                 val screenshot = requireNotNull(instrumentation.uiAutomation.takeScreenshot())
-                File(instrumentation.targetContext.cacheDir, "network-panel-$scale.png").outputStream().use { screenshot.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
+                File(instrumentation.targetContext.getExternalFilesDir(null), "network-panel-$width-$scale.png").outputStream().use { screenshot.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
                 val descriptions = mutableListOf<String>()
+                val elements = mutableListOf<android.view.accessibility.AccessibilityNodeInfo>()
                 fun collect(node: android.view.accessibility.AccessibilityNodeInfo?) {
                     if (node == null || !node.refresh()) return
+                    if (node.isVisibleToUser) elements += node
                     node.contentDescription?.toString()?.let(descriptions::add)
                     for (i in 0 until node.childCount) collect(node.getChild(i))
                 }
                 collect(instrumentation.uiAutomation.rootInActiveWindow)
                 assertTrue(descriptions.toString(), descriptions.any { it.contains("999") && it.contains("999.9") })
                 assertTrue(descriptions.toString(), descriptions.any { it.contains("2000") && it.contains("29") })
+                val chart = elements.single { it.contentDescription?.toString()?.startsWith(instrumentation.targetContext.localized(R.string.network_chart)) == true }
+                val numbers = elements.single { it.contentDescription?.toString()?.contains("999.9") == true }
+                val chartBounds = android.graphics.Rect().also(chart::getBoundsInScreen)
+                val numberBounds = android.graphics.Rect().also(numbers::getBoundsInScreen)
+                if (scale > 1f || width < 263) {
+                    assertTrue("Narrow width and large text stack the chart below numbers", chartBounds.top > numberBounds.bottom)
+                } else {
+                    assertEquals(numberBounds.top, chartBounds.top)
+                    assertEquals(numberBounds.bottom, chartBounds.bottom)
+                }
             }
         }
     }

@@ -37,6 +37,8 @@ pub(crate) struct Sample {
     second: u64,
     rtt_ms: f64,
     grade: Grade,
+    packet_loss_percent: Option<f64>,
+    packet_loss_grade: Option<Grade>,
 }
 
 #[derive(Default, Clone, Debug, PartialEq, Serialize)]
@@ -51,26 +53,21 @@ pub(crate) struct Reading {
 }
 
 impl Reading {
-    fn from_stats(rtt: Duration, deviation: Duration, loss_fraction: f32) -> Option<Self> {
-        if !loss_fraction.is_finite() || loss_fraction < 0.0 {
-            return None;
-        }
+    fn from_stats(rtt: Duration, deviation: Duration, loss_fraction: f32) -> Self {
+        let loss = (loss_fraction.is_finite() && loss_fraction >= 0.0).then_some(loss_fraction);
         let rtt = rtt.as_secs_f64() * 1000.0;
         let dev = deviation.as_secs_f64() * 1000.0;
         // Compare the fraction in its original f32 precision at 1% / 3%.
         // Converting 0.01f32 to f64 before comparing to 1.0% moves that boundary.
-        Some(Self {
+        Self {
             rtt_ms: Some(rtt),
             deviation_ms: Some(dev),
-            packet_loss_percent: Some(f64::from(loss_fraction) * 100.0),
+            packet_loss_percent: loss.map(|value| f64::from(value) * 100.0),
             rtt_grade: Some(grade(rtt, 100.0, 200.0)),
             deviation_grade: Some(grade(dev, 50.0, 100.0)),
-            packet_loss_grade: Some(grade(
-                f64::from(loss_fraction),
-                f64::from(0.01f32),
-                f64::from(0.03f32),
-            )),
-        })
+            packet_loss_grade: loss
+                .map(|value| grade(f64::from(value), f64::from(0.01f32), f64::from(0.03f32))),
+        }
     }
 }
 
@@ -211,10 +208,19 @@ impl History {
                 new_measurement = self.last_rtt.is_some();
             }
         }
-        let reading = stats.and_then(|stats| {
+        let reading = stats.map(|stats| {
             // get_packetloss() returns a fraction for the library's current window.
             Reading::from_stats(stats.rtt, stats.rtt_dev, stats.get_packetloss())
         });
+        self.publish(reading, new_measurement, now)
+    }
+
+    fn publish(
+        &mut self,
+        reading: Option<Reading>,
+        new_measurement: bool,
+        now: Instant,
+    ) -> &Quality {
         if let Some(mut reading) = reading {
             if !self.rtt_fresh(now) {
                 reading.rtt_ms = None;
@@ -242,6 +248,8 @@ impl History {
                     second: self.second(self.last_rtt.unwrap()),
                     rtt_ms: reading.rtt_ms.unwrap(),
                     grade: reading.rtt_grade.unwrap(),
+                    packet_loss_percent: reading.packet_loss_percent,
+                    packet_loss_grade: reading.packet_loss_grade,
                 };
                 match self.quality.samples.back_mut() {
                     Some(last) if last.second == sample.second => *last = sample,
@@ -310,26 +318,109 @@ mod tests {
         }
     }
     #[test]
+    fn samples_capture_raw_loss_and_never_recolor_old_measurements() {
+        let start = Instant::now();
+        let mut history = History::new(start);
+        // Use the same publication path with readings made by the library adapter;
+        // ConnectionStats keeps its packet counters private.
+        for (second, loss, expected) in [
+            (0, 0.0, Grade::Good),
+            (1, 0.01, Grade::Fair),
+            (2, 0.03, Grade::Poor),
+        ] {
+            let now = start + Duration::from_secs(second);
+            history.advance(now, history.wall_baseline.1);
+            history.last_event = Some(now);
+            history.last_rtt = Some(now);
+            let reading = Reading::from_stats(Duration::from_millis(50), Duration::ZERO, loss);
+            let quality = history.publish(Some(reading), true, now);
+            let sample = quality.samples.back().unwrap();
+            assert_eq!(sample.packet_loss_percent, Some(f64::from(loss) * 100.0));
+            assert_eq!(sample.packet_loss_grade, Some(expected));
+            assert_eq!(sample.grade, Grade::Good);
+        }
+        let saved = history.quality.samples.clone();
+        let now = start + Duration::from_millis(2500);
+        history.publish(
+            Some(Reading::from_stats(
+                Duration::from_millis(50),
+                Duration::ZERO,
+                0.1,
+            )),
+            false,
+            now,
+        );
+        assert_eq!(history.quality.samples, saved);
+        assert_eq!(history.quality.reading.packet_loss_grade, Some(Grade::Poor));
+        history.last_rtt = Some(now);
+        history.publish(
+            Some(Reading::from_stats(
+                Duration::from_millis(150),
+                Duration::ZERO,
+                0.02,
+            )),
+            true,
+            now,
+        );
+        assert_eq!(history.quality.samples.len(), 3);
+        assert_eq!(history.quality.samples[0], saved[0]);
+        assert_eq!(history.quality.samples[1], saved[1]);
+        assert_eq!(history.quality.samples[2].grade, Grade::Fair);
+        assert_eq!(
+            history.quality.samples[2].packet_loss_grade,
+            Some(Grade::Fair)
+        );
+        let later = start + Duration::from_secs(4);
+        history.last_rtt = Some(later);
+        history.publish(
+            Some(Reading::from_stats(
+                Duration::ZERO,
+                Duration::ZERO,
+                f32::NAN,
+            )),
+            true,
+            later,
+        );
+        let sample = history.quality.samples.back().unwrap();
+        assert_eq!(sample.second, 4);
+        assert_eq!(sample.rtt_ms, 0.0);
+        assert_eq!(sample.packet_loss_percent, None);
+        assert_eq!(sample.packet_loss_grade, None);
+        let json = serde_json::to_value(&history.quality).unwrap();
+        assert_eq!(
+            json["samples"][1]["packetLossPercent"],
+            f64::from(0.01f32) * 100.0
+        );
+        assert_eq!(json["samples"][1]["packetLossGrade"], "fair");
+        assert!(json["samples"][3]["packetLossPercent"].is_null());
+        assert!(json["samples"][3]["packetLossGrade"].is_null());
+    }
+
+    #[test]
     fn raw_thresholds_units_defaults_and_real_zeros() {
         let reading =
-            Reading::from_stats(Duration::from_millis(42), Duration::from_millis(6), 0.008)
-                .unwrap();
+            Reading::from_stats(Duration::from_millis(42), Duration::from_millis(6), 0.008);
         assert!((reading.packet_loss_percent.unwrap() - 0.8).abs() < 0.000001);
         for (loss, expected) in [
             (0.00999, Grade::Good),
+            (f32::from_bits(0.01f32.to_bits() - 1), Grade::Good),
             (0.01, Grade::Fair),
             (0.02999, Grade::Fair),
+            (f32::from_bits(0.03f32.to_bits() - 1), Grade::Fair),
             (0.03, Grade::Poor),
             (0.04, Grade::Poor),
         ] {
             assert_eq!(
-                Reading::from_stats(Duration::ZERO, Duration::ZERO, loss)
-                    .unwrap()
-                    .packet_loss_grade,
+                Reading::from_stats(Duration::ZERO, Duration::ZERO, loss).packet_loss_grade,
                 Some(expected)
             );
         }
-        assert!(Reading::from_stats(Duration::ZERO, Duration::ZERO, f32::NAN).is_none());
+        for loss in [f32::NAN, f32::INFINITY, -0.01] {
+            let reading = Reading::from_stats(Duration::ZERO, Duration::ZERO, loss);
+            assert_eq!(reading.rtt_ms, Some(0.0));
+            assert_eq!(reading.packet_loss_percent, None);
+            assert_eq!(reading.packet_loss_grade, None);
+        }
         for (value, expected) in [
             (99.99, Grade::Good),
             (100.0, Grade::Fair),
@@ -351,8 +442,7 @@ mod tests {
                 Duration::from_millis(30),
                 Duration::from_secs_f64(value / 1000.0),
                 0.0,
-            )
-            .unwrap();
+            );
             assert_eq!(r.deviation_grade, Some(expected));
             assert_eq!(r.rtt_grade, Some(Grade::Good));
             assert_eq!(r.packet_loss_grade, Some(Grade::Good));
@@ -429,8 +519,7 @@ mod tests {
 
     #[test]
     fn mixed_grades_and_recovery_interruptions_are_independent() {
-        let r =
-            Reading::from_stats(Duration::from_millis(42), Duration::from_millis(6), 0.04).unwrap();
+        let r = Reading::from_stats(Duration::from_millis(42), Duration::from_millis(6), 0.04);
         assert_eq!(r.rtt_grade, Some(Grade::Good));
         assert_eq!(r.deviation_grade, Some(Grade::Good));
         assert_eq!(r.packet_loss_grade, Some(Grade::Poor));

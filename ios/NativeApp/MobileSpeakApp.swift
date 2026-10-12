@@ -52,6 +52,13 @@ struct AppIcon: View {
 }
 
 extension NetworkGrade {
+    var packetLossColor: Color {
+        switch self {
+        case .good: Color(hex: 0x3DBE78)
+        case .fair: Color(hex: 0xFF8000)
+        case .poor: Color(hex: 0x581C87)
+        }
+    }
     var color: Color {
         switch self {
         case .good: Color(hex: 0x3DBE78)
@@ -78,13 +85,13 @@ struct NetworkQualityPanel: View {
                 + Text(quality.deviationText).foregroundColor(quality.deviationGrade?.color ?? Palette.muted))
                 .font(.system(size: valueSize, weight: .semibold)).monospacedDigit().fixedSize(horizontal: false, vertical: true)
             (Text(L10n.string("network_packet_loss") + " ").foregroundColor(Palette.muted)
-                + Text(quality.lossText).foregroundColor(quality.packetLossGrade?.color ?? Palette.muted)
+                + Text(quality.lossText).foregroundColor(quality.packetLossGrade?.packetLossColor ?? Palette.muted)
                 + Text("%").foregroundColor(Palette.muted))
                 .font(.system(size: labelSize)).monospacedDigit().fixedSize(horizontal: false, vertical: true)
         }.foregroundStyle(Palette.muted)
             .accessibilityElement(children: .ignore).accessibilityLabel(quality.accessibilitySummary)
     }
-    private var chart: some View {
+    var chart: some View {
         Canvas { context, size in
             let font = Font.system(size: min(labelSize, 16)).monospacedDigit()
             let upper = context.resolve(Text(quality.axisText + " ms").font(font).foregroundColor(Palette.muted))
@@ -113,11 +120,27 @@ struct NetworkQualityPanel: View {
                 // Round only the top corners; keep the baseline flat.
                 let radius = min(1.5, rect.width / 2, barHeight / 2)
                 let path = Path(UIBezierPath(roundedRect: rect, byRoundingCorners: [.topLeft, .topRight], cornerRadii: CGSize(width: radius, height: radius)).cgPath)
-                context.fill(path, with: .color(sample.grade.color))
+                let shading: GraphicsContext.Shading
+                if let p = sample.packetLossFraction, let lossGrade = sample.packetLossGrade, p > 0 {
+                    if p == 1 {
+                        shading = .color(lossGrade.packetLossColor)
+                    } else {
+                        let t = 1 - p
+                        shading = .linearGradient(Gradient(stops: [
+                            .init(color: sample.grade.color, location: 0),
+                            .init(color: sample.grade.color, location: t),
+                            .init(color: lossGrade.packetLossColor, location: t),
+                            .init(color: lossGrade.packetLossColor, location: 1)
+                        ]), startPoint: CGPoint(x: rect.midX, y: rect.minY), endPoint: CGPoint(x: rect.midX, y: rect.maxY))
+                    }
+                } else {
+                    shading = .color(sample.grade.color)
+                }
+                context.fill(path, with: shading)
             }
         }.accessibilityElement(children: .ignore)
             .accessibilityLabel(L10n.string("network_chart"))
-            .accessibilityValue(quality.samples.isEmpty ? L10n.string("network_unavailable") : L10n.format("network_chart_summary", quality.samples.count, quality.axisText))
+            .accessibilityValue(quality.chartAccessibilitySummary)
     }
     var body: some View {
         VStack(spacing: 12) {
@@ -471,7 +494,7 @@ struct Avatar: View {
             if let path { LocalImage(path: path).frame(width: size, height: size) }
         }
             .frame(width: size, height: size).clipShape(Circle())
-            .overlay(Circle().stroke(speaking ? Palette.green : .clear, lineWidth: 3))
+            .overlay(Circle().strokeBorder(speaking ? Palette.green : .clear, lineWidth: 3))
     }
 }
 private struct UnreadBadge: View {
@@ -851,6 +874,7 @@ struct HomeView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State var tab = 0
     @Environment(\.sizeCategory) private var sizeCategory
+    @State private var userVolumesOpen = false
     @State private var drawerExpanded = false
     @State private var drawerBlocksClick = false
     @State private var showConnect = false
@@ -932,7 +956,7 @@ struct HomeView: View {
                 .onChange(of: proxy.size.height) { viewportHeight = $0 }
         })
         .onChange(of: client.connected) { connected in
-            if !connected { drawerExpanded = false; drawerBlocksClick = false }
+            if !connected { drawerExpanded = false; drawerBlocksClick = false; userVolumesOpen = false }
         }
         .navigationTitle(tab == 2 ? L10n.string("tab_settings") : "")
         .navigationBarHidden(true)
@@ -1196,6 +1220,11 @@ struct HomeView: View {
                     Toggle(L10n.string("settings_microphone"), isOn: Binding(get: { !client.microphoneMuted }, set: { value in Task { await client.setAudio(input: !value) } })).disabled(client.audioBusy || client.deafened)
                     Text(L10n.string("settings_microphone_help")).font(.footnote).foregroundStyle(Palette.muted)
                     Toggle(L10n.string("settings_listening"), isOn: Binding(get: { !client.deafened }, set: { value in Task { await client.setAudio(output: !value) } })).disabled(client.audioBusy)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Toggle(L10n.string("settings_receive_agc"), isOn: Binding(get: { client.receiveAgc }, set: client.setReceiveAgc))
+                            .accessibilityIdentifier("receive-agc")
+                        Text(L10n.string("settings_receive_agc_help")).font(.footnote).foregroundStyle(Palette.muted)
+                    }
                     VStack(alignment: .leading, spacing: 12) {
                         Text(L10n.string("settings_noise_suppression"))
                         VStack(spacing: 0) {
@@ -1265,25 +1294,36 @@ struct HomeView: View {
                     .accessibilityValue(L10n.string(drawerExpanded && client.connected ? "voice_drawer_expanded" : "voice_drawer_collapsed"))
                 }
                 Group {
-                    if client.channelFiles.open { ChannelFilesDrawer(client: client) }
+                    if userVolumesOpen { UserVolumesDrawer(client: client, onBack: { userVolumesOpen = false }) }
+                    else if client.channelFiles.open { ChannelFilesDrawer(client: client) }
                     else {
                         VStack(spacing: 0) {
                             NetworkQualityPanel(quality: client.state.networkQuality ?? NetworkQuality()).fixedSize(horizontal: false, vertical: true)
-                            VStack(alignment: .leading, spacing: 12) {
-                                Text(L10n.string("files_tools")).font(.caption).foregroundStyle(Palette.muted)
-                                Button { client.openChannelFiles() } label: {
-                                    HStack(spacing: 14) {
-                                        AppIcon(name: "folder", scaledSize: 26).foregroundStyle(Palette.accent)
-                                        VStack(alignment: .leading, spacing: 4) {
-                                            Text(L10n.string("files_title")).foregroundStyle(.white)
-                                            Text(L10n.string("files_subtitle")).font(.caption).foregroundStyle(Palette.muted)
-                                        }.frame(maxWidth: .infinity, alignment: .leading)
-                                        AppIcon(name: "chevron-right", size: 18).foregroundStyle(Palette.muted)
-                                    }.padding(16).frame(minHeight: 72).background(Palette.card).clipShape(RoundedRectangle(cornerRadius: 14))
-                                }.buttonStyle(.plain).disabled(!client.connected || client.state.ownClient == nil)
-                                .accessibilityIdentifier("channel-files-tool")
-                            }.padding(16).dynamicTypeSize(...DynamicTypeSize.xxxLarge)
-                            Spacer(minLength: 0)
+                            ScrollView {
+                                VStack(alignment: .leading, spacing: 12) {
+                                    Text(L10n.string("volume_tools")).font(.caption).foregroundStyle(Palette.muted)
+                                    Button { userVolumesOpen = true } label: {
+                                        HStack(spacing: 14) {
+                                            AppIcon(name: "speaker-on", scaledSize: 26).foregroundStyle(Palette.accent)
+                                            Text(L10n.string("volume_title")).foregroundStyle(.white).frame(maxWidth: .infinity, alignment: .leading)
+                                            AppIcon(name: "chevron-right", size: 18).foregroundStyle(Palette.muted)
+                                        }.padding(16).frame(minHeight: 72).background(Palette.card).clipShape(RoundedRectangle(cornerRadius: 14))
+                                    }.buttonStyle(.plain).disabled(!client.connected || client.state.ownClient == nil)
+                                    .accessibilityIdentifier("user-volumes-tool")
+                                    Text(L10n.string("files_tools")).font(.caption).foregroundStyle(Palette.muted)
+                                    Button { client.openChannelFiles() } label: {
+                                        HStack(spacing: 14) {
+                                            AppIcon(name: "folder", scaledSize: 26).foregroundStyle(Palette.accent)
+                                            VStack(alignment: .leading, spacing: 4) {
+                                                Text(L10n.string("files_title")).foregroundStyle(.white)
+                                                Text(L10n.string("files_subtitle")).font(.caption).foregroundStyle(Palette.muted)
+                                            }.frame(maxWidth: .infinity, alignment: .leading)
+                                            AppIcon(name: "chevron-right", size: 18).foregroundStyle(Palette.muted)
+                                        }.padding(16).frame(minHeight: 72).background(Palette.card).clipShape(RoundedRectangle(cornerRadius: 14))
+                                    }.buttonStyle(.plain).disabled(!client.connected || client.state.ownClient == nil)
+                                    .accessibilityIdentifier("channel-files-tool")
+                                }.padding(16).dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+                            }
                         }
                     }
                 }.frame(maxWidth: .infinity, minHeight: 0, maxHeight: .infinity, alignment: .top).clipped()
@@ -1605,5 +1645,72 @@ struct SettingsDetailPage: View {
         }.foregroundStyle(Color(hex: 0xF2F3F5)).background(Palette.background.ignoresSafeArea())
             .navigationBarHidden(false).navigationBarTitleDisplayMode(.inline)
             .navigationTitle(L10n.string(page == .language ? "settings_language" : "settings_about"))
+    }
+}
+
+struct UserVolumesDrawer: View {
+    @ObservedObject var client: Client
+    var onBack: () -> Void
+    @ScaledMetric(relativeTo: .headline) private var titleSize: CGFloat = 17
+    @ScaledMetric(relativeTo: .callout) private var actionSize: CGFloat = 14
+    @ScaledMetric(relativeTo: .caption) private var chromeSize: CGFloat = 12
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 4) {
+                Button(action: onBack) {
+                    HStack(spacing: 2) { AppIcon(name: "chevron-right", size: 18).scaleEffect(x: -1, y: 1); Text(L10n.string("action_back")) }
+                        .frame(minWidth: 64, minHeight: 44).foregroundStyle(Palette.accent)
+                }.accessibilityIdentifier("volumes-back")
+                VStack(spacing: 2) {
+                    Text(L10n.string("volume_title")).font(.system(size: min(titleSize, 22), weight: .semibold))
+                    Text(client.state.server ?? "").font(.system(size: min(chromeSize, 16))).foregroundStyle(Palette.muted).lineLimit(1)
+                }.frame(maxWidth: .infinity)
+                Color.clear.frame(width: 64, height: 44).accessibilityHidden(true)
+            }.font(.system(size: min(actionSize, 20))).padding(.horizontal, 8)
+            Divider().overlay(Palette.border)
+            ScrollView {
+                let members = client.state.clients.filter { $0.id != client.state.ownClient }.sorted { $0.id < $1.id }
+                LazyVStack(spacing: 0) {
+                    if members.isEmpty { Text(L10n.string("volume_empty")).foregroundStyle(Palette.muted).padding(24) }
+                    ForEach(members, id: \.volumeRowId) { member in
+                        UserVolumeRow(client: client, server: client.state.serverId ?? "", member: member)
+                    }
+                }.padding(.top, members.isEmpty ? 0 : 12)
+            }.accessibilityIdentifier("user-volumes-list")
+        }.accessibilityIdentifier("user-volumes-page")
+    }
+}
+private struct UserVolumeRow: View {
+    @ObservedObject var client: Client
+    let server: String
+    let member: Member
+    @State private var value: Double
+    @State private var editing = false
+    init(client: Client, server: String, member: Member) {
+        self.client = client; self.server = server; self.member = member
+        _value = State(initialValue: Double(member.volumePercent ?? 100))
+    }
+    var body: some View {
+        VStack(spacing: 2) {
+            HStack(spacing: 12) {
+                Avatar(name: member.name, path: member.avatarPath, speaking: member.speaking)
+                Text(member.name).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
+                Text("\(Int(value))%").foregroundStyle(Palette.muted).monospacedDigit().fixedSize()
+            }
+            Slider(value: Binding(get: { value }, set: { next in
+                value = next
+                client.setUserVolume(server: server, member: member, percent: Int(next))
+            }), in: 0...200, step: 1, onEditingChanged: { active in
+                editing = active
+                if !active {
+                    client.setUserVolume(server: server, member: member, percent: Int(value))
+                    value = Double(member.volumePercent ?? 100)
+                }
+            }).frame(minHeight: 48).disabled(!client.connected || member.volumeToken == nil)
+                .accessibilityLabel(L10n.format("volume_accessibility", member.name))
+                .accessibilityValue("\(Int(value))%")
+                .accessibilityIdentifier("user-volume-\(member.id)")
+        }.padding(.horizontal, 16).padding(.vertical, 4)
+            .onChange(of: member.volumePercent) { percent in if !editing { value = Double(percent ?? 100) } }
     }
 }

@@ -86,6 +86,7 @@ enum L10n {
             "disconnect_before_connect", "storage_change_while_connected", "message_send_failed",
             "message_wrong_channel", "channel_unavailable", "user_offline", "user_identity_unavailable",
             "user_connection_changed", "unsupported_message_target",
+            "receive_audio_read_failed", "receive_audio_save_failed", "receive_audio_context_changed",
         ]
         let known = code.flatMap { keys.contains($0) ? "error_\($0)" : nil }
         let message = string(known ?? "error_generic")

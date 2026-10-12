@@ -97,6 +97,14 @@ class ChannelFilesTest {
             assertTrue(refreshBounds.height >= 48 * density - 1)
             assertTrue(sortBounds.height >= 48 * density - 1)
             val headerBounds = semantics().first { files.channelName in texts(it) }.boundsInRoot
+            fun tagged(value: String) = semantics().single { it.config.getOrNull(SemanticsProperties.TestTag) == value }.boundsInRoot
+            val heading = tagged("drawer-page-title")
+            val subtitle = tagged("drawer-page-subtitle")
+            assertEquals(160 * density, heading.center.x, density)
+            assertEquals(heading.center.x, subtitle.center.x, density)
+            assertEquals(2 * density, subtitle.top - heading.bottom, density / 2)
+            assertTrue(tagged("drawer-page-back").right <= heading.left)
+            assertTrue(heading.right <= tagged("files-upload").left)
             assertTrue(semantics().any { texts(it).any { text -> text.contains(".pdf") } })
             val scroll = semantics().first { it.config.contains(SemanticsProperties.VerticalScrollAxisRange) }
             scenario.onActivity { assertTrue(scroll.config[SemanticsActions.ScrollBy].action!!(0f, 200 * density)) }

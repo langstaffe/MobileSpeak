@@ -9,6 +9,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.RoundRect
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.platform.LocalDensity
@@ -30,6 +32,13 @@ internal fun NetworkGrade?.networkColor(): Color = when (this) {
     NetworkGrade.GOOD -> Color(0xFF3DBE78)
     NetworkGrade.FAIR -> Color(0xFFE9B44C)
     NetworkGrade.POOR -> Color(0xFFFF375F)
+    null -> Palette.muted
+}
+
+internal fun NetworkGrade?.packetLossColor(): Color = when (this) {
+    NetworkGrade.GOOD -> Color(0xFF3DBE78)
+    NetworkGrade.FAIR -> Color(0xFFFF8000)
+    NetworkGrade.POOR -> Color(0xFF581C87)
     null -> Palette.muted
 }
 
@@ -67,14 +76,14 @@ private fun NetworkNumbers(quality: NetworkQuality, style: TextStyle, modifier: 
         }, style = style)
         Text(buildAnnotatedString {
             withStyle(SpanStyle(color = Palette.muted)) { append("$lossLabel ") }
-            withStyle(SpanStyle(color = quality.packetLossGrade.networkColor())) { append(quality.lossText) }
+            withStyle(SpanStyle(color = quality.packetLossGrade.packetLossColor())) { append(quality.lossText) }
             withStyle(SpanStyle(color = Palette.muted)) { append("%") }
         }, fontSize = 12.sp, style = TextStyle(fontFeatureSettings = "tnum"))
     }
 }
 
 @Composable
-private fun NetworkChart(quality: NetworkQuality, modifier: Modifier) {
+internal fun NetworkChart(quality: NetworkQuality, modifier: Modifier) {
     val density = LocalDensity.current
     val axisFontSize = with(density) { minOf(12.sp.toPx(), 16.dp.toPx()).toSp() }
     val measurer = rememberTextMeasurer()
@@ -83,7 +92,12 @@ private fun NetworkChart(quality: NetworkQuality, modifier: Modifier) {
     val middle = measurer.measure(AnnotatedString(quality.midAxisText + " ms"), style, softWrap = false)
     val description = stringResource(R.string.network_chart) + ", " + if (quality.samples.isEmpty()) stringResource(R.string.network_unavailable)
         else stringResource(R.string.network_chart_summary, quality.samples.size, quality.axisText)
-    Canvas(modifier.clearAndSetSemantics { contentDescription = description }) {
+    val resources = androidx.compose.ui.platform.LocalResources.current
+    val history = quality.samples.filter { quality.nowSecond - it.second in 0..29 && it.packetLossFraction != null }.map {
+        resources.getString(R.string.network_chart_sample_loss, quality.nowSecond - it.second, NetworkQuality.number(it.packetLossPercent, 1))
+    }
+    val historyDescription = (listOf(description) + history).joinToString("; ")
+    Canvas(modifier.clearAndSetSemantics { contentDescription = historyDescription }) {
         val labelWidth = maxOf(upper.size.width, middle.size.width).toFloat()
         val plotLeft = labelWidth + 8.dp.toPx()
         val plotWidth = (size.width - plotLeft).coerceAtLeast(0f)
@@ -108,7 +122,18 @@ private fun NetworkChart(quality: NetworkQuality, modifier: Modifier) {
             val path = Path().apply {
                 addRoundRect(RoundRect(left, baseline - barHeight, left + width, baseline, topLeftCornerRadius = radius, topRightCornerRadius = radius))
             }
-            drawPath(path, sample.grade.networkColor())
+            val p = sample.packetLossFraction
+            val brush = if (p == null || p == 0.0) SolidColor(sample.grade.networkColor())
+                else if (p == 1.0) SolidColor(sample.packetLossGrade.packetLossColor())
+                else {
+                    val t = (1 - p).toFloat()
+                    Brush.verticalGradient(
+                        0f to sample.grade.networkColor(), t to sample.grade.networkColor(),
+                        t to sample.packetLossGrade.packetLossColor(), 1f to sample.packetLossGrade.packetLossColor(),
+                        startY = baseline - barHeight, endY = baseline,
+                    )
+                }
+            drawPath(path, brush)
         }
     }
 }

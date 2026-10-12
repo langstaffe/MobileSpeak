@@ -7,10 +7,17 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
+import androidx.compose.foundation.border
+import androidx.compose.foundation.Canvas
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -19,17 +26,27 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.text.style.TextAlign
 import androidx.core.content.FileProvider
 import kotlinx.coroutines.launch
 import org.json.JSONObject
@@ -131,26 +148,93 @@ internal fun android.content.Context.fileError(value: String): String = when (va
 }
 private fun fileDate(timestamp: Long, context: android.content.Context) = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT, context.resources.configuration.locales[0]).format(Date(timestamp * 1000))
 
+@Composable private fun DrawerPageHeader(title: String, subtitle: String, onBack: () -> Unit,
+                                        onUpload: (() -> Unit)? = null, canUpload: Boolean = false) {
+    val density = LocalDensity.current
+    val titleSize = minOf(17f * density.fontScale, 22f)
+    val subtitleSize = minOf(12f * density.fontScale, 16f)
+    val actionSize = minOf(14f * density.fontScale, 20f)
+    val actionStyle = androidx.compose.ui.text.TextStyle(fontSize = actionSize.sp, lineHeight = (actionSize * 17f / 14f).sp,
+        fontWeight = FontWeight.Normal, fontFamily = FontFamily.SansSerif, letterSpacing = 0.sp)
+    CompositionLocalProvider(LocalDensity provides Density(density.density, 1f),
+        LocalTextStyle provides actionStyle) {
+        Layout(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp).testTag("drawer-page-header"), content = {
+            PressFeedback(ToolbarPressFeedback) { source, feedback, _ ->
+                TextButton(interactionSource = source, modifier = feedback.widthIn(min = 64.dp).testTag("drawer-page-back"),
+                    onClick = onBack, contentPadding = PaddingValues(2.dp)) {
+                    Icon(UiIcons.ChevronRight, null, Modifier.size(18.dp).scale(-1f, 1f))
+                    Spacer(Modifier.width(2.dp))
+                    Text(stringResource(R.string.action_back), style = actionStyle, maxLines = 1)
+                }
+            }
+            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(title, Modifier.fillMaxWidth().testTag("drawer-page-title"), color = Palette.text, fontSize = titleSize.sp,
+                    lineHeight = (titleSize * 20f / 17f).sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.sp, textAlign = TextAlign.Center)
+                Text(subtitle, Modifier.fillMaxWidth().testTag("drawer-page-subtitle"), color = Palette.muted, fontSize = subtitleSize.sp,
+                    lineHeight = (subtitleSize * 14f / 12f).sp, fontWeight = FontWeight.Normal, letterSpacing = 0.sp,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
+            }
+            if (onUpload == null) Spacer(Modifier.size(64.dp, 44.dp))
+            else PressFeedback(ToolbarPressFeedback) { source, feedback, _ ->
+                TextButton(interactionSource = source, modifier = feedback.widthIn(min = 64.dp).testTag("files-upload"),
+                    onClick = onUpload, enabled = canUpload, contentPadding = PaddingValues(4.dp)) {
+                    Icon(UiIcons.Upload, null, Modifier.size(18.dp)); Spacer(Modifier.width(4.dp))
+                    Text(stringResource(R.string.files_upload), style = actionStyle, maxLines = 1)
+                }
+            }
+        }) { children, constraints ->
+            val loose = constraints.copy(minWidth = 0, minHeight = 0)
+            val back = children[0].measure(loose)
+            val upload = children[2].measure(loose)
+            val gap = 4.dp.roundToPx()
+            val side = maxOf(back.width, upload.width)
+            val titleWidth = (constraints.maxWidth - 2 * (side + gap)).coerceAtLeast(0)
+            val heading = children[1].measure(loose.copy(minWidth = titleWidth, maxWidth = titleWidth))
+            val height = maxOf(back.height, upload.height, heading.height)
+            layout(constraints.maxWidth, height) {
+                back.placeRelative(0, (height - back.height) / 2)
+                heading.placeRelative(side + gap, (height - heading.height) / 2)
+                upload.placeRelative(constraints.maxWidth - upload.width, (height - upload.height) / 2)
+            }
+        }
+    }
+}
+
 @Composable internal fun ChannelFileTools(ui: SessionUiState, fileHeaderModifier: Modifier = Modifier) {
+    if (ui.userVolumesOpen) { UserVolumesDrawer(ui, fileHeaderModifier); return }
     if (ui.channelFiles.open) { ChannelFilesDrawer(ui, fileHeaderModifier); return }
-    // Measure the whole toolbox naturally; the drawer clips the portion currently revealed.
-    Column(Modifier.wrapContentHeight(align = Alignment.Top, unbounded = true)) {
-        NetworkQualityPanel(ui.snapshot.networkQuality ?: NetworkQuality())
+    // Keep the network header draggable and tools scrollable at the current drawer height.
+    BoxWithConstraints(Modifier.fillMaxSize()) {
         val density = LocalDensity.current
-        CompositionLocalProvider(LocalDensity provides Density(density.density, minOf(density.fontScale, 1.4f))) {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(stringResource(R.string.files_tools), color = Palette.muted, fontSize = 12.sp, lineHeight = 14.sp,
-                    fontWeight = FontWeight.Normal, letterSpacing = 0.sp)
-                Row(Modifier.fillMaxWidth()
-                    .clickable(interactionSource = null, indication = RowPressFeedback, enabled = ui.snapshot.status == "connected" && ui.snapshot.ownClient != null) { ClientSession.openChannelFiles() }
-                    .background(Palette.card, RoundedCornerShape(14.dp))
-                    .testTag("channel-files-tool").heightIn(min = 72.dp).padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                    Icon(UiIcons.Folder, null, Modifier.size(26.dp).testTag("channel-files-tool-icon"), tint = Palette.accent)
-                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text(stringResource(R.string.files_title), color = Palette.text)
-                        Text(stringResource(R.string.files_subtitle), color = Palette.muted, style = MaterialTheme.typography.bodySmall)
+        var networkHeight by remember { mutableIntStateOf(0) }
+        val toolsHeight = (maxHeight - with(density) { networkHeight.toDp() }).coerceAtLeast(0.dp)
+        Column(Modifier.wrapContentHeight(align = Alignment.Top, unbounded = true)) {
+            NetworkQualityPanel(ui.snapshot.networkQuality ?: NetworkQuality(), fileHeaderModifier.onSizeChanged { networkHeight = it.height })
+            CompositionLocalProvider(LocalDensity provides Density(density.density, minOf(density.fontScale, 1.4f))) {
+                Column(Modifier.height(toolsHeight).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(stringResource(R.string.volume_tools), color = Palette.muted, fontSize = 12.sp, lineHeight = 14.sp,
+                        fontWeight = FontWeight.Normal, letterSpacing = 0.sp)
+                    Row(Modifier.fillMaxWidth()
+                        .clickable(interactionSource = null, indication = RowPressFeedback, enabled = ui.snapshot.status == "connected" && ui.snapshot.ownClient != null) { ClientSession.openUserVolumes() }
+                        .background(Palette.card, RoundedCornerShape(14.dp)).testTag("user-volumes-tool")
+                        .heightIn(min = 72.dp).padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                        Icon(UiIcons.Speaker, null, Modifier.size(26.dp), tint = Palette.accent)
+                        Text(stringResource(R.string.volume_title), Modifier.weight(1f), color = Palette.text)
+                        Icon(UiIcons.ChevronRight, null, Modifier.size(18.dp), tint = Palette.muted)
                     }
-                    Icon(UiIcons.ChevronRight, null, Modifier.size(18.dp), tint = Palette.muted)
+                    Text(stringResource(R.string.files_tools), color = Palette.muted, fontSize = 12.sp, lineHeight = 14.sp,
+                        fontWeight = FontWeight.Normal, letterSpacing = 0.sp)
+                    Row(Modifier.fillMaxWidth()
+                        .clickable(interactionSource = null, indication = RowPressFeedback, enabled = ui.snapshot.status == "connected" && ui.snapshot.ownClient != null) { ClientSession.openChannelFiles() }
+                        .background(Palette.card, RoundedCornerShape(14.dp))
+                        .testTag("channel-files-tool").heightIn(min = 72.dp).padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                        Icon(UiIcons.Folder, null, Modifier.size(26.dp).testTag("channel-files-tool-icon"), tint = Palette.accent)
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(stringResource(R.string.files_title), color = Palette.text)
+                            Text(stringResource(R.string.files_subtitle), color = Palette.muted, style = MaterialTheme.typography.bodySmall)
+                        }
+                        Icon(UiIcons.ChevronRight, null, Modifier.size(18.dp), tint = Palette.muted)
+                    }
                 }
             }
         }
@@ -187,23 +271,9 @@ private fun fileDate(timestamp: Long, context: android.content.Context) = DateFo
         val density = LocalDensity.current
         // Keep the measured drag boundary inside the unbounded header, and the lazy list bounded.
         Column(Modifier.wrapContentHeight(align = Alignment.Top, unbounded = true).then(headerModifier).testTag("channel-files-header")) {
+            DrawerPageHeader(stringResource(R.string.files_title), files.channelName.orEmpty(), back, upload,
+                files.status == "ready" && !preparing && ui.snapshot.status == "connected")
             CompositionLocalProvider(LocalDensity provides Density(density.density, minOf(density.fontScale, 1.4f))) {
-                Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    PressFeedback(ToolbarPressFeedback) { source, feedback, _ ->
-                        TextButton(interactionSource = source, modifier = feedback, onClick = back, contentPadding = PaddingValues(2.dp)) {
-                            Icon(UiIcons.ChevronRight, null, Modifier.size(18.dp).scale(-1f, 1f)); Text(stringResource(R.string.action_back))
-                        }
-                    }
-                    Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(stringResource(R.string.files_title), color = Palette.text, style = MaterialTheme.typography.titleMedium)
-                        Text(files.channelName.orEmpty(), color = Palette.muted, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    }
-                    PressFeedback(ToolbarPressFeedback) { source, feedback, _ ->
-                        TextButton(interactionSource = source, modifier = feedback, onClick = upload, enabled = files.status == "ready" && !preparing && ui.snapshot.status == "connected", contentPadding = PaddingValues(4.dp)) {
-                            Icon(UiIcons.Upload, null, Modifier.size(18.dp)); Spacer(Modifier.width(4.dp)); Text(stringResource(R.string.files_upload))
-                        }
-                    }
-                }
                 Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
                     Icon(UiIcons.Folder, null, Modifier.size(18.dp), tint = Palette.muted)
                     Text(files.path, Modifier.weight(1f).padding(horizontal = 6.dp), color = Palette.muted, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -348,5 +418,65 @@ private fun fileDate(timestamp: Long, context: android.content.Context) = DateFo
         Text(stringResource(R.string.files_downloaded), Modifier.weight(1f).padding(4.dp), color = Palette.green, style = MaterialTheme.typography.bodySmall)
         TextButton(onClick = { launch(false) }) { Text(stringResource(R.string.files_open)) }
         IconButton(onClick = { launch(true) }) { Icon(UiIcons.Share, stringResource(R.string.files_share), tint = Palette.accent) }
+    }
+}
+
+@Composable internal fun UserVolumesDrawer(ui: SessionUiState, headerModifier: Modifier = Modifier) {
+    BackHandler { ClientSession.closeUserVolumes() }
+    Column(Modifier.fillMaxSize().testTag("user-volumes-page")) {
+        Column(Modifier.wrapContentHeight(align = Alignment.Top, unbounded = true).then(headerModifier)) {
+            DrawerPageHeader(stringResource(R.string.volume_title), ui.snapshot.server.orEmpty(), ClientSession::closeUserVolumes)
+            HorizontalDivider(color = Palette.border)
+        }
+        val members = ui.snapshot.clients.filter { it.id != ui.snapshot.ownClient }.sortedBy { it.id }
+        LazyColumn(Modifier.weight(1f).fillMaxWidth().testTag("user-volumes-list"), contentPadding = PaddingValues(top = if (members.isEmpty()) 0.dp else 12.dp)) {
+            if (members.isEmpty()) item { Text(stringResource(R.string.volume_empty), Modifier.fillMaxWidth().padding(24.dp), color = Palette.muted, textAlign = androidx.compose.ui.text.style.TextAlign.Center) }
+            items(members, key = { it.volumeToken ?: "client:${it.id}" }) { member ->
+                UserVolumeRow(ui.snapshot, member)
+            }
+        }
+    }
+}
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable private fun UserVolumeRow(snapshot: Snapshot, member: Member) {
+    var value by remember(snapshot.serverId, member.volumeToken) { mutableFloatStateOf(member.volumePercent.toFloat()) }
+    var editing by remember(snapshot.serverId, member.volumeToken) { mutableStateOf(false) }
+    LaunchedEffect(member.volumePercent, editing) { if (!editing) value = member.volumePercent.toFloat() }
+    val label = stringResource(R.string.volume_accessibility, member.name)
+    val enabled = snapshot.status == "connected" && member.volumeToken != null
+    val interactions = remember { MutableInteractionSource() }
+    val focused by interactions.collectIsFocusedAsState()
+    val rtl = LocalLayoutDirection.current == LayoutDirection.Rtl
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            val density = LocalDensity.current
+            CompositionLocalProvider(LocalDensity provides Density(density.density, 1f)) {
+                Avatar(member.name, member.avatarPath, member.speaking, 34)
+            }
+            Text(member.name, Modifier.weight(1f), color = Palette.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text("${value.toInt()}%", color = Palette.muted, maxLines = 1)
+        }
+        Slider(value, onValueChange = { next ->
+            editing = true; value = kotlin.math.round(next)
+            ClientSession.setUserVolume(snapshot.serverId.orEmpty(), member, value.toInt())
+        }, onValueChangeFinished = {
+            ClientSession.setUserVolume(snapshot.serverId.orEmpty(), member, value.toInt()); editing = false
+        }, valueRange = 0f..200f, steps = 199, enabled = enabled, interactionSource = interactions,
+            thumb = { Box(Modifier.size(36.dp, 24.dp).background(Color.White.copy(alpha = if (enabled) 1f else .38f), CircleShape)
+                .then(if (focused && enabled) Modifier.border(2.dp, Palette.accent, CircleShape) else Modifier)) },
+            track = { state ->
+                Canvas(Modifier.fillMaxWidth().height(6.dp)) {
+                    // Slider reserves half the thumb at each end; paint through that inset like UISlider.
+                    val halfThumb = 18.dp.toPx()
+                    val radius = size.height / 2
+                    val left = Offset(-halfThumb + radius, radius)
+                    val right = Offset(size.width + halfThumb - radius, radius)
+                    drawLine(Color.White.copy(alpha = .12f), left, right, size.height, StrokeCap.Round)
+                    val fraction = ((state.value - state.valueRange.start) / (state.valueRange.endInclusive - state.valueRange.start)).coerceIn(0f, 1f)
+                    val end = Offset(size.width * if (rtl) 1f - fraction else fraction, radius)
+                    drawLine(Palette.accent.copy(alpha = if (enabled) 1f else .38f), if (rtl) right else left, end, size.height, StrokeCap.Round)
+                }
+            },
+            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("user-volume-${member.id}").semantics { contentDescription = label })
     }
 }

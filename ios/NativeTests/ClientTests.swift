@@ -7,6 +7,64 @@ import Combine
 @testable import MobileSpeak
 
 final class ClientTests: XCTestCase {
+    func testUserVolumeBridgeDefaultsAndIdentityToken() throws {
+        let old = #"{"id":7,"channel":9,"uid":"stable","name":"User","avatarHash":"","avatarPath":null,"badges":[],"serverGroupIcons":[],"channelGroupIcon":null,"muted":false,"deafened":false,"speaking":false}"#
+        let member = try JSONDecoder().decode(Member.self,from:Data(old.utf8))
+        XCTAssertEqual(member.volumePercent ?? 100,100); XCTAssertNil(member.volumeToken)
+        let current = String(old.dropLast()) + #", "volumePercent":143,"volumeToken":"instance-7"}"#
+        let saved = try JSONDecoder().decode(Member.self,from:Data(current.utf8))
+        XCTAssertEqual(saved.volumePercent,143); XCTAssertEqual(saved.volumeRowId,"instance-7")
+        XCTAssertEqual(saved.uid,member.uid)
+    }
+    @MainActor func testUserVolumesLongListAndEmptyStateAtLargeFonts() async throws {
+        let client = Client.shared
+        guard !client.connected, !client.busy else { throw XCTSkip("Requires an offline test profile") }
+        let saved = client.state, savedError = client.error
+        let language = UserDefaults.standard.string(forKey: AppLanguage.preferenceKey)
+        let host = UIHostingController(rootView: AnyView(EmptyView()))
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let window = UIWindow(windowScene:scene)
+        let container = UIViewController()
+        window.rootViewController = container
+        container.addChild(host); container.view.addSubview(host.view)
+        host.view.frame = CGRect(x:0,y:0,width:320,height:568); host.didMove(toParent:container)
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true; client.state = saved; client.error = savedError
+            if let language { UserDefaults.standard.set(language,forKey:AppLanguage.preferenceKey) }
+            else { UserDefaults.standard.removeObject(forKey:AppLanguage.preferenceKey) }
+        }
+        try await Task.sleep(nanoseconds:200_000_000)
+        let members: [Member] = (1...41).map { (id: Int) -> Member in
+            let channel: UInt64 = id % 2 == 0 ? 9 : 7
+            let name = id == 1 ? "SELF MUST BE EXCLUDED" : "User \(id)"
+            return Member(id:UInt64(id),channel:channel,uid:"fixture-\(id)",name:name,avatarHash:"",avatarPath:nil,badges:[],serverGroupIcons:[],channelGroupIcon:nil,muted:false,deafened:false,speaking:false,volumePercent:id == 2 ? 143 : 100,volumeToken:"instance-\(id)")
+        }
+        func scrolls(_ v:UIView)->[UIScrollView] { (v as? UIScrollView).map { [$0] } ?? v.subviews.flatMap(scrolls) }
+        for lang in ["en","zh-Hans"] {
+            UserDefaults.standard.set(lang,forKey:AppLanguage.preferenceKey)
+            for category in [ContentSizeCategory.large,.accessibilityLarge,.accessibilityExtraExtraExtraLarge] {
+                client.state = Snapshot(status:"connected",server:"Fixture server",ownClient:1,clients:members)
+                host.rootView = AnyView(UserVolumesDrawer(client:client,onBack:{}).frame(height:300).foregroundStyle(Color(hex:0xF2F3F5)).background(Palette.bottom).tint(Palette.accent).environment(\.sizeCategory,category))
+                try await Task.sleep(nanoseconds:200_000_000)
+                host.view.layoutIfNeeded()
+                let scroll = try XCTUnwrap(scrolls(host.view).first)
+                XCTAssertGreaterThan(scroll.contentSize.height,scroll.bounds.height)
+                let frame = host.view.frame
+                scroll.setContentOffset(CGPoint(x:0,y:100),animated:false)
+                XCTAssertEqual(host.view.frame,frame); XCTAssertGreaterThan(scroll.contentOffset.y,0)
+                scroll.setContentOffset(.zero,animated:false)
+                let image = UIGraphicsImageRenderer(size:host.view.bounds.size).image { _ in host.view.drawHierarchy(in:host.view.bounds,afterScreenUpdates:true) }
+                let name = "user-volumes-\(lang)-\(category)"
+                try image.pngData()?.write(to:FileManager.default.temporaryDirectory.appendingPathComponent(name+".png"))
+                let attachment = XCTAttachment(image:image); attachment.name=name; attachment.lifetime = .keepAlways; add(attachment)
+                client.state.clients = Array(members.prefix(1))
+                try await Task.sleep(nanoseconds:100_000_000)
+                XCTAssertLessThanOrEqual(scroll.contentSize.height,scroll.bounds.height+1)
+            }
+        }
+    }
+
     @MainActor func testFileCacheSettingsLayoutsAtLargeTextSizes() async throws {
         let client = Client.shared
         guard !client.connected, !client.busy else { throw XCTSkip("Requires an offline test profile") }
@@ -55,12 +113,20 @@ final class ClientTests: XCTestCase {
     }
 
     func testNetworkQualityBridgeAndNumberFormatting() throws {
-        let data = Data(#"{"status":"connected","channels":[],"clients":[],"networkQuality":{"rttMs":42.5,"deviationMs":6.05,"packetLossPercent":4.0,"rttGrade":"good","deviationGrade":"good","packetLossGrade":"poor","iconGrade":"poor","axisMaxMs":2000,"nowSecond":31,"samples":[{"second":29,"rttMs":1234,"grade":"poor"},{"second":31,"rttMs":42.5,"grade":"good"}]}}"#.utf8)
+        let data = Data(#"{"status":"connected","channels":[],"clients":[],"networkQuality":{"rttMs":42.5,"deviationMs":6.05,"packetLossPercent":4.0,"rttGrade":"good","deviationGrade":"good","packetLossGrade":"poor","iconGrade":"poor","axisMaxMs":2000,"nowSecond":33,"samples":[{"second":29,"rttMs":1234,"grade":"poor"},{"second":31,"rttMs":50,"grade":"good","packetLossPercent":null,"packetLossGrade":null},{"second":33,"rttMs":42.5,"grade":"good","packetLossPercent":2.004,"packetLossGrade":"fair"}]}}"#.utf8)
         let snapshot = try JSONDecoder().decode(Snapshot.self, from: data)
         let q = try XCTUnwrap(snapshot.networkQuality)
         XCTAssertEqual(q.latencyText, "43"); XCTAssertEqual(q.deviationText, "6.1"); XCTAssertEqual(q.lossText, "4.0")
         XCTAssertEqual(q.iconGrade, .poor); XCTAssertEqual(q.rttGrade, .good)
-        XCTAssertEqual(q.samples.map(\.second), [29, 31]); XCTAssertEqual(q.axisMaxMs, 2000)
+        XCTAssertEqual(q.samples.map(\.second), [29, 31, 33]); XCTAssertEqual(q.axisMaxMs, 2000)
+        XCTAssertNil(q.samples[0].packetLossFraction); XCTAssertNil(q.samples[1].packetLossFraction)
+        XCTAssertEqual(q.samples[2].packetLossPercent, 2.004); XCTAssertEqual(q.samples[2].packetLossGrade, .fair)
+        XCTAssertEqual(try XCTUnwrap(q.samples[2].packetLossFraction), 0.02004, accuracy: 1e-12)
+        XCTAssertTrue(q.chartAccessibilitySummary.contains("2.0"))
+        for fields in [#","packetLossPercent":2"#, #","packetLossGrade":"fair""#, #","packetLossPercent":null,"packetLossGrade":"fair""#, #","packetLossPercent":2,"packetLossGrade":null"#] {
+            let sample = try JSONDecoder().decode(NetworkSample.self, from: Data((#"{"second":0,"rttMs":50,"grade":"good""# + fields + "}").utf8))
+            XCTAssertNil(sample.packetLossFraction)
+        }
         XCTAssertEqual(NetworkQuality.number(0, decimals: 1), "0.0")
         XCTAssertEqual(NetworkQuality.number(1234, decimals: 0), "1234")
         XCTAssertEqual(NetworkQuality.number(123.4, decimals: 1), "123.4")
@@ -84,6 +150,120 @@ final class ClientTests: XCTestCase {
         XCTAssertNil(try JSONDecoder().decode(Snapshot.self, from: Data(#"{"status":"disconnected","channels":[],"clients":[],"networkQuality":null}"#.utf8)).networkQuality)
     }
 
+    func testNetworkLossPaletteAndRawDrawingFractions() throws {
+        for (grade, loss, network) in [(NetworkGrade.good, 0x3DBE78, 0x3DBE78), (.fair, 0xFF8000, 0xE9B44C), (.poor, 0x581C87, 0xFF375F)] {
+            XCTAssertEqual(UIColor(grade.packetLossColor), UIColor(Color(hex: UInt32(loss))))
+            XCTAssertEqual(UIColor(grade.color), UIColor(Color(hex: UInt32(network))))
+        }
+        for (percent, fraction) in [(0.0, 0.0), (2.004, 0.02004), (10, 0.1), (100, 1), (120, 1), (0.0001, 0.000001)] {
+            let sample = NetworkSample(second: 0, rttMs: 50, grade: .good, packetLossPercent: percent, packetLossGrade: .poor)
+            XCTAssertEqual(try XCTUnwrap(sample.packetLossFraction), fraction, accuracy: 1e-12)
+            XCTAssertEqual(sample.packetLossPercent, percent)
+        }
+        for percent: Double? in [nil, .nan, .infinity, -1] {
+            XCTAssertNil(NetworkSample(second: 0, rttMs: 50, grade: .good, packetLossPercent: percent, packetLossGrade: .poor).packetLossFraction)
+        }
+        XCTAssertNil(NetworkSample(second: 0, rttMs: 50, grade: .good, packetLossPercent: 2).packetLossFraction)
+    }
+
+    @MainActor func testNetworkHistoryHardEdgesAndNativeStateChanges() async throws {
+        var quality = NetworkQuality(axisMaxMs: 200, nowSecond: 29)
+        quality.samples = (0..<30).filter { $0 != 14 }.map { second in
+            let percent: Double? = [0: 0, 1: 2, 2: 10, 3: 100, 4: 2, 5: 120, 7: -1,
+                8: .nan, 9: .infinity, 10: 2, 11: 0.0001, 13: 100, 15: 50][second] ?? (second == 6 ? nil : 10)
+            return NetworkSample(second: UInt64(second), rttMs: second == 4 ? 150 : second == 13 ? 0 : second == 15 ? 2 : 50,
+                grade: second == 4 ? .fair : .good, packetLossPercent: percent,
+                packetLossGrade: second == 6 || second == 10 ? nil : second == 1 || second == 4 ? .fair : .poor)
+        }
+        let colors = [[61,190,120], [233,180,76], [255,55,95], [255,128,0], [88,28,135]]
+        let host = UIHostingController(rootView: NetworkQualityPanel(quality: quality).chart.frame(width: 366, height: 240).background(Palette.bottom).ignoresSafeArea())
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 366, height: 240))
+        window.rootViewController = host; window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+        func render(_ name: String) async throws -> (UIImage, [UInt8], Int, Int) {
+            host.rootView = NetworkQualityPanel(quality: quality).chart.frame(width: 366, height: 240).background(Palette.bottom).ignoresSafeArea()
+            try await Task.sleep(nanoseconds: 200_000_000)
+            host.view.layoutIfNeeded()
+            let image = UIGraphicsImageRenderer(size: host.view.bounds.size).image { _ in host.view.drawHierarchy(in: host.view.bounds, afterScreenUpdates: true) }
+            let attachment = XCTAttachment(image: image); attachment.name = name; attachment.lifetime = .keepAlways; add(attachment)
+            try image.pngData()?.write(to: FileManager.default.temporaryDirectory.appendingPathComponent(name + ".png"))
+            let cg = try XCTUnwrap(image.cgImage)
+            let context = try XCTUnwrap(CGContext(data: nil, width: cg.width, height: cg.height, bitsPerComponent: 8, bytesPerRow: cg.width * 4, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+            context.draw(cg, in: CGRect(x: 0, y: 0, width: cg.width, height: cg.height))
+            let bytes = Array(UnsafeBufferPointer(start: try XCTUnwrap(context.data).assumingMemoryBound(to: UInt8.self), count: cg.width * cg.height * 4))
+            return (image, bytes, cg.width, cg.height)
+        }
+        func matches(_ bytes: [UInt8], _ width: Int, _ x: Int, _ y: Int, _ color: [Int]) -> Bool {
+            (0..<3).allSatisfy { abs(Int(bytes[(y * width + x) * 4 + $0]) - color[$0]) <= 4 }
+        }
+        func bars(_ bytes: [UInt8], _ width: Int, _ height: Int, _ scale: CGFloat) -> [ClosedRange<Int>] {
+            let y = height - Int(scale) - 2
+            var ranges: [ClosedRange<Int>] = []
+            var start: Int?
+            for x in 0...width {
+                let filled = x < width && colors.contains { matches(bytes, width, x, y, $0) }
+                if filled && start == nil { start = x }
+                if !filled, let left = start { ranges.append(left...(x - 1)); start = nil }
+            }
+            return ranges
+        }
+        let (image, bytes, width, height) = try await render("loss-history-normal")
+        let ranges = bars(bytes, width, height, image.scale)
+        XCTAssertEqual(ranges.count, quality.samples.count)
+        guard ranges.count == quality.samples.count else { return }
+        for (sample, range) in zip(quality.samples, ranges) {
+            let x = (range.lowerBound + range.upperBound) / 2
+            let latency = sample.grade == .fair ? colors[1] : colors[0]
+            let loss = sample.packetLossGrade == .fair ? colors[3] : colors[4]
+            let rows = (0..<height).filter { y in colors.contains { matches(bytes, width, x, y, $0) } }
+            let first = try XCTUnwrap(rows.first), last = try XCTUnwrap(rows.last)
+            let p = sample.packetLossFraction ?? 0
+            let count = last - first + 1
+            if p == 0 {
+                XCTAssertTrue(rows.allSatisfy { matches(bytes, width, x, $0, latency) }, "Fallback/zero sample \(sample.second)")
+            } else if p == 1 {
+                XCTAssertTrue(rows.allSatisfy { matches(bytes, width, x, $0, loss) }, "Full-loss sample \(sample.second)")
+            } else {
+                let boundary = Double(last + 1) - Double(count) * p
+                for y in first...last where abs(Double(y) + 0.5 - boundary) > 1.5 {
+                    XCTAssertTrue(matches(bytes, width, x, y, Double(y) + 0.5 < boundary ? latency : loss), "Hard edge sample \(sample.second), y=\(y), boundary=\(boundary)")
+                }
+                let lossRows = rows.filter { matches(bytes, width, x, $0, loss) }.count
+                XCTAssertEqual(Double(lossRows), Double(count) * p, accuracy: 1.5, "Raw ratio sample \(sample.second)")
+            }
+            if sample.second == 3 {
+                XCTAssertFalse(matches(bytes, width, range.lowerBound, first, loss), "Rounded top corner")
+                XCTAssertTrue(matches(bytes, width, range.lowerBound, last - 1, loss), "Flat baseline")
+            }
+            if sample.second == 13 { XCTAssertLessThanOrEqual(count, Int(image.scale) + 1) }
+        }
+        let firstCenter = (ranges[0].lowerBound + ranges[0].upperBound) / 2
+        let secondCenter = (ranges[1].lowerBound + ranges[1].upperBound) / 2
+        let gapCenter = secondCenter + (secondCenter - firstCenter) * 13
+        XCTAssertFalse(colors.contains { matches(bytes, width, gapCenter, height - Int(image.scale) - 2, $0) }, "Missing second stays empty")
+        quality.nowSecond = 30
+        let (advancedImage, advancedBytes, advancedWidth, advancedHeight) = try await render("loss-history-advanced")
+        let advancedRanges = bars(advancedBytes, advancedWidth, advancedHeight, advancedImage.scale)
+        XCTAssertEqual(advancedRanges.count, ranges.count - 1)
+        let advancedLast = try XCTUnwrap(advancedRanges.last), originalLast = try XCTUnwrap(ranges.last)
+        XCTAssertEqual(Double(advancedLast.lowerBound + advancedLast.upperBound) / 2,
+            Double(originalLast.lowerBound + originalLast.upperBound) / 2 - Double(secondCenter - firstCenter), accuracy: 2)
+        quality.axisMaxMs = 500
+        let (_, scaledBytes, scaledWidth, scaledHeight) = try await render("loss-history-axis")
+        let scaledRanges = bars(scaledBytes, scaledWidth, scaledHeight, image.scale)
+        let scaledLast = try XCTUnwrap(scaledRanges.last)
+        let scaledX = (scaledLast.lowerBound + scaledLast.upperBound) / 2
+        let scaledRows = (0..<scaledHeight).filter { y in colors.contains { matches(scaledBytes, scaledWidth, scaledX, y, $0) } }
+        XCTAssertLessThan(scaledRows.count, Int(Double(height) * 0.12))
+        XCTAssertEqual(Double(scaledRows.filter { matches(scaledBytes, scaledWidth, scaledX, $0, colors[4]) }.count), Double(scaledRows.count) * 0.1, accuracy: 1.5)
+        quality.samples = []
+        let (emptyImage, emptyBytes, emptyWidth, emptyHeight) = try await render("loss-history-disconnected")
+        XCTAssertTrue(bars(emptyBytes, emptyWidth, emptyHeight, emptyImage.scale).isEmpty)
+        quality = NetworkQuality(axisMaxMs: 100, nowSecond: 0, samples: [NetworkSample(second: 0, rttMs: 50, grade: .good, packetLossPercent: 100, packetLossGrade: .poor)])
+        let (restoredImage, restoredBytes, restoredWidth, restoredHeight) = try await render("loss-history-reconnected")
+        XCTAssertEqual(bars(restoredBytes, restoredWidth, restoredHeight, restoredImage.scale).count, 1)
+    }
+
     @MainActor func testNetworkQualityNativeLayoutsAndColors() async throws {
         let originalLanguage = UserDefaults.standard.object(forKey: AppLanguage.preferenceKey)
         defer {
@@ -92,14 +272,14 @@ final class ClientTests: XCTestCase {
         }
         for language in [AppLanguage.english, .simplifiedChinese] {
             UserDefaults.standard.set(language.rawValue, forKey: AppLanguage.preferenceKey)
-            for (width, category, long) in [(CGFloat(390), ContentSizeCategory.large, false), (320, .large, true), (320, .accessibilityExtraExtraExtraLarge, true)] {
+            for (width, category, long) in [(CGFloat(390), ContentSizeCategory.large, false), (320, .large, true), (240, .large, true), (320, .accessibilityExtraExtraExtraLarge, true)] {
                 var q = NetworkQuality(rttMs: long ? 1234 : 42, deviationMs: long ? 1234.5 : 6, packetLossPercent: 4,
                     rttGrade: long ? .poor : .good, deviationGrade: long ? .poor : .good, packetLossGrade: .poor, iconGrade: .poor)
                 q.axisMaxMs = 2000; q.nowSecond = 29
                 q.samples = (0..<30).filter { $0 != 24 }.map { second -> NetworkSample in
                     let rtt: Double = second == 20 ? 1234 : second == 25 ? 150 : 42
                     let grade: NetworkGrade = second == 20 ? .poor : second == 25 ? .fair : .good
-                    return NetworkSample(second: UInt64(second), rttMs: rtt, grade: grade)
+                    return NetworkSample(second: UInt64(second), rttMs: rtt, grade: grade, packetLossPercent: second == 25 ? 2 : 10, packetLossGrade: second == 25 ? .fair : .poor)
                 }
                 let view = VStack(spacing: 0) { NetworkQualityPanel(quality: q); Spacer(minLength: 0) }
                     .frame(height: 333, alignment: .top).clipped().frame(maxHeight: .infinity, alignment: .top)
@@ -230,7 +410,8 @@ final class ClientTests: XCTestCase {
             try image.pngData()?.write(to: FileManager.default.temporaryDirectory.appendingPathComponent(screenshot + ".png"))
         }
         try checkDrawerHeader(expanded: false, screenshot: "drawer-network-collapsed")
-        let homeScrolls = scrolls(host.view)
+        let collapsedDrawerPane = try XCTUnwrap(drawer(host.view))
+        let homeScrolls = scrolls(host.view).filter { !$0.isDescendant(of: collapsedDrawerPane) }
         XCTAssertEqual(homeScrolls.count, 3)
         guard homeScrolls.count == 3 else { return }
         let stack = try XCTUnwrap(navigation(host))
@@ -253,6 +434,17 @@ final class ClientTests: XCTestCase {
         try activate(L10n.string("voice_drawer_expand"))
         try await Task.sleep(nanoseconds: 500_000_000)
         try checkDrawerHeader(expanded: true, screenshot: "drawer-network-expanded")
+        let volumePane = try XCTUnwrap(drawer(host.view))
+        let volumeFrame = volumePane.frame
+        try activate(L10n.string("volume_title"))
+        try await Task.sleep(nanoseconds:150_000_000)
+        XCTAssertEqual(volumePane.frame,volumeFrame,"Entering volumes preserves the drawer position")
+        let volumeScroll = try XCTUnwrap(scrolls(volumePane).first)
+        volumeScroll.setContentOffset(CGPoint(x:0,y:100),animated:false)
+        XCTAssertEqual(volumePane.frame,volumeFrame,"Volume content scrolls inside the existing drawer")
+        try activate(L10n.string("action_back"))
+        try await Task.sleep(nanoseconds:150_000_000)
+        XCTAssertEqual(volumePane.frame,volumeFrame,"Returning preserves the drawer position")
         let originalFiles = client.channelFiles
         client.channelFiles = ChannelFilesState(open: true, server: "fixture", channel: 20, channelName: "Scroll channel 20", path: "/", status: "ready",
             entries: (0..<40).map { ChannelFileEntry(name: "频道文件 \($0).pdf", size: 0, timestamp: 1700000000, directory: false, icon: "file-text") })
@@ -477,7 +669,7 @@ final class ClientTests: XCTestCase {
         let decoded = try JSONDecoder().decode(ChannelFilesState.self, from: data)
         XCTAssertEqual(decoded.entries.first?.size, 0)
         XCTAssertEqual(decoded.channel, 7)
-        let view = ChannelFilesDrawer(client: client).frame(height: 340).foregroundStyle(.white)
+        let view = ChannelFilesDrawer(client: client).frame(height: 340).foregroundStyle(Color(hex:0xF2F3F5))
             .background(Palette.bottom).tint(Palette.accent).environment(\.locale, Locale(identifier: "zh-Hans"))
         let host = UIHostingController(rootView: AnyView(view))
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 320, height: 568))

@@ -4,7 +4,7 @@
 // Licenses: licenses/tsclientlib-MIT.txt and licenses/tsclientlib-APACHE.txt.
 // Local changes: ClientId import; omit disabled audiopus-unstable code and upstream
 // test harness; keep newly queued packets alive past the historical PLC cutoff;
-// smooth queue catch-up and expose receive diagnostics. Queue thresholds,
+// smooth queue catch-up and expose receive diagnostics and mutable pre-mix PCM. Queue thresholds,
 // reordering, FEC/PLC and end-marker behavior otherwise stay upstream.
 //! Handle receiving audio.
 //!
@@ -105,6 +105,7 @@ pub struct AudioQueue {
     span: Span,
     decoder: Decoder,
     pub volume: f32,
+    current_volume: Option<f32>,
     /// The id of the next packet that should be decoded.
     ///
     /// Used to check for packet loss.
@@ -210,6 +211,7 @@ impl AudioQueue {
             span: Span::current(),
             decoder,
             volume: 1.0,
+            current_volume: None,
             next_id: data.id(),
             whispering,
             packet_buffer: Default::default(),
@@ -409,7 +411,7 @@ impl AudioQueue {
         &mut self,
         len: usize,
         diagnostics: &mut ReceiveDiagnostics,
-    ) -> Result<(&[f32], bool)> {
+    ) -> Result<(&mut [f32], bool)> {
         let _span = self.span.clone().entered();
         if self.buffering_samples > 0 {
             if self.buffered_for_samples >= MAX_BUFFER_TIME {
@@ -428,7 +430,7 @@ impl AudioQueue {
                     buffering_samples = self.buffering_samples,
                     "Buffering"
                 );
-                return Ok((&[], false));
+                return Ok((&mut [], false));
             }
         }
         // Need to refill buffer
@@ -445,7 +447,7 @@ impl AudioQueue {
             if let Some(packet) = self.packet_buffer.pop_front() {
                 if packet.packet.data().data().data().len() <= 1 {
                     // End of stream
-                    return Ok((&self.decoded_buffer, true));
+                    return Ok((&mut self.decoded_buffer, true));
                 }
 
                 self.packet_buffer_samples -= packet.samples;
@@ -519,7 +521,7 @@ impl AudioQueue {
         }
 
         self.decoded_pos = len;
-        Ok((&self.decoded_buffer[..len], false))
+        Ok((&mut self.decoded_buffer[..len], false))
     }
 }
 
@@ -593,7 +595,7 @@ impl<Id: Clone + Debug + Eq + Hash + PartialEq> AudioHandler<Id> {
     /// function is called. The queue volume is applied after calling the preprocessor.
     ///
     /// Returns the clients that are not talking anymore.
-    pub fn fill_buffer_with_proc<F: FnMut(&Id, &[f32])>(
+    pub fn fill_buffer_with_proc<F: FnMut(&Id, &mut [f32])>(
         &mut self,
         buf: &mut [f32],
         mut handle: F,
@@ -609,7 +611,12 @@ impl<Id: Clone + Debug + Eq + Hash + PartialEq> AudioHandler<Id> {
                 continue;
             }
 
-            let vol = queue.volume;
+            let vol = if queue.volume.is_finite() {
+                queue.volume.clamp(0., 2.)
+            } else {
+                1.
+            };
+            let mut current_volume = queue.current_volume.unwrap_or(vol);
             match queue.get_next_data(buf.len(), &mut self.diagnostics) {
                 Err(error) => {
                     self.diagnostics.decode_errors += 1;
@@ -617,14 +624,20 @@ impl<Id: Clone + Debug + Eq + Hash + PartialEq> AudioHandler<Id> {
                 }
                 Ok((r, is_end)) => {
                     handle(id, r);
-                    for i in 0..r.len() {
-                        buf[i] += r[i] * vol;
+                    for (input, output) in r.chunks_exact(2).zip(buf.chunks_exact_mut(2)) {
+                        current_volume += (vol - current_volume) * 0.0020811647; // 10 ms at 48 kHz.
+                        if (current_volume - vol).abs() < 1e-5 {
+                            current_volume = vol;
+                        }
+                        output[0] += input[0] * current_volume;
+                        output[1] += input[1] * current_volume;
                     }
                     if is_end {
                         to_remove.push(id.clone());
                     }
                 }
             }
+            queue.current_volume = Some(current_volume);
         }
 
         for id in &to_remove {
@@ -674,6 +687,66 @@ impl<Id: Clone + Debug + Eq + Hash + PartialEq> AudioHandler<Id> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn manual_volume_is_after_processing_smooth_and_restored_on_new_queues() {
+        use audiopus::{coder::Encoder, Application};
+        use tsproto_packets::packets::{Direction, OutAudio};
+        let encoder = Encoder::new(SAMPLE_RATE, CHANNELS, Application::Audio).unwrap();
+        let mut encoded = [0; 1275];
+        let length = encoder
+            .encode(&[100; USUAL_FRAME_SIZE * CHANNEL_NUM], &mut encoded)
+            .unwrap();
+        let packet = |id, data: &[u8]| {
+            InAudioBuf::try_new(
+                Direction::S2C,
+                OutAudio::new(&AudioData::S2C {
+                    id,
+                    from: 7,
+                    codec: CodecType::OpusVoice,
+                    data,
+                })
+                .into_vec(),
+            )
+            .unwrap()
+        };
+        let mut audio = AudioHandler::<ClientId>::new();
+        for percent in [0, 100, 200] {
+            audio
+                .handle_packet(ClientId(7), packet(0, &encoded[..length]))
+                .unwrap();
+            audio.get_mut_queues().get_mut(&ClientId(7)).unwrap().volume = percent as f32 / 100.;
+            let mut output = [0.; USUAL_FRAME_SIZE * CHANNEL_NUM];
+            audio.fill_buffer_with_proc(&mut output, |_, pcm| {
+                // Stand in for AGC; the callback receives the original decoded signal.
+                assert!(pcm.iter().all(|v| v.abs() < 0.02));
+                for pair in pcm.chunks_exact_mut(2) {
+                    pair.copy_from_slice(&[0.1, -0.05]);
+                }
+            });
+            assert!((output[100] - percent as f32 / 1000.).abs() < 1e-5);
+            assert!((output[100] + output[101] * 2.).abs() < 1e-5);
+            let queue = audio.get_mut_queues().get_mut(&ClientId(7)).unwrap();
+            queue.volume = 1.;
+            audio
+                .handle_packet(ClientId(7), packet(1, &encoded[..length]))
+                .unwrap();
+            audio.handle_packet(ClientId(7), packet(2, &[])).unwrap();
+            output.fill(0.);
+            let mut input_was_seen = false;
+            audio.fill_buffer_with_proc(&mut output, |_, pcm| {
+                input_was_seen = !pcm.is_empty();
+                pcm.fill(0.1);
+            });
+            assert!(input_was_seen);
+            assert!((output[0] - percent as f32 / 1000.).abs() < 0.001);
+            assert!((output[output.len() - 2] - 0.1).abs() < 0.015);
+            for _ in 0..4 {
+                audio.fill_buffer(&mut [0.; USUAL_FRAME_SIZE * CHANNEL_NUM]);
+            }
+            assert!(audio.get_queues().is_empty());
+        }
+    }
 
     #[test]
     fn catchup_keeps_stereo_boundaries_without_periodic_sample_jumps() {

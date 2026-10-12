@@ -66,6 +66,9 @@ struct Member: Decodable, Identifiable, Equatable {
     let muted: Bool
     let deafened: Bool
     let speaking: Bool
+    var volumePercent: Int? = nil
+    var volumeToken: String? = nil
+    var volumeRowId: String { volumeToken ?? "client:\(id)" }
     var conversation: String? { uid.map { "client:\($0)" } }
 }
 struct Snapshot: Decodable, Equatable {
@@ -84,6 +87,13 @@ struct NetworkSample: Decodable, Equatable {
     let second: UInt64
     let rttMs: Double
     let grade: NetworkGrade
+    var packetLossPercent: Double? = nil
+    var packetLossGrade: NetworkGrade? = nil
+
+    var packetLossFraction: Double? {
+        guard let packetLossPercent, packetLossPercent.isFinite, packetLossPercent >= 0, packetLossGrade != nil else { return nil }
+        return min(packetLossPercent, 100) / 100
+    }
 }
 struct NetworkQuality: Decodable, Equatable {
     var rttMs: Double?
@@ -111,6 +121,13 @@ struct NetworkQuality: Decodable, Equatable {
     }
     var axisText: String { Self.axisNumber(axisMaxMs) }
     var midAxisText: String { Self.axisNumber(axisMaxMs / 2) }
+    var chartAccessibilitySummary: String {
+        guard !samples.isEmpty else { return L10n.string("network_unavailable") }
+        let history = samples.filter { $0.second <= nowSecond && nowSecond - $0.second < 30 && $0.packetLossFraction != nil }.map {
+            L10n.format("network_chart_sample_loss", Int(nowSecond - $0.second), Self.number($0.packetLossPercent, decimals: 1))
+        }
+        return ([L10n.format("network_chart_summary", samples.count, axisText)] + history).joined(separator: "; ")
+    }
     var accessibilitySummary: String {
         rttMs == nil ? L10n.string("network_unavailable") : L10n.format("network_summary", latencyText, deviationText, lossText)
     }
@@ -225,6 +242,7 @@ private func coreChanged(_ context: Int) {
     private var avatarRoot: URL?
     @Published private(set) var microphoneMuted = false
     @Published private(set) var deafened = false
+    @Published private(set) var receiveAgc = true
     @Published private(set) var noiseSuppression = NoiseSuppressionMode.stored(in: .standard)
     @Published private(set) var appliedNoise = NoiseSuppressionMode.rnnoise
     @Published private(set) var audioProcessingStatus = "switching"
@@ -544,6 +562,7 @@ private func coreChanged(_ context: Int) {
             if let cache = envelope["fileCache"], !(cache is NSNull) {
                 fileCache = try JSONDecoder().decode(FileCacheState.self, from: JSONSerialization.data(withJSONObject: cache))
             }
+            if let receive = envelope["receiveAudio"] as? [String: Any], let agc = receive["agc"] as? Bool { receiveAgc = agc }
             let next = try JSONDecoder().decode(Snapshot.self, from: JSONSerialization.data(withJSONObject: envelope["snapshot"]!))
             guard acceptingConnection || next.status == "disconnected" else { return }
             if let value = envelope["unread"], !(value is NSNull) {
@@ -670,6 +689,16 @@ private func coreChanged(_ context: Int) {
     func setAppActive(_ active: Bool) {
         do { try send(["type": "set_app_active", "active": active]) }
         catch { self.error = error.localizedDescription }
+    }
+    func setReceiveAgc(_ enabled: Bool) {
+        do { try send(["type": "set_receive_agc", "enabled": enabled]) }
+        catch { self.error = L10n.withDetail("error_generic", error.localizedDescription) }
+    }
+    func setUserVolume(server: String, member: Member, percent: Int) {
+        guard let token = member.volumeToken else { return }
+        do { try send(["type": "set_user_volume", "server": server, "client": member.id,
+                       "uid": member.uid as Any? ?? NSNull(), "token": token, "percent": percent]) }
+        catch { self.error = L10n.withDetail("error_generic", error.localizedDescription) }
     }
     func setNoiseSuppression(_ mode: NoiseSuppressionMode) {
         audioRequest += 1

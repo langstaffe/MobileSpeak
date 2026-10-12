@@ -18,6 +18,7 @@ mod channel_files;
 mod network_diagnostics;
 mod network_quality;
 mod playback;
+mod receive_audio;
 // Fixed upstream receive module with the queued-packet recovery patch.
 #[allow(dead_code)]
 mod tsclientlib_audio;
@@ -79,6 +80,16 @@ pub enum Command {
         mode: NoiseSuppressionMode,
         #[serde(default)]
         request_id: u64,
+    },
+    SetReceiveAgc {
+        enabled: bool,
+    },
+    SetUserVolume {
+        server: String,
+        client: u16,
+        uid: Option<String>,
+        token: String,
+        percent: u16,
     },
     SendChannelMessage {
         request_id: String,
@@ -225,6 +236,23 @@ impl Command {
             }
             Self::Join { channel, password } if *channel == 0 || password.len() > 1024 => {
                 Err("Invalid channel")
+            }
+            Self::SetUserVolume {
+                server,
+                client,
+                uid,
+                token,
+                percent,
+            } if !receive_audio::valid_identity(server)
+                || *client == 0
+                || uid
+                    .as_ref()
+                    .is_some_and(|u| !receive_audio::valid_identity(u))
+                || token.is_empty()
+                || token.len() > 64
+                || *percent > 200 =>
+            {
+                Err("Invalid user volume")
             }
             Self::SendChannelMessage {
                 request_id,
@@ -491,6 +519,7 @@ struct Output {
     snapshot: Value,
     network_quality: Option<Value>,
     chat_snapshot: Option<Value>,
+    receive_audio: Value,
     channel_files: Value,
     file_cache: Value,
     unread: Value,
@@ -724,6 +753,7 @@ fn snapshot(
     audio: &AudioHandler,
     sending: bool,
     storage: Option<&Path>,
+    receive: &receive_audio::Session,
 ) {
     let Ok(state) = con.get_state() else { return };
     // initserver arrives before our client and channel lists. Keep connecting
@@ -784,7 +814,9 @@ fn snapshot(
             let channel_group_icon = state.channel_groups.get(&client.channel_group)
                 .filter(|group| group.icon.0 != 0)
                 .map(|group| group_icon_snapshot(group.id.0, &group.name, group.icon.0, storage, &server_id));
+            let (volume, volume_token) = receive.fields(client.id);
             json!({
+                "volumePercent":volume,"volumeToken":volume_token,
                 "id":client.id.0,"channel":client.channel.0,"uid":uid,"name":client.name,
                 "avatarHash":client.avatar_hash,"avatarPath":avatar_path,
                 "badges":badges,"serverGroupIcons":server_group_icons,"channelGroupIcon":channel_group_icon,
@@ -830,6 +862,7 @@ fn load_chat(root: &Path, server: &str) -> Result<ChatStore, String> {
 struct PersistJob {
     path: PathBuf,
     data: Vec<u8>,
+    error_code: &'static str,
 }
 fn persist_chat(
     tx: &std_mpsc::Sender<PersistJob>,
@@ -844,6 +877,7 @@ fn persist_chat(
         let _ = tx.send(PersistJob {
             path: chat_path(root, server),
             data,
+            error_code: "chat_history_save_failed",
         });
     }
 }
@@ -1352,6 +1386,7 @@ async fn session(
     app_active: &mut bool,
     processing: &mut AudioProcessingState,
     processor: &mut audio_processing::Processor,
+    receive_prefs: &mut receive_audio::Preferences,
     avatar_store: &Arc<avatar::Store>,
     files: &mut channel_files::Files,
     files_tx: &mpsc::UnboundedSender<channel_files::Update>,
@@ -1401,6 +1436,8 @@ async fn session(
         connection_started.elapsed().as_millis()
     );
     let mut audio = AudioHandler::new();
+    let mut receive = receive_audio::Session::default();
+    let mut mix_limiter = receive_audio::Limiter::default();
     let mut receive_traces = HashMap::<tsclientlib::ClientId, playback::ReceiveTrace>::new();
     let audio_trace_start = Instant::now();
     invalidate_capture(processor, capture_epoch);
@@ -1491,7 +1528,7 @@ async fn session(
             } => {
                 let speaking = voice.speaking();
                 let result = voice.expire(Instant::now(), |codec, data| send_voice(&mut con, codec, data));
-                if speaking != voice.speaking() { snapshot(&con, out, &audio, voice.speaking(), storage.as_deref()); }
+                if speaking != voice.speaking() { snapshot(&con, out, &audio, voice.speaking(), storage.as_deref(), &receive); }
                 result?;
             },
             Ok(_) = refill.recv(&mut refill_byte) => {
@@ -1501,13 +1538,13 @@ async fn session(
                     playback_revision = revision;
                     last_refill = Instant::now();
                     audio.reset(); receive_traces.clear(); playback.clear();
-                    snapshot(&con, out, &audio, voice.speaking(), storage.as_deref());
+                    snapshot(&con, out, &audio, voice.speaking(), storage.as_deref(), &receive);
                 }
                 if subscribed && !output_muted && playback.active.load(Ordering::Acquire) {
                     let started = Instant::now();
                     max_refill_gap_ms = max_refill_gap_ms.max(started.duration_since(last_refill).as_millis());
                     last_refill = started;
-                    let ended = playback.refill(&mut audio);
+                    let ended = playback.refill_with_proc(&mut audio, |id, pcm| receive.process(id, pcm, receive_prefs.agc), |pcm| mix_limiter.process(pcm));
                     max_refill_work_us = max_refill_work_us.max(started.elapsed().as_micros());
                     ended_queues += u64::from(!ended.is_empty());
                     playback.prepared(revision);
@@ -1522,7 +1559,7 @@ async fn session(
                                 trace.reordered_or_duplicate, trace.rejected);
                         }
                     }
-                    if !ended.is_empty() { snapshot(&con, out, &audio, voice.speaking(), storage.as_deref()); }
+                    if !ended.is_empty() { snapshot(&con, out, &audio, voice.speaking(), storage.as_deref(), &receive); }
                 }
             },
             _ = &mut deadline, if first_connection => return Err("Connection timed out after 30 seconds".into()),
@@ -1535,6 +1572,13 @@ async fn session(
                 Some(Ok(StreamItem::BookEvents(events))) => {
                     #[cfg(feature = "network-diagnostics")]
                     if network_trace.is_none() { network_trace = network_diagnostics::Diagnostics::attach(&mut con); }
+                    for event in &events {
+                        if let Event::PropertyRemoved { id: tsclientlib::events::PropertyId::Client(id), .. } = event {
+                            receive.remove(*id); audio.get_mut_queues().remove(id);
+                        }
+                    }
+                    receive.sync(&con, receive_prefs, &mut audio);
+                    for (id, queue) in audio.get_mut_queues() { queue.volume = receive.fields(*id).0 as f32 / 100.; }
                     files.observe(&con, out);
                     avatar.observe(avatar_store, out);
                     let channel = con.get_state().ok().and_then(|state| state.clients.get(&state.own_client).map(|me| (me.channel, state.channels.get(&me.channel).map(|channel| channel.codec))));
@@ -1599,7 +1643,7 @@ async fn session(
                         publish_chat(out, &chats, storage.as_deref(), current_server.as_deref());
                     }
                     out.lock().unwrap().set_unread(unread.snapshot());
-                    snapshot(&con, out, &audio, voice.speaking(), storage.as_deref());
+                    snapshot(&con, out, &audio, voice.speaking(), storage.as_deref(), &receive);
                     if initial_connection {
                         diagnostic!("Connection startup phase=snapshot_published total_ms={}", connection_started.elapsed().as_millis());
                     }
@@ -1624,7 +1668,7 @@ async fn session(
                         tsclientlib::AudioEvent::CanReceiveAudio(false) => { audio.reset(); receive_traces.clear(); playback.clear(); playback.request(); },
                         _ => {},
                     }
-                    snapshot(&con, out, &audio, voice.speaking(), storage.as_deref());
+                    snapshot(&con, out, &audio, voice.speaking(), storage.as_deref(), &receive);
                 },
                 Some(Ok(StreamItem::Audio(packet))) => {
                     if !output_muted && playback.active.load(Ordering::Acquire) {
@@ -1638,12 +1682,14 @@ async fn session(
                         let now = Instant::now();
                         match audio.handle_packet(from, packet) {
                             Ok(started) => {
+                                if !end_marker { receive.prepare_audio(from); }
+                                if let Some(queue) = audio.get_mut_queues().get_mut(&from) { queue.volume = receive.fields(from).0 as f32 / 100.; }
                                 if started.is_some() {
                                     receive_traces.insert(from, playback::ReceiveTrace::new(now));
                                     diagnostic!("Playback receive_start at_ms={} client={} sequence={}", audio_trace_start.elapsed().as_millis(), from.0, sequence);
                                 }
                                 if let Some(trace) = receive_traces.get_mut(&from) { trace.received(sequence, end_marker, now); }
-                                if started.is_some() { snapshot(&con, out, &audio, voice.speaking(), storage.as_deref()); }
+                                if started.is_some() { snapshot(&con, out, &audio, voice.speaking(), storage.as_deref(), &receive); }
                             },
                             Err(error) => {
                                 rejected_packets += 1; last_packet_error = error.to_string();
@@ -1772,6 +1818,7 @@ async fn session(
                         out.lock().unwrap().event(json!({"type":"avatar_sync","status":"idle","detail":null}));
                     }
                     subscribed = false;
+                    receive.clear();
                     media_active.clear();
                     media_failed.clear();
                     transfers.clear();
@@ -1787,7 +1834,7 @@ async fn session(
             Some((request, result)) = media_rx.recv() => {
                 media_active.remove(&request.key);
                 if result.is_err() { media_failed.insert(request.key); }
-                snapshot(&con, out, &audio, voice.speaking(), storage.as_deref());
+                snapshot(&con, out, &audio, voice.speaking(), storage.as_deref(), &receive);
                 publish_chat(out, &chats, storage.as_deref(), current_server.as_deref());
                 schedule_media(&mut con, storage.as_deref(), &mut media_active, &mut media_failed, &mut transfers);
             },
@@ -1800,7 +1847,7 @@ async fn session(
             Some((request, result)) = badge_rx.recv() => {
                 badge_active.remove(&request.key);
                 if result.is_err() { badge_failed.insert(request.key); }
-                snapshot(&con, out, &audio, voice.speaking(), storage.as_deref());
+                snapshot(&con, out, &audio, voice.speaking(), storage.as_deref(), &receive);
                 schedule_badges(&con, storage.as_deref(), &mut badge_active, &badge_failed, &badge_tx);
             },
             received = rx.recv() => match received {
@@ -1842,6 +1889,7 @@ async fn session(
                         out.lock().unwrap().set_network_quality(quality);
                     }
                     *app_active = active;
+                    if !active { receive_prefs.flush(storage.as_deref(), persist_tx, out, true); }
                     unread.set_app_active(active);
                     out.lock().unwrap().set_unread(unread.snapshot());
                 },
@@ -1855,7 +1903,7 @@ async fn session(
                     invalidate_capture(processor, capture_epoch); let _ = voice.interrupt(|codec, data| send_voice(&mut con, codec, data));
                     while pcm.try_recv().is_ok() {}
                     audio.reset(); receive_traces.clear(); playback.clear(); playback.request();
-                    snapshot(&con, out, &audio, false, storage.as_deref());
+                    snapshot(&con, out, &audio, false, storage.as_deref(), &receive);
                     let handle = request.send_with_result(&mut con)?;
                     operations.insert(handle, PendingOperation::Other("join_channel_failed"));
                 },
@@ -1864,7 +1912,7 @@ async fn session(
                     if output_muted != output { audio.reset(); receive_traces.clear(); playback.clear(); playback.request(); }
                     input_muted = input; output_muted = output;
                     while pcm.try_recv().is_ok() {}
-                    snapshot(&con, out, &audio, voice.speaking(), storage.as_deref());
+                    snapshot(&con, out, &audio, voice.speaking(), storage.as_deref(), &receive);
                     if subscribed {
                         let update = con.get_state()?.client_update()
                             .set_input_muted(input)
@@ -1880,7 +1928,14 @@ async fn session(
                 Some(Command::CaptureStopped) => {
                     invalidate_capture(processor, capture_epoch); let _ = voice.interrupt(|codec, data| send_voice(&mut con, codec, data));
                     while pcm.try_recv().is_ok() {}
-                    snapshot(&con, out, &audio, false, storage.as_deref());
+                    snapshot(&con, out, &audio, false, storage.as_deref(), &receive);
+                },
+                Some(Command::SetReceiveAgc { enabled }) => { receive_prefs.set_agc(enabled, out); },
+                Some(Command::SetUserVolume { server, client, uid, token, percent }) => {
+                    if !subscribed { report_code(out, "connection_recovering", None); continue; }
+                    if let Err(code) = receive.set_volume(&server, client, uid.as_deref(), &token, percent, receive_prefs) { report_code(out, code, None); }
+                    for (id, queue) in audio.get_mut_queues() { queue.volume = receive.fields(*id).0 as f32 / 100.; }
+                    snapshot(&con, out, &audio, voice.speaking(), storage.as_deref(), &receive);
                 },
                 Some(Command::SetNoiseSuppression { mode, request_id }) => { processing.request_id=request_id; processing.requested.noise=mode; processing.request(processor,out); },
                 Some(Command::SendChannelMessage { request_id, channel, message }) => {
@@ -1964,22 +2019,23 @@ async fn session(
                             Some(tsclientlib::Codec::OpusMusic)=>CodecType::OpusMusic,
                             _=>{
                                 invalidate_capture(processor, capture_epoch); let _=voice.interrupt(|codec,data|send_voice(&mut con,codec,data));
-                                input_muted=true;snapshot(&con,out,&audio,false,storage.as_deref());report_audio_muted(out,"legacy_codec",None);continue
+                                input_muted=true;snapshot(&con,out,&audio,false,storage.as_deref(), &receive);report_audio_muted(out,"legacy_codec",None);continue
                             }
                         };
                         let speaking=voice.speaking();
                         voice.process(frame,codec,Instant::now(),|codec,data|send_voice(&mut con,codec,data))?;
-                        if speaking!=voice.speaking(){snapshot(&con,out,&audio,voice.speaking(),storage.as_deref());}
+                        if speaking!=voice.speaking(){snapshot(&con,out,&audio,voice.speaking(),storage.as_deref(), &receive);}
                     },
                     audio_processing::Event::Gap{epoch}=>{
                         if epoch!=processor.epoch(){continue}
                         let _=voice.interrupt(|codec,data|send_voice(&mut con,codec,data));
-                        snapshot(&con,out,&audio,false,storage.as_deref());
+                        snapshot(&con,out,&audio,false,storage.as_deref(), &receive);
                     },
                     event=>{if matches!(event,audio_processing::Event::Applied{..}){voice.switched();}processing.completed(event,out);},
                 }
             },
             _ = clock.tick() => {
+                receive_prefs.flush(storage.as_deref(), persist_tx, out, false);
                 files.tick(&mut con, &mut operations, out);
                 if let Some(quality) = network.expire(Instant::now()) {
                     out.lock().unwrap().set_network_quality(quality);
@@ -2028,17 +2084,13 @@ impl Bridge {
         let (persist_tx, persist_rx) = std_mpsc::channel::<PersistJob>();
         std::thread::spawn(move || {
             while let Ok(first) = persist_rx.recv() {
-                let mut latest = HashMap::from([(first.path, first.data)]);
+                let mut latest = HashMap::from([(first.path, (first.data, first.error_code))]);
                 while let Ok(job) = persist_rx.try_recv() {
-                    latest.insert(job.path, job.data);
+                    latest.insert(job.path, (job.data, job.error_code));
                 }
-                for (path, data) in latest {
+                for (path, (data, error_code)) in latest {
                     if let Err(error) = atomic_write(&path, &data) {
-                        report_code(
-                            &persistence_output,
-                            "chat_history_save_failed",
-                            Some(error.to_string()),
-                        );
+                        report_code(&persistence_output, error_code, Some(error.to_string()));
                     }
                 }
             }
@@ -2052,6 +2104,9 @@ impl Bridge {
                 let refill = tokio::net::UnixDatagram::from_std(refill).unwrap();
                 let mut storage: Option<PathBuf> = None;
                 let mut app_active = false;
+                let mut receive_prefs = receive_audio::Preferences::default();
+                receive_prefs.publish(&worker_output);
+                let mut save_clock = tokio::time::interval(Duration::from_millis(100));
                 let mut processing = AudioProcessingState::default();
                 let mut processor = audio_processing::Processor::new();
                 let mut files = channel_files::Files::default();
@@ -2059,15 +2114,20 @@ impl Bridge {
                 files.publish(&worker_output);
                 loop {
                     let request = tokio::select! {
+                        _=save_clock.tick()=>{receive_prefs.flush(storage.as_deref(), &persist_tx, &worker_output, false);continue},
                         Some(update)=files_rx.recv()=>{files.update(update,&worker_output);continue},
                         event=processor.events.recv()=>{if let Some(event)=event{processing.completed(event,&worker_output);}continue},
                         request=rx.recv()=>match request{Some(r)=>r,None=>break},
                     };
                     match request {
-                        Command::Shutdown => break,
-                        Command::SetAppActive { active } => app_active = active,
+                        Command::Shutdown => { receive_prefs.flush(storage.as_deref(), &persist_tx, &worker_output, true); break; },
+                        Command::SetAppActive { active } => { app_active = active; if !active { receive_prefs.flush(storage.as_deref(), &persist_tx, &worker_output, true); } },
+                        Command::SetReceiveAgc { enabled } => receive_prefs.set_agc(enabled, &worker_output),
+                        Command::SetUserVolume { .. } => report_code(&worker_output, "receive_audio_context_changed", None),
                         Command::SetNoiseSuppression { mode, request_id } => {processing.request_id=request_id;processing.requested.noise=mode;processing.request(&processor,&worker_output);},
                         Command::Configure { storage: value } => {
+                            receive_prefs.flush(storage.as_deref(), &persist_tx, &worker_output, true);
+                            receive_prefs.load(Path::new(&value), &worker_output);
                             processor.configure(PathBuf::from(&value));
                             audio_models::remove_retired_model_cache(Path::new(&value));
                             storage = Some(PathBuf::from(value));
@@ -2088,6 +2148,7 @@ impl Bridge {
                                 &mut app_active,
                                 &mut processing,
                                 &mut processor,
+                                &mut receive_prefs,
                                 &worker_avatar_store,
                                 &mut files,
                                 &files_tx,
@@ -2096,7 +2157,7 @@ impl Bridge {
                             .catch_unwind()
                             .await
                             {
-                                Ok(Ok(true)) => break,
+                                Ok(Ok(true)) => { receive_prefs.flush(storage.as_deref(), &persist_tx, &worker_output, true); break; },
                                 Ok(Err(error)) => report(&worker_output, error),
                                 Err(panic) => {
                                     let detail = panic.downcast_ref::<String>().map(String::as_str)
@@ -2106,6 +2167,7 @@ impl Bridge {
                                 }
                                 _ => {}
                             }
+                            receive_prefs.flush(storage.as_deref(), &persist_tx, &worker_output, true);
                             files.disconnected(&worker_output);
                             worker_playback.clear();
                             invalidate_capture(&mut processor, &worker_capture_epoch);
@@ -2128,6 +2190,7 @@ impl Bridge {
                         _ => {}
                     }
                 }
+                receive_prefs.flush(storage.as_deref(), &persist_tx, &worker_output, true);
             });
         });
         Self {
@@ -2178,7 +2241,7 @@ impl Bridge {
         let mut out = self.output.lock().unwrap();
         let events: Vec<_> = out.events.drain(..).collect();
         let chats = out.chat_snapshot.take().unwrap_or(Value::Null);
-        json!({"snapshot":out.snapshot,"events":events,"chats":chats,"unread":out.unread,"channelFiles":out.channel_files,"fileCache":out.file_cache})
+        json!({"snapshot":out.snapshot,"events":events,"chats":chats,"unread":out.unread,"channelFiles":out.channel_files,"fileCache":out.file_cache,"receiveAudio":out.receive_audio})
     }
 }
 impl Default for Bridge {
@@ -2278,6 +2341,118 @@ pub unsafe extern "C" fn ts_playback(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn receive_preferences_bridge_defaults_validation_and_restart() {
+        let root = std::env::temp_dir().join(format!("receive-bridge-{}", received_id()));
+        let bridge = Bridge::new();
+        bridge
+            .send(&json!({"type":"configure","storage":root}).to_string())
+            .unwrap();
+        wait_until(|| bridge.poll()["receiveAudio"]["agc"] == true);
+        for command in [
+            json!({"type":"set_receive_agc","enabled":1}),
+            json!({"type":"set_user_volume","server":"s","client":1,"uid":"u","token":"t","percent":201}),
+            json!({"type":"set_user_volume","server":"s","client":1,"uid":"u","token":"t","percent":-1}),
+            json!({"type":"set_user_volume","server":"s","client":1,"uid":"u","token":"t","percent":1.5}),
+            json!({"type":"set_user_volume","server":"s","client":1,"uid":"","token":"t","percent":100}),
+            json!({"type":"set_user_volume","server":"s","client":0,"uid":null,"token":"t","percent":100}),
+        ] {
+            assert!(bridge.send(&command.to_string()).is_err());
+        }
+        bridge
+            .send(r#"{"type":"set_receive_agc","enabled":false}"#)
+            .unwrap();
+        wait_until(|| bridge.poll()["receiveAudio"]["agc"] == false);
+        drop(bridge);
+        wait_until(|| {
+            std::fs::read(root.join("receive-audio.json"))
+                .ok()
+                .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+                .is_some_and(|v| v["agc"] == false)
+        });
+        let restored = Bridge::new();
+        restored
+            .send(&json!({"type":"configure","storage":root}).to_string())
+            .unwrap();
+        wait_until(|| restored.poll()["receiveAudio"]["agc"] == false);
+        restored.send(r#"{"type":"set_user_volume","server":"s","client":1,"uid":null,"token":"old","percent":140}"#).unwrap();
+        wait_until(|| {
+            restored.poll()["events"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|e| e["code"] == "receive_audio_context_changed")
+        });
+        drop(restored);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    #[ignore = "requires an explicitly authorized read-only TeamSpeak server"]
+    fn read_only_receive_members_and_reconnect() {
+        let address = std::env::var("MOBILESPEAK_READONLY_SERVER")
+            .expect("explicit read-only server authorization");
+        let root = std::env::temp_dir().join(format!("receive-readonly-{}", received_id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let bridge = Bridge::new();
+        bridge
+            .send(&json!({"type":"configure","storage":root}).to_string())
+            .unwrap();
+        let identity = Identity::create();
+        let connect = json!({"type":"connect","address":address,"name":"MobileSpeak read-only check","identity":identity}).to_string();
+        let mut previous_server = None;
+        for _ in 0..2 {
+            bridge.send(&connect).unwrap();
+            let deadline = Instant::now() + Duration::from_secs(35);
+            let snapshot = loop {
+                let poll = bridge.poll();
+                let errors: Vec<_> = poll["events"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .filter(|e| e["type"] == "error")
+                    .collect();
+                assert!(errors.is_empty(), "{errors:?}");
+                if poll["snapshot"]["status"] == "connected"
+                    && poll["snapshot"]["clients"]
+                        .as_array()
+                        .is_some_and(|c| !c.is_empty())
+                {
+                    std::thread::sleep(Duration::from_secs(1));
+                    let settled = bridge.poll();
+                    let errors: Vec<_> = settled["events"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .filter(|e| e["type"] == "error")
+                        .collect();
+                    assert!(errors.is_empty(), "{errors:?}");
+                    break settled["snapshot"].clone();
+                }
+                assert!(Instant::now() < deadline, "connection timeout");
+                std::thread::sleep(Duration::from_millis(50));
+            };
+            if let Some(server) = &previous_server {
+                assert_eq!(server, &snapshot["serverId"]);
+            }
+            previous_server = Some(snapshot["serverId"].clone());
+            let others: Vec<_> = snapshot["clients"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|u| u["id"] != snapshot["ownClient"])
+                .collect();
+            assert!(others
+                .iter()
+                .all(|u| u["volumePercent"] == 100 && u["volumeToken"].is_string()));
+            println!("Read-only subscription: {} channels, {} other online members, {} distinct member channels", snapshot["channels"].as_array().unwrap().len(), others.len(), others.iter().map(|u| u["channel"].as_u64().unwrap()).collect::<HashSet<_>>().len());
+            // Never activate playback/capture or send a captured sample in this test.
+            bridge.send(r#"{"type":"disconnect"}"#).unwrap();
+            wait_until(|| bridge.poll()["snapshot"]["status"] == "disconnected");
+        }
+        drop(bridge);
+        std::fs::remove_dir_all(root).unwrap();
+    }
     fn wait_until(mut ready: impl FnMut() -> bool) {
         let deadline = Instant::now() + Duration::from_secs(5);
         while !ready() {
@@ -2597,6 +2772,14 @@ mod tests {
         out.set_network_quality(quality);
         assert_eq!(count.load(Ordering::SeqCst), 4);
         assert_eq!(out.snapshot["networkQuality"]["packetLossPercent"], 0.0);
+        assert_eq!(
+            out.snapshot["networkQuality"]["samples"][0]["packetLossPercent"],
+            0.0
+        );
+        assert_eq!(
+            out.snapshot["networkQuality"]["samples"][0]["packetLossGrade"],
+            "good"
+        );
         assert_eq!(
             out.snapshot["networkQuality"]["samples"]
                 .as_array()

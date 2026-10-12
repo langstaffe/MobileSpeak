@@ -840,6 +840,10 @@ internal fun SettingsScreen(ui: SessionUiState, requestPermissions: () -> Unit, 
             }
             Text(stringResource(R.string.settings_microphone_help), fontSize = 13.sp, lineHeight = 16.sp, color = Palette.muted)
             SettingSwitch(stringResource(R.string.settings_listening), !ui.deafened) { ClientSession.setAudio(deafened = !it) }
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                SettingSwitch(stringResource(R.string.settings_receive_agc), ui.receiveAgc, onChange = ClientSession::setReceiveAgc)
+                Text(stringResource(R.string.settings_receive_agc_help), fontSize = 13.sp, lineHeight = 16.sp, color = Palette.muted)
+            }
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(stringResource(R.string.settings_noise_suppression), fontSize = 17.sp, lineHeight = 20.sp)
                 Column(Modifier.clip(RoundedCornerShape(14.dp)).background(Palette.card)) {
@@ -922,7 +926,8 @@ internal fun VoiceDrawer(ui: SessionUiState, requestPermissions: () -> Unit, exp
     var settleRequest by remember { mutableIntStateOf(0) }
     var automaticallyClosing by remember { mutableStateOf(false) }
     val currentAutomaticClose by rememberUpdatedState(automaticallyClosing)
-    var filesHeaderHeight by remember(ui.channelFiles.open) { mutableIntStateOf(0) }
+    val internalPage = ui.channelFiles.open || ui.userVolumesOpen
+    var filesHeaderHeight by remember(internalPage) { mutableIntStateOf(0) }
     val containerOffset = with(density) { (availableHeight.toPx() - 64.dp.toPx()).coerceAtLeast(0f) }
     // A resized expansion anchor must not clip an automatic close or the user's next gesture.
     val maximumOffset = maxOf(travel + limit, height).coerceAtMost(containerOffset)
@@ -966,11 +971,11 @@ internal fun VoiceDrawer(ui: SessionUiState, requestPermissions: () -> Unit, exp
             }
         }
     }
-    val drag = Modifier.pointerInput(session, ui.channelFiles.open) {
+    val drag = Modifier.pointerInput(session, internalPage) {
         awaitEachGesture {
             val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
             // Measure through the file toolbar divider; content below it keeps its own scrolling.
-            if (!connected || travel == 0f || (ui.channelFiles.open && down.position.y >= with(density) { 64.dp.toPx() } + filesHeaderHeight)) return@awaitEachGesture
+            if (!connected || travel == 0f || (down.position.y >= with(density) { 64.dp.toPx() } + filesHeaderHeight)) return@awaitEachGesture
             val closingOnPress = currentAutomaticClose
             if (!closingOnPress) {
                 held = true
@@ -1194,7 +1199,7 @@ internal fun RowScope.NavigationItem(label: String, icon: androidx.compose.ui.gr
 }
 
 @Composable
-private fun Avatar(name: String, path: String?, speaking: Boolean, size: Int) {
+internal fun Avatar(name: String, path: String?, speaking: Boolean, size: Int) {
     Box(
         Modifier.size(size.dp).clip(CircleShape)
             .background(Palette.accent),
