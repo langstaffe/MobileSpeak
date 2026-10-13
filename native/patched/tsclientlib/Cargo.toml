@@ -1,0 +1,55 @@
+[package]
+name = "tsclientlib"
+version = "0.2.0"
+authors = ["Flakebi <flakebi@t-online.de>"]
+description = "A library to create TeamSpeak clients and bots."
+repository = "https://github.com/ReSpeak/tsclientlib"
+readme = "README.md"
+keywords = ["teamspeak3", "ts3", "voip"]
+categories = ["multimedia"]
+license = "MIT OR Apache-2.0"
+edition = "2018"
+include = [
+	"/Cargo.toml",
+	"/README.md",
+	"**/*.rs",
+]
+
+[package.metadata.docs.rs]
+features = ["unstable"]
+
+[features]
+default = ["audio", "default-tls"]
+# Enable the unstable api
+unstable = []
+audio = ["audiopus"]
+# Enable default reqwest features.
+# Use default-features=false on tsclientlib to configure reqwest differently.
+default-tls = ["reqwest/charset", "reqwest/default-tls", "reqwest/http2"]
+# Use API of audiopus fork at https://github.com/Flakebi/audiopus for more features
+audiopus-unstable = []
+
+[dependencies]
+audiopus = { version = "0.3.0-rc.0", optional = true }
+base64 = "0.22"
+futures = "0.3"
+git-testament = "0.2"
+itertools = "0.14"
+num-traits = "0.2"
+pin-utils = "0.1"
+rand = "0.10"
+reqwest = { version = "0.13", default-features = false }
+thiserror = "2"
+time = "0.3"
+tokio = { version = "1", features = ["time"] }
+tokio-stream = "0.1"
+tracing = "0.1"
+hickory-net = "0.26"
+hickory-resolver = "0.26"
+ts-bookkeeping = { git = "https://github.com/ReSpeak/tsclientlib", rev = "ee3bc6f45a7137db7793ba5593a321df400d53e5" }
+tsproto = { git = "https://github.com/ReSpeak/tsclientlib", rev = "ee3bc6f45a7137db7793ba5593a321df400d53e5" }
+tsproto-packets = { git = "https://github.com/ReSpeak/tsclientlib", rev = "ee3bc6f45a7137db7793ba5593a321df400d53e5" }
+tsproto-types = { git = "https://github.com/ReSpeak/tsclientlib", rev = "ee3bc6f45a7137db7793ba5593a321df400d53e5" }
+url = "2"
+
+[dev-dependencies]

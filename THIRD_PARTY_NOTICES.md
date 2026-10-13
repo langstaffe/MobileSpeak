@@ -56,3 +56,9 @@ in MobileSpeak. The patch and pinned source checksum are recorded in
 agreement with the unmodified upstream streaming implementation. Native
 transitive dependency versions and archive checksums remain those pinned
 in the sherpa-onnx 1.13.8 CMake sources.
+
+- The same fixed tsclientlib crate is included in `native/patched/tsclientlib`.
+  Its local cancellation API drops pending file-transfer handshakes/queued streams and
+  ignores their late notifications; no wire protocol changes. See its MOBILESPEAK.md.
+  The receive-audio copy additionally rejects zero-sample data, restores buffer
+  invariants after decode errors, and removes only the failed speaker queue.

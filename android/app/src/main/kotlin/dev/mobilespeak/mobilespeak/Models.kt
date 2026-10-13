@@ -49,6 +49,7 @@ data class Snapshot(
     val channels: List<Channel> = emptyList(),
     val clients: List<Member> = emptyList(),
     val networkQuality: NetworkQuality? = null,
+    val connectionId: String? = null,
 ) {
     fun onlineMember(uid: String?): Member? =
         if (status == "connected" && !uid.isNullOrEmpty()) clients.firstOrNull { it.uid == uid } else null
@@ -234,6 +235,7 @@ internal fun orderedChannels(channels: List<Channel>): List<Pair<Channel, Int>> 
 
 internal fun JSONObject.snapshot() = Snapshot(
     status = getString("status"),
+    connectionId = stringOrNull("connectionId"),
     server = stringOrNull("server"),
     serverId = stringOrNull("serverId"),
     ownClient = if (has("ownClient") && !isNull("ownClient")) getLong("ownClient") else null,

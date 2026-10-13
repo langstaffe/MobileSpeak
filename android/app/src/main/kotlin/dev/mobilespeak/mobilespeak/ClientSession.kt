@@ -42,7 +42,11 @@ internal object ClientSession {
     private var fileCacheRequest = 0L
     private var fileCacheClearRequest: Long? = null
     private var activeBookmarkId: String? = null
-    @Volatile private var acceptingConnection = false
+    private val connectionGate = ConnectionGate()
+    private val serviceHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private val bookmarks by lazy { BookmarkTransactions(store::bookmarks, store::saveBookmarks) { next ->
+        mutableState.update { it.copy(bookmarks = next) }
+    } }
     val appActive = mutableAppActive.asStateFlow()
     @Volatile var microphonePermission = false
         private set
@@ -162,38 +166,40 @@ internal object ClientSession {
         mutableState.update { it.copy(avatarStatus = "failed", avatarDetail = context.localized(R.string.avatar_image_error)) }
     }
 
-    fun connect(bookmark: Bookmark) {
-        if (state.value.snapshot.status != "disconnected") return
+    fun connect(bookmark: Bookmark) = coreExecutor.execute {
+        if (state.value.snapshot.status != "disconnected") return@execute
         val identity = runCatching { store.identity() }.getOrElse {
             fail(context.localized(R.string.error_with_detail, context.localized(R.string.error_identity_read), it.message.orEmpty()))
-            return
+            return@execute
         }
-        val command = JSONObject()
+        val connectionId = UUID.randomUUID().toString()
+        val command = JSONObject().put("connectionId", connectionId)
             .put("type", "connect")
             .put("address", bookmark.address)
             .put("name", bookmark.nickname)
             .put("password", bookmark.password)
             .put("identity", identity ?: JSONObject.NULL)
-        if (!send(command)) return
+        if (!send(command)) return@execute
         activeBookmarkId = bookmark.id
-        acceptingConnection = true
+        connectionGate.begin(connectionId)
         mutableState.update {
             it.copy(
-                snapshot = Snapshot(status = "connecting"),
+                snapshot = Snapshot(status = "connecting", connectionId = connectionId),
                 microphoneMuted = it.microphoneMuted || !microphonePermission,
                 error = null,
             )
         }
-        val intent = Intent(context, VoiceService::class.java).setAction(VoiceService.ACTION_START_CALL)
-        if (Build.VERSION.SDK_INT >= 26) context.startForegroundService(intent) else context.startService(intent)
+        updateService()
     }
 
-    fun disconnect() {
-        acceptingConnection = false
+    fun disconnect() = coreExecutor.execute(::disconnectCore)
+
+    private fun disconnectCore() {
+        if (!send(JSONObject().put("type", "disconnect"))) { updateService(); return }
+        connectionGate.cancel()
         activeBookmarkId = null
-        send(JSONObject().put("type", "disconnect"))
-        mutableState.update { it.copy(snapshot = Snapshot(), messages = emptyList(), unread = Unread()) }
-        context.stopService(Intent(context, VoiceService::class.java))
+        mutableState.update { it.copy(snapshot = Snapshot(connectionId = connectionGate.id), messages = emptyList(), unread = Unread()) }
+        updateService()
     }
 
     fun setAppActive(active: Boolean) {
@@ -208,7 +214,11 @@ internal object ClientSession {
         else if (!wasGranted) setAudio(inputMuted = false)
     }
 
-    fun setAudio(inputMuted: Boolean? = null, deafened: Boolean? = null) {
+    fun setAudio(inputMuted: Boolean? = null, deafened: Boolean? = null) = coreExecutor.execute {
+        setAudioCore(inputMuted, deafened)
+    }
+
+    private fun setAudioCore(inputMuted: Boolean? = null, deafened: Boolean? = null) {
         val old = state.value
         val nextInput = inputMuted ?: old.microphoneMuted
         val nextOutput = deafened ?: old.deafened
@@ -244,27 +254,23 @@ internal object ClientSession {
             fail(context.localized(R.string.error_bookmark_invalid))
             return null
         }
-        val existing = state.value.bookmarks
-        val original = existing.firstOrNull { it.id == id }
-        val resolvedAutomaticName = title.trim().isEmpty() ||
-            (original?.automaticallyNamed == true && title.trim() == original.title)
-        val normalized = bookmark.copy(automaticallyNamed = resolvedAutomaticName)
-        val duplicate = existing.firstOrNull {
-            it.id != id && it.host == normalized.host && it.port == normalized.port && it.nickname == normalized.nickname
-        }
-        if (id != null && duplicate != null) {
-            fail(context.localized(R.string.error_bookmark_duplicate))
-            return null
-        }
-        val resolved = if (id == null && duplicate != null) normalized.copy(id = duplicate.id) else normalized
-        val next = existing.toMutableList().apply {
-            val index = indexOfFirst { it.id == resolved.id }
-            if (index >= 0) set(index, resolved) else add(resolved)
-        }
         return runCatching {
-            store.saveBookmarks(next)
-            mutableState.update { it.copy(bookmarks = next, error = null) }
-            resolved
+            bookmarks.change { existing ->
+                val original = existing.firstOrNull { it.id == id }
+                val automatic = title.trim().isEmpty() ||
+                    (original?.automaticallyNamed == true && title.trim() == original.title)
+                val normalized = bookmark.copy(automaticallyNamed = automatic)
+                val duplicate = existing.firstOrNull {
+                    it.id != id && it.host == normalized.host && it.port == normalized.port && it.nickname == normalized.nickname
+                }
+                check(id == null || duplicate == null) { context.localized(R.string.error_bookmark_duplicate) }
+                val resolved = if (id == null && duplicate != null) normalized.copy(id = duplicate.id) else normalized
+                val next = existing.toMutableList().apply {
+                    val index = indexOfFirst { it.id == resolved.id }
+                    if (index >= 0) set(index, resolved) else add(resolved)
+                }
+                next to resolved
+            }.also { mutableState.update { it.copy(error = null) } }
         }.getOrElse {
             fail(context.localized(R.string.error_with_detail, context.localized(R.string.error_bookmark_save), it.message.orEmpty()))
             null
@@ -272,9 +278,7 @@ internal object ClientSession {
     }
 
     fun deleteBookmark(bookmark: Bookmark) {
-        val next = state.value.bookmarks.filterNot { it.id == bookmark.id }
-        runCatching { store.saveBookmarks(next) }
-            .onSuccess { mutableState.update { current -> current.copy(bookmarks = next) } }
+        runCatching { bookmarks.change { latest -> latest.filterNot { it.id == bookmark.id } to Unit } }
             .onFailure { fail(context.localized(R.string.error_with_detail, context.localized(R.string.error_bookmark_delete), it.message.orEmpty())) }
     }
 
@@ -309,10 +313,9 @@ internal object ClientSession {
     }
 
     private fun drainCore() {
-        do {
-            coreDirty.set(false)
-            pollCore()
-        } while (coreDirty.get())
+        // Yield between envelopes so continuous notifications cannot starve cancel/connect.
+        coreDirty.set(false)
+        pollCore()
         coreScheduled.set(false)
         if (coreDirty.get() && coreScheduled.compareAndSet(false, true)) coreExecutor.execute(::drainCore)
     }
@@ -360,6 +363,7 @@ internal object ClientSession {
         val events = envelope.getJSONArray("events")
         for (index in 0 until events.length()) {
             val event = events.getJSONObject(index)
+            if (event.has("connectionId") && !connectionGate.accepts(event.stringOrNull("connectionId"))) continue
             when (event.getString("type")) {
                 "file_cache_result" -> synchronized(fileCacheLock) {
                     if (event.optLong("requestId") == fileCacheRequest) {
@@ -421,9 +425,13 @@ internal object ClientSession {
                 ) }
             }
         }
+        if (eventError != null || audioMuted) mutableState.update { it.copy(error = eventError ?: it.error, microphoneMuted = audioMuted || it.microphoneMuted) }
         envelope.optJSONObject("fileCache")?.let { cache -> mutableState.update { it.copy(fileCache = cache.fileCache()) } }
-        val nextSnapshot = envelope.getJSONObject("snapshot").snapshot()
-        if (!acceptingConnection && nextSnapshot.status != "disconnected") return
+        envelope.optJSONObject("receiveAudio")?.let { audio -> mutableState.update { it.copy(receiveAgc = audio.optBoolean("agc", true)) } }
+        // Global events above remain valid even while Rust has not consumed Connect yet.
+        val snapshotJson = envelope.getJSONObject("snapshot")
+        val nextSnapshot = snapshotJson.snapshot()
+        if (!connectionGate.accepts(nextSnapshot.connectionId, nextSnapshot.status)) return
         val chats = if (envelope.get("chats") == JSONObject.NULL) null else envelope.getJSONArray("chats").objects().map(JSONObject::chatMessage)
         val unreadJson = envelope.getJSONObject("unread")
         val unread = Unread(
@@ -445,12 +453,10 @@ internal object ClientSession {
         if (nextSnapshot.status == "connected") {
             updateAutomaticTitle(nextSnapshot.server)
             if (!wasAudioReady && nextSnapshot.canApplyAudioState()) {
-                val audio = state.value
-                setAudio(inputMuted = audio.microphoneMuted, deafened = audio.deafened)
+                setAudioCore()
             }
-        } else if (nextSnapshot.status == "disconnected") {
-            acceptingConnection = false
         }
+        updateService()
     }
 
     fun fileLocalError(message: String?) { mutableState.update { it.copy(channelFilesLocalError = message) } }
@@ -527,7 +533,68 @@ internal object ClientSession {
     fun capture(samples: ShortArray): Int = NativeCore.capture(handle, samples)
     fun openOutput(channels: Int, communication: Boolean, notification: Runnable): Long =
         NativeOutput.open(handle, channels, communication, notification)
-    fun shouldRunService() = acceptingConnection || state.value.snapshot.status in setOf("connected", "connecting", "reconnecting")
+    fun shouldRunService() = state.value.snapshot.status in setOf("connected", "connecting", "reconnecting")
+
+    // Intent/request bookkeeping is separate from the actual, instance-scoped lifecycle.
+    private var serviceRequested = false
+    private var voiceService: VoiceService? = null // Owned by coreExecutor; cleared only by this instance.
+    private val serviceRevision = AtomicLong()
+
+    fun voiceServiceCreated(service: VoiceService) = coreExecutor.execute {
+        voiceService = service
+        updateService()
+    }
+
+    fun voiceServiceStarted(service: VoiceService, disconnect: Boolean, connectionId: String?) = coreExecutor.execute {
+        if (voiceService !== service) return@execute
+        if (disconnect && connectionId == state.value.snapshot.connectionId) disconnectCore()
+        else updateService()
+    }
+
+    fun voiceServiceDestroyed(service: VoiceService) = coreExecutor.execute {
+        if (voiceService !== service) return@execute
+        voiceService = null
+        serviceRequested = false
+        serviceRevision.incrementAndGet()
+        // A stop accepted before a new Connect may finish destroying after it.
+        updateService()
+    }
+
+    fun voiceServiceFailed(service: VoiceService, connectionId: String?, error: Throwable) = coreExecutor.execute {
+        if (voiceService === service && connectionId == state.value.snapshot.connectionId) {
+            serviceStartFailed(error)
+        }
+    }
+
+    private fun serviceStartFailed(error: Throwable) {
+        serviceRequested = false
+        fail(error.message.orEmpty())
+        disconnectCore()
+    }
+
+    private fun updateService() {
+        val running = shouldRunService()
+        val instance = voiceService
+        if (running == serviceRequested && (running || instance == null)) return
+        serviceRequested = running
+        val revision = serviceRevision.incrementAndGet()
+        val requestId = state.value.snapshot.connectionId
+        serviceHandler.post {
+            if (revision != serviceRevision.get() || requestId != state.value.snapshot.connectionId || running != shouldRunService()) return@post
+            if (running) {
+                if (instance != null) {
+                    instance.startCall()
+                    return@post
+                }
+                val intent = Intent(context, VoiceService::class.java).setAction(VoiceService.ACTION_START_CALL)
+                runCatching {
+                    if (Build.VERSION.SDK_INT >= 26) context.startForegroundService(intent) else context.startService(intent)
+                }.onFailure { error -> coreExecutor.execute {
+                    if (revision == serviceRevision.get() && connectionGate.id == requestId) serviceStartFailed(error)
+                } }
+            } else instance?.stopSelf() // Never let an old stop target a newer service instance.
+        }
+    }
 
     private fun send(command: JSONObject): Boolean {
         val result = runCatching {
@@ -544,18 +611,21 @@ internal object ClientSession {
         val name = serverName?.trim().orEmpty()
         if (name.isEmpty()) return
         val connectedBookmark = activeBookmarkId ?: return
-        val next = state.value.bookmarks.map {
-            if (it.id == connectedBookmark && it.automaticallyNamed && it.title != name) it.copy(title = name) else it
-        }
-        if (next == state.value.bookmarks) return
-        runCatching { store.saveBookmarks(next) }
-            .onSuccess { mutableState.update { current -> current.copy(bookmarks = next) } }
-            .onFailure { fail(context.localized(R.string.error_with_detail, context.localized(R.string.error_bookmark_title_update), it.message.orEmpty())) }
+        runCatching { bookmarks.change { latest ->
+            latest.map {
+                if (it.id == connectedBookmark && it.automaticallyNamed && it.title != name) it.copy(title = name) else it
+            } to Unit
+        } }.onFailure { fail(context.localized(R.string.error_with_detail, context.localized(R.string.error_bookmark_title_update), it.message.orEmpty())) }
     }
 
-    fun refreshLanguage() {
-        if (!initialized || !shouldRunService()) return
-        context.startService(Intent(context, VoiceService::class.java).setAction(VoiceService.ACTION_REFRESH_LANGUAGE))
+    fun refreshLanguage() = coreExecutor.execute {
+        if (!initialized) return@execute
+        updateService()
+        val instance = voiceService ?: return@execute
+        val requestId = state.value.snapshot.connectionId
+        serviceHandler.post {
+            if (requestId == state.value.snapshot.connectionId && shouldRunService()) instance.refreshLanguage()
+        }
     }
 
     private fun fail(message: String) {

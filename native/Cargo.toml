@@ -6,6 +6,7 @@ license = "MIT"
 
 [workspace]
 members = ["patched/tsproto"]
+exclude = ["patched/tsclientlib"]
 resolver = "2"
 
 [lib]
@@ -42,3 +43,4 @@ cc = "=1.4.6"
 
 [patch."https://github.com/ReSpeak/tsclientlib"]
 tsproto = { path = "patched/tsproto" }
+tsclientlib = { path = "patched/tsclientlib" }

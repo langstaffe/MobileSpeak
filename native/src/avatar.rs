@@ -2,7 +2,7 @@ use super::*;
 use md5::{Digest, Md5};
 use std::io::{Read, Write};
 use std::sync::atomic::AtomicBool;
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tsclientlib::messages::{
     c2s::{OutClientInfoRequestPart, OutListFiletransfersMessage, OutStopFiletransferPart},
     s2c::InMessage,
@@ -1319,14 +1319,14 @@ pub async fn offline(store: &Arc<Store>, out: &Arc<Mutex<Output>>) {
         match result {
             Ok(Ok(Desired::Clear)) => {
                 output.event(json!({"type":"avatar_local","intent":"clear"}));
-                output.event(json!({"type":"avatar_sync","status":"clear_pending","detail":null}));
+                output.event(json!({"type":"avatar_sync","scope":"global","status":"clear_pending","detail":null}));
             }
-            Ok(Err(error)) => output.event(json!({"type":"avatar_sync","status":"failed","detail":format!("avatar_local_read_failed: {error}")})),
+            Ok(Err(error)) => output.event(json!({"type":"avatar_sync","scope":"global","status":"failed","detail":format!("avatar_local_read_failed: {error}")})),
             Ok(Ok(Desired::Image(_))) => {
                 output.event(json!({"type":"avatar_local","intent":"image"}));
-                output.event(json!({"type":"avatar_sync","status":"idle","detail":null}));
+                output.event(json!({"type":"avatar_sync","scope":"global","status":"idle","detail":null}));
             }
-            _ => output.event(json!({"type":"avatar_sync","status":"idle","detail":null})),
+            _ => output.event(json!({"type":"avatar_sync","scope":"global","status":"idle","detail":null})),
         }
     }
 }

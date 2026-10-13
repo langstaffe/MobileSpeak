@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+        A20000000000000000000002 /* bridge.json in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000003; };
 		A10000000000000000000001 /* ChannelFiles.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000002 /* ChannelFiles.swift */; };
 		111111111111111111111111 /* Localization.swift in Sources */ = {isa = PBXBuildFile; fileRef = 211111111111111111111111 /* Localization.swift */; };
 		111111111111111111111112 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = 211111111111111111111112 /* Localizable.xcstrings */; };
@@ -52,6 +53,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+        A20000000000000000000003 /* bridge.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "../native/tests/contracts/bridge.json"; sourceTree = SOURCE_ROOT; };
 		A10000000000000000000002 /* ChannelFiles.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelFiles.swift; sourceTree = "<group>"; };
 		1C1AAF64A80E5FFD5457D916 /* Assets.xcassets */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		211111111111111111111111 /* Localization.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = Localization.swift; sourceTree = "<group>"; };
@@ -173,6 +175,7 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = AC5ED93E49CCB694318B6315 /* Build configuration list for PBXNativeTarget "MobileSpeak" */;
 			buildPhases = (
+				A20000000000000000000001 /* Verify Rust Core */,
 				27CAD4737276FFAAE33AA99C /* Sources */,
 				F7D3E293066E90BE40B40D5B /* Frameworks */,
 				D874450ECF958A72230D08B8 /* Resources */,
@@ -248,6 +251,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+                A20000000000000000000002 /* bridge.json in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -262,6 +266,21 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+        A20000000000000000000001 /* Verify Rust Core */ = {
+            isa = PBXShellScriptBuildPhase;
+            alwaysOutOfDate = 1;
+            buildActionMask = 2147483647;
+            files = ();
+            inputPaths = ("$(BUILT_PRODUCTS_DIR)/libmobilespeak_core.a", );
+            outputPaths = ();
+            name = "Verify Rust Core";
+            runOnlyForDeploymentPostprocessing = 0;
+            shellPath = /bin/sh;
+            shellScript = "python3 \"$SRCROOT/../tool/ios_core_fingerprint.py\"";
+        };
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		1F6C19D55F6773C8C4295915 /* Sources */ = {

@@ -56,7 +56,12 @@ internal class SecureStore(private val context: Context) {
     private fun save(next: JSONObject) {
         check(!blocked) { context.localized(R.string.error_secure_data_overwrite) }
         val encoded = Base64.encodeToString(encrypt(next.toString().toByteArray()), Base64.NO_WRAP)
-        check(preferences.edit().putString("data", encoded).commit()) { context.localized(R.string.error_secure_store_write) }
+        val previous = preferences.getString("data", null)
+        if (!preferences.edit().putString("data", encoded).commit()) {
+            // SharedPreferences updates its memory cache even when disk commit fails.
+            preferences.edit().putString("data", previous).commit()
+            error(context.localized(R.string.error_secure_store_write))
+        }
         data = next
     }
 

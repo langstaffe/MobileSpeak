@@ -29,46 +29,72 @@ internal class VoiceService : Service() {
     private var lastAudioPolicy: String? = null
     private lateinit var audio: AudioEngine
     private lateinit var wakeLock: PowerManager.WakeLock
+    private var released = false // Main-thread lifecycle, including partially initialized failures.
+    private var notificationConnectionId: String? = null
 
     @SuppressLint("WakelockTimeout") // The foreground call may last for hours; onDestroy always releases it.
     override fun onCreate() {
         super.onCreate()
         ClientSession.initialize(applicationContext)
-        audio = AudioEngine(applicationContext)
-        wakeLock = getSystemService(PowerManager::class.java)
-            .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "MobileSpeak:Voice")
-            .apply { acquire() }
-        createChannel()
-        showForeground(false)
-        audio.start()
-        serviceScope.launch {
-            ClientSession.state.combine(ClientSession.appActive) { ui, active -> ui to active }
-                .collect { (ui, active) -> updateAudio(ui, active, userInitiated = false) }
+        val connectionId = ClientSession.state.value.snapshot.connectionId
+        ClientSession.voiceServiceCreated(this)
+        Log.i(TAG, "Service created instance=${System.identityHashCode(this)}")
+        try {
+            audio = AudioEngine(applicationContext)
+            wakeLock = getSystemService(PowerManager::class.java)
+                .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "MobileSpeak:Voice")
+                .apply { acquire() }
+            createChannel()
+            showForeground(false)
+            audio.start()
+            serviceScope.launch {
+                ClientSession.state.combine(ClientSession.appActive) { ui, active -> ui to active }
+                    .collect { (ui, active) -> updateAudio(ui, active, userInitiated = false) }
+            }
+        } catch (error: Exception) {
+            try { releaseResources() } finally {
+                ClientSession.voiceServiceFailed(this, connectionId, error)
+                stopSelf()
+            }
         }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        Log.i(TAG, "Service start instance=${System.identityHashCode(this)} action=${intent?.action} startId=$startId")
+        ClientSession.voiceServiceStarted(this, intent?.action == ACTION_DISCONNECT,
+            if (intent?.hasExtra(EXTRA_CONNECTION_ID) == true) intent.getStringExtra(EXTRA_CONNECTION_ID)
+            else ClientSession.state.value.snapshot.connectionId)
+        if (released) return START_NOT_STICKY
         when (intent?.action) {
-            ACTION_DISCONNECT -> ClientSession.disconnect()
-            ACTION_START_CALL -> updateAudio(ClientSession.state.value, ClientSession.appActive.value, userInitiated = true)
-            ACTION_REFRESH_LANGUAGE -> {
-                createChannel()
-                showForeground(foregroundHasMicrophone)
-            }
+            ACTION_START_CALL -> startCall()
+            ACTION_REFRESH_LANGUAGE -> refreshLanguage()
         }
         return START_STICKY
     }
 
     override fun onDestroy() {
+        try { releaseResources() } finally {
+            ClientSession.voiceServiceDestroyed(this)
+            Log.i(TAG, "Service destroyed instance=${System.identityHashCode(this)}")
+            super.onDestroy()
+        }
+    }
+
+    private fun releaseResources() {
+        if (released) return
+        released = true
         serviceScope.cancel()
-        audio.stop()
-        if (wakeLock.isHeld) wakeLock.release()
-        super.onDestroy()
+        try { if (::audio.isInitialized) audio.stop() } finally {
+            try { if (::wakeLock.isInitialized && wakeLock.isHeld) wakeLock.release() }
+            finally { stopForeground(STOP_FOREGROUND_REMOVE) }
+        }
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     private fun updateAudio(ui: SessionUiState, appActive: Boolean, userInitiated: Boolean) {
+        if (released) return
+        if (notificationConnectionId != ClientSession.state.value.snapshot.connectionId) showForeground(foregroundHasMicrophone)
         val returnedToForeground = appActive && !lastAppActive
         if (returnedToForeground) {
             microphoneUpgradeFailed = false
@@ -112,19 +138,32 @@ internal class VoiceService : Service() {
         audio.update(ui, allowCapture, reapplyRoute = reapplyAudio)
         if (shouldReassertAudioState(ui.snapshot.status == "connected", reapplyAudio)) {
             Log.i(TAG, "Reasserting current microphone and listening state after foreground recovery")
-            ClientSession.setAudio(inputMuted = ui.microphoneMuted, deafened = ui.deafened)
+            ClientSession.setAudio()
         }
-        if (!ClientSession.shouldRunService()) stopSelf()
+        // ClientSession serializes service stop/start with connection transitions.
+    }
+
+    fun refreshLanguage() {
+        if (released) return
+        createChannel()
+        showForeground(foregroundHasMicrophone)
+    }
+
+    fun startCall() {
+        updateAudio(ClientSession.state.value, ClientSession.appActive.value, userInitiated = true)
     }
 
     @Suppress("DEPRECATION")
     private fun showForeground(microphone: Boolean) {
+        notificationConnectionId = ClientSession.state.value.snapshot.connectionId
         val open = PendingIntent.getActivity(
             this, 0, Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         val disconnect = PendingIntent.getService(
-            this, 1, Intent(this, VoiceService::class.java).setAction(ACTION_DISCONNECT),
+            this, 1, Intent(this, VoiceService::class.java).setAction(ACTION_DISCONNECT)
+                .setData(android.net.Uri.fromParts("mobilespeak", notificationConnectionId ?: "idle", null))
+                .putExtra(EXTRA_CONNECTION_ID, notificationConnectionId),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         val builder = if (Build.VERSION.SDK_INT >= 26) Notification.Builder(this, CHANNEL) else Notification.Builder(this)
@@ -161,6 +200,7 @@ internal class VoiceService : Service() {
         private const val CHANNEL = "mobilespeak.voice"
         private const val NOTIFICATION_ID = 7
         private const val ACTION_DISCONNECT = "dev.mobilespeak.mobilespeak.DISCONNECT"
+        private const val EXTRA_CONNECTION_ID = "connectionId"
         private const val TAG = "MobileSpeakVoice"
     }
 }

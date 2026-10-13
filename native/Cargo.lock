@@ -2619,7 +2619,6 @@ dependencies = [
 [[package]]
 name = "tsclientlib"
 version = "0.2.0"
-source = "git+https://github.com/ReSpeak/tsclientlib?rev=ee3bc6f45a7137db7793ba5593a321df400d53e5#ee3bc6f45a7137db7793ba5593a321df400d53e5"
 dependencies = [
  "audiopus",
  "base64 0.22.1",

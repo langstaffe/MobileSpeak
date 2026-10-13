@@ -6,6 +6,7 @@
 // test harness; keep newly queued packets alive past the historical PLC cutoff;
 // smooth queue catch-up and expose receive diagnostics and mutable pre-mix PCM. Queue thresholds,
 // reordering, FEC/PLC and end-marker behavior otherwise stay upstream.
+// Reject zero-sample data; restore decode invariants on failure and isolate failed talkers.
 //! Handle receiving audio.
 //!
 //! The [`AudioHandler`] collects all incoming audio packets and queues them per
@@ -69,6 +70,8 @@ pub enum Error {
     QueueFull,
     #[error("Audio packet is too late, dropping (wanted {wanted}, got {got})")]
     TooLate { wanted: u16, got: u16 },
+    #[error("Audio data packet has zero samples")]
+    ZeroSamples,
     #[error("Packet has too many samples")]
     TooManySamples,
     #[error("Only opus audio is supported, ignoring {0:?}")]
@@ -272,6 +275,7 @@ impl AudioQueue {
                 .map_err(Error::GetPacketSample)?;
             samples =
                 packet::nb_samples(opus_packet, SAMPLE_RATE).map_err(Error::GetPacketSample)?;
+            if samples == 0 { return Err(Error::ZeroSamples); }
             if samples > MAX_BUFFER_SIZE {
                 return Err(Error::TooManySamples);
             }
@@ -356,19 +360,23 @@ impl AudioQueue {
         let orig_buffer_len = self.decoded_buffer.len();
         self.decoded_buffer
             .resize(orig_buffer_len + len * CHANNEL_NUM, 0.0);
-        let len = self
-            .decoder
-            .decode_float(
+        let decoded = (|| {
+            self.decoder.decode_float(
                 packet_data,
-                (&mut self.decoded_buffer[orig_buffer_len..])
-                    .try_into()
+                (&mut self.decoded_buffer[orig_buffer_len..]).try_into()
                     .map_err(Error::GetPacketSample)?,
                 fec,
-            )
-            .map_err(|e| Error::Decode {
-                error: e,
-                packet: packet.map(|p| p.packet.raw_data().to_vec()),
-            })?;
+            ).map_err(|error| Error::Decode {
+                error, packet: packet.map(|p| p.packet.raw_data().to_vec()),
+            })
+        })();
+        let len = match decoded {
+            Ok(len) if len > 0 => len,
+            result => {
+                self.decoded_buffer.truncate(orig_buffer_len);
+                return Err(result.err().unwrap_or(Error::ZeroSamples));
+            }
+        };
         self.last_packet_samples = len;
         self.decoded_buffer
             .truncate(orig_buffer_len + len * CHANNEL_NUM);
@@ -435,6 +443,7 @@ impl AudioQueue {
         }
         // Need to refill buffer
         self.decoded_buffer.drain(..self.decoded_pos);
+        self.decoded_pos = 0;
 
         while self.decoded_buffer.len() < len {
             trace!(
@@ -620,7 +629,8 @@ impl<Id: Clone + Debug + Eq + Hash + PartialEq> AudioHandler<Id> {
             match queue.get_next_data(buf.len(), &mut self.diagnostics) {
                 Err(error) => {
                     self.diagnostics.decode_errors += 1;
-                    warn!(%error, "Failed to decode audio packet");
+                    warn!(%error, "Failed to decode audio packet; removing talker queue");
+                    to_remove.push(id.clone());
                 }
                 Ok((r, is_end)) => {
                     handle(id, r);
@@ -687,6 +697,62 @@ impl<Id: Clone + Debug + Eq + Hash + PartialEq> AudioHandler<Id> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn audio_packet(id: u16, bytes: &[u8]) -> InAudioBuf {
+        use tsproto_packets::packets::{Direction, OutAudio};
+        InAudioBuf::try_new(Direction::S2C, OutAudio::new(&AudioData::S2C {
+            id, from: 7, codec: CodecType::OpusVoice, data: bytes,
+        }).into_vec()).unwrap()
+    }
+
+    #[test]
+    fn malformed_packets_preserve_invariants_and_other_talkers() {
+        use audiopus::{coder::Encoder, Application};
+        let encoder = Encoder::new(SAMPLE_RATE, CHANNELS, Application::Audio).unwrap();
+        for frames in [120, 240, 480, 960, 1920, 2880] {
+            let mut encoded = [0; 4000];
+            let n = encoder.encode(&vec![100; frames * 2], &mut encoded).unwrap();
+            for bad in [&[3, 0][..], &[3, 0x41][..], &encoded[..2]] {
+                let mut audio = AudioHandler::<u16>::new();
+                audio.handle_packet(7, audio_packet(0, &encoded[..n])).unwrap();
+                audio.fill_buffer(&mut vec![0.; frames * 2]);
+                let _ = audio.handle_packet(7, audio_packet(1, bad));
+                audio.handle_packet(8, audio_packet(0, &encoded[..n])).unwrap();
+                for q in audio.queues.values_mut() { q.buffering_samples = 0; }
+                let mut heard_other = false;
+                audio.fill_buffer_with_proc(&mut vec![0.; frames * 2], |id, pcm| {
+                    if *id == 8 { heard_other = !pcm.is_empty(); }
+                });
+                assert!(heard_other);
+                for q in audio.queues.values() {
+                    assert!(q.decoded_pos <= q.decoded_buffer.len());
+                    assert_eq!(q.packet_buffer_samples, q.packet_buffer.iter().map(|p| p.samples).sum::<usize>());
+                }
+                audio.handle_packet(7, audio_packet(2, &encoded[..n])).unwrap();
+                audio.handle_packet(7, audio_packet(3, &[])).unwrap();
+                for _ in 0..240 { audio.fill_buffer(&mut vec![0.; frames * 2]); }
+                assert!(audio.queues.is_empty());
+            }
+        }
+    }
+
+    #[test]
+    fn failed_decode_can_be_refilled_without_invalid_drain() {
+        use audiopus::{coder::Encoder, Application};
+        let encoder = Encoder::new(SAMPLE_RATE, CHANNELS, Application::Audio).unwrap();
+        let mut bytes = [0; 1275];
+        let n = encoder.encode(&[100; 1920], &mut bytes).unwrap();
+        let mut queue = AudioQueue::new(audio_packet(0, &bytes[..n])).unwrap();
+        let mut diagnostics = ReceiveDiagnostics::default();
+        queue.get_next_data(1920, &mut diagnostics).unwrap();
+        // A valid duration header with a truncated frame reaches the real decoder.
+        queue.add_packet(audio_packet(1, &[3, 0x41])).unwrap();
+        assert!(queue.get_next_data(1920, &mut diagnostics).is_err());
+        assert_eq!(queue.decoded_pos, 0);
+        assert!(queue.decoded_buffer.is_empty());
+        queue.add_packet(audio_packet(2, &bytes[..n])).unwrap();
+        assert!(queue.get_next_data(1920, &mut diagnostics).is_ok());
+    }
 
     #[test]
     fn manual_volume_is_after_processing_smooth_and_restored_on_new_queues() {

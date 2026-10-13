@@ -79,6 +79,7 @@ struct Member: Decodable, Identifiable, Equatable {
     var conversation: String? { uid.map { "client:\($0)" } }
 }
 struct Snapshot: Decodable, Equatable {
+    var connectionId: String?
     var status = "disconnected"
     var server: String?
     var serverId: String?
@@ -345,6 +346,7 @@ private func coreChanged(_ context: Int) {
         catch { self.error = error.localizedDescription }
     }
     private var acceptingConnection = false
+    private var connectionId: String?
     private var audioInterrupted = false
     private var intent = 0
     var connected: Bool { state.status == "connected" }
@@ -512,6 +514,8 @@ private func coreChanged(_ context: Int) {
             let data = Data(String(cString: pointer).utf8)
             let envelope = try JSONSerialization.jsonObject(with: data) as! [String: Any]
             for event in envelope["events"] as? [[String: Any]] ?? [] {
+                if event.keys.contains("connectionId") &&
+                    ((event["connectionId"] as? String) != connectionId || !acceptingConnection) { continue }
                 if event["type"] as? String == "identity", let identity = event["value"] {
                     let started = ProcessInfo.processInfo.systemUptime
                     do { try saveIdentity(JSONSerialization.data(withJSONObject: identity)) }
@@ -567,15 +571,15 @@ private func coreChanged(_ context: Int) {
                     }
                 }
             }
-            if let chats = envelope["chats"], !(chats is NSNull) {
-                messages = try JSONDecoder().decode([ChatMessage].self, from: JSONSerialization.data(withJSONObject: chats))
-            }
             if let cache = envelope["fileCache"], !(cache is NSNull) {
                 fileCache = try JSONDecoder().decode(FileCacheState.self, from: JSONSerialization.data(withJSONObject: cache))
             }
             if let receive = envelope["receiveAudio"] as? [String: Any], let agc = receive["agc"] as? Bool { receiveAgc = agc }
             let next = try JSONDecoder().decode(Snapshot.self, from: JSONSerialization.data(withJSONObject: envelope["snapshot"]!))
-            guard acceptingConnection || next.status == "disconnected" else { return }
+            guard next.connectionId == connectionId, acceptingConnection || next.status == "disconnected" else { return }
+            if let chats = envelope["chats"], !(chats is NSNull) {
+                messages = try JSONDecoder().decode([ChatMessage].self, from: JSONSerialization.data(withJSONObject: chats))
+            }
             if let value = envelope["unread"], !(value is NSNull) {
                 let updated = try JSONDecoder().decode(UnreadSnapshot.self, from: JSONSerialization.data(withJSONObject: value))
                 if updated != unread { unread = updated }
@@ -646,10 +650,13 @@ private func coreChanged(_ context: Int) {
             name = nickname
             error = nil
             audioInterrupted = false
-            try send(["type": "connect", "address": address, "name": name, "password": password,
+            let requestId = UUID().uuidString
+            try send(["type": "connect", "connectionId": requestId, "address": address, "name": name, "password": password,
                       "identity": try identity.map { try JSONSerialization.jsonObject(with: $0) } ?? NSNull()])
+            connectionId = requestId
             connectionStarted = started
             connectionLogger.info("Connection startup phase=command_submitted total_ms=\(Int((ProcessInfo.processInfo.systemUptime - started) * 1000))")
+            state.connectionId = requestId
             state.status = "connecting"
             acceptingConnection = true; intent += 1
             UserDefaults.standard.set(address, forKey: "mobilespeak.server.address")
@@ -657,12 +664,12 @@ private func coreChanged(_ context: Int) {
         } catch { self.error = error.localizedDescription }
     }
     func disconnect() {
+        do { try send(["type": "disconnect"]) } catch { self.error = error.localizedDescription; return }
         connectionStarted = nil
         acceptingConnection = false; intent += 1
         audioBusy = false
         audioInterrupted = false
         audio.stop()
-        do { try send(["type": "disconnect"]) } catch { self.error = error.localizedDescription }
         state = Snapshot()
         messages = []
         unread = UnreadSnapshot()

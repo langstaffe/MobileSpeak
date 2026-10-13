@@ -1,0 +1,179 @@
+[
+  {
+    "chats": null,
+    "events": [],
+    "snapshot": {
+      "channels": [],
+      "clients": [],
+      "networkQuality": null,
+      "status": "disconnected"
+    }
+  },
+  {
+    "channelFiles": null,
+    "chats": [],
+    "events": [
+      {
+        "applied": {
+          "noise": "rnnoise"
+        },
+        "detail": null,
+        "generation": 0,
+        "requestId": 0,
+        "requested": {
+          "noise": "dpdfnet2"
+        },
+        "status": "switching",
+        "type": "audio_processing"
+      }
+    ],
+    "fileCache": null,
+    "receiveAudio": {
+      "agc": true
+    },
+    "snapshot": {
+      "channels": [],
+      "clients": [],
+      "connectionId": "fixture-connection",
+      "networkQuality": null,
+      "status": "connecting"
+    },
+    "unread": {
+      "channel": null,
+      "channelCount": 0,
+      "privateCounts": {},
+      "serverId": null
+    }
+  },
+  {
+    "channelFiles": null,
+    "chats": [
+      {
+        "avatarPath": null,
+        "conversation": "channel:id:1",
+        "error": null,
+        "id": "fixture-message",
+        "kind": "channel",
+        "own": true,
+        "senderAvatarHash": "",
+        "senderName": "Speaker",
+        "senderUid": "uid",
+        "status": "sent",
+        "targetId": "id:1",
+        "targetName": "Lobby",
+        "text": "contract",
+        "timestamp": 1
+      }
+    ],
+    "events": [
+      {
+        "applied": {
+          "noise": "rnnoise"
+        },
+        "detail": null,
+        "generation": 0,
+        "requestId": 0,
+        "requested": {
+          "noise": "dpdfnet2"
+        },
+        "status": "switching",
+        "type": "audio_processing"
+      }
+    ],
+    "fileCache": null,
+    "receiveAudio": {
+      "agc": true
+    },
+    "snapshot": {
+      "channels": [],
+      "clients": [],
+      "connectionId": "fixture-connection",
+      "networkQuality": null,
+      "status": "connected"
+    },
+    "unread": {
+      "channel": null,
+      "channelCount": 0,
+      "privateCounts": {},
+      "serverId": null
+    }
+  },
+  {
+    "channelFiles": null,
+    "chats": [],
+    "events": [
+      {
+        "applied": {
+          "noise": "rnnoise"
+        },
+        "detail": null,
+        "generation": 0,
+        "requestId": 0,
+        "requested": {
+          "noise": "dpdfnet2"
+        },
+        "status": "switching",
+        "type": "audio_processing"
+      }
+    ],
+    "fileCache": null,
+    "receiveAudio": {
+      "agc": true
+    },
+    "snapshot": {
+      "channels": [],
+      "clients": [],
+      "connectionId": "fixture-connection",
+      "networkQuality": null,
+      "status": "reconnecting"
+    },
+    "unread": {
+      "channel": null,
+      "channelCount": 0,
+      "privateCounts": {},
+      "serverId": null
+    }
+  },
+  {
+    "channelFiles": null,
+    "chats": [],
+    "events": [
+      {
+        "code": "core_error",
+        "connectionId": "fixture-connection",
+        "detail": "fixture failure",
+        "type": "error"
+      },
+      {
+        "applied": {
+          "noise": "rnnoise"
+        },
+        "detail": null,
+        "generation": 0,
+        "requestId": 0,
+        "requested": {
+          "noise": "dpdfnet2"
+        },
+        "status": "switching",
+        "type": "audio_processing"
+      }
+    ],
+    "fileCache": null,
+    "receiveAudio": {
+      "agc": true
+    },
+    "snapshot": {
+      "channels": [],
+      "clients": [],
+      "connectionId": "fixture-connection",
+      "networkQuality": null,
+      "status": "disconnected"
+    },
+    "unread": {
+      "channel": null,
+      "channelCount": 0,
+      "privateCounts": {},
+      "serverId": null
+    }
+  }
+]

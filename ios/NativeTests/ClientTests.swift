@@ -2049,3 +2049,31 @@ extension ClientTests {
         }
     }
 }
+
+final class BridgeContractTests: XCTestCase {
+    func testSharedRustOutputAndOptionalConnectionFields() throws {
+        let url = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "bridge", withExtension: "json"))
+        let samples = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [[String: Any]])
+        XCTAssertEqual(samples.count, 5)
+        for (index, envelope) in samples.enumerated() {
+            let snapshot = try XCTUnwrap(envelope["snapshot"] as? [String: Any])
+            let decoded = try JSONDecoder().decode(Snapshot.self, from: JSONSerialization.data(withJSONObject: snapshot))
+            XCTAssertEqual(decoded.status, ["disconnected", "connecting", "connected", "reconnecting", "disconnected"][index])
+            XCTAssertEqual(snapshot["connectionId"] as? String, index == 0 ? nil : "fixture-connection")
+            if let chats = envelope["chats"], !(chats is NSNull) {
+                let messages = try JSONDecoder().decode([ChatMessage].self, from: JSONSerialization.data(withJSONObject: chats))
+                XCTAssertEqual(messages.count, index == 2 ? 1 : 0)
+                if index == 2 { XCTAssertEqual(messages.first?.status, .sent) }
+            }
+            for event in envelope["events"] as? [[String: Any]] ?? [] {
+                if event["type"] as? String == "error" {
+                    XCTAssertEqual(event["connectionId"] as? String, "fixture-connection")
+                    XCTAssertEqual(event["detail"] as? String, "fixture failure")
+                } else if event["type"] as? String == "audio_processing" {
+                    XCTAssertNil(event["connectionId"])
+                    XCTAssertEqual((event["requested"] as? [String: String])?["noise"], "dpdfnet2")
+                }
+            }
+        }
+    }
+}

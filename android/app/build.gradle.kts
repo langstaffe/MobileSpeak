@@ -32,6 +32,8 @@ android {
         }
     }
 
+    sourceSets.getByName("androidTest").assets.srcDir("../../native/tests/contracts")
+
     buildFeatures { compose = true; prefab = true }
     externalNativeBuild { cmake { path = file("src/main/cpp/CMakeLists.txt"); version = "3.22.1" } }
     compileOptions {

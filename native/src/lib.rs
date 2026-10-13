@@ -14,6 +14,8 @@ mod audio_processing;
 mod avatar;
 mod badges;
 mod channel_files;
+mod chat;
+mod media;
 #[cfg(feature = "network-diagnostics")]
 mod network_diagnostics;
 mod network_quality;
@@ -39,7 +41,7 @@ use std::{
     sync::{mpsc as std_mpsc, Arc, Mutex},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
-use tokio::{io::AsyncReadExt, sync::mpsc};
+use tokio::sync::mpsc;
 use tsclientlib::prelude::*;
 use tsclientlib::{
     events::Event, ChannelId, ChannelType, CodecEncryptionMode, Connection, DisconnectOptions,
@@ -58,6 +60,8 @@ pub enum Command {
         storage: String,
     },
     Connect {
+        #[serde(default, rename = "connectionId")]
+        connection_id: Option<String>,
         address: String,
         name: String,
         #[serde(default)]
@@ -221,6 +225,7 @@ impl Command {
             {
                 Err("Invalid storage path")
             }
+            Self::Connect { connection_id: Some(id), .. } if id.is_empty() || id.len() > 128 => Err("Invalid connection ID"),
             Self::Connect {
                 address,
                 name,
@@ -389,12 +394,6 @@ struct ChatStore {
     messages: Vec<ChatMessage>,
 }
 impl ChatStore {
-    fn finish(&mut self, id: &str, status: ChatStatus, error: Option<String>) {
-        if let Some(message) = self.messages.iter_mut().find(|message| message.id == id) {
-            message.status = status;
-            message.error = error;
-        }
-    }
     fn fail_pending(&mut self, reason: &str) -> bool {
         let mut changed = false;
         for message in &mut self.messages {
@@ -516,9 +515,11 @@ impl UnreadState {
 
 #[derive(Default)]
 struct Output {
+    connection_id: Option<String>,
     snapshot: Value,
     network_quality: Option<Value>,
     chat_snapshot: Option<Value>,
+    chat_epoch: u64,
     receive_audio: Value,
     channel_files: Value,
     file_cache: Value,
@@ -533,6 +534,7 @@ impl Output {
         }
     }
     fn set_snapshot(&mut self, mut value: Value) {
+        value["connectionId"] = json!(self.connection_id);
         value["networkQuality"] = self.network_quality.clone().unwrap_or(Value::Null);
         if self.snapshot != value {
             self.snapshot = value;
@@ -550,6 +552,7 @@ impl Output {
             self.notify();
         }
     }
+    #[cfg(test)]
     fn set_chats(&mut self, value: Value) {
         self.chat_snapshot = Some(value);
         self.notify();
@@ -560,7 +563,15 @@ impl Output {
             self.notify();
         }
     }
-    fn event(&mut self, event: Value) {
+    fn event(&mut self, mut event: Value) {
+        let kind = event["type"].as_str().unwrap_or_default();
+        let code = event["code"].as_str().unwrap_or_default();
+        let global = event["scope"] == "global" || matches!(kind, "identity" | "audio_processing" | "avatar_local" | "avatar_cleanup_failed" | "file_cache_result")
+            || (kind == "error" && (code.starts_with("receive_audio_read") || code.starts_with("receive_audio_save")
+                || code.starts_with("audio_processing") || code.starts_with("avatar_local")));
+        if !global && event.get("connectionId").is_none() {
+            event["connectionId"] = json!(self.connection_id);
+        }
         if self.events.len() >= 64 {
             self.events.pop_front();
         }
@@ -574,6 +585,7 @@ impl Output {
 }
 
 pub struct Bridge {
+    worker: Option<std::thread::JoinHandle<()>>,
     tx: mpsc::Sender<Command>,
     pcm: mpsc::Sender<(u64, Vec<i16>)>,
     capture_epoch: Arc<AtomicU64>,
@@ -892,24 +904,8 @@ struct PersistJob {
     data: Vec<u8>,
     error_code: &'static str,
 }
-fn persist_chat(
-    tx: &std_mpsc::Sender<PersistJob>,
-    root: Option<&Path>,
-    server: Option<&str>,
-    store: &ChatStore,
-) {
-    let (Some(root), Some(server)) = (root, server) else {
-        return;
-    };
-    if let Ok(data) = serde_json::to_vec(store) {
-        let _ = tx.send(PersistJob {
-            path: chat_path(root, server),
-            data,
-            error_code: "chat_history_save_failed",
-        });
-    }
-}
 fn chat_snapshot(store: &ChatStore, storage: Option<&Path>, server: Option<&str>) -> Value {
+    let mut avatars = HashMap::new();
     Value::Array(
         store
             .messages
@@ -921,12 +917,8 @@ fn chat_snapshot(store: &ChatStore, storage: Option<&Path>, server: Option<&str>
                         if message.sender_uid.is_empty() || message.sender_avatar_hash.is_empty() {
                             None
                         } else {
-                            path_if_cached(avatar_path(
-                                root,
-                                server,
-                                &message.sender_uid,
-                                &message.sender_avatar_hash,
-                            ))
+                            avatars.entry((&message.sender_uid, &message.sender_avatar_hash))
+                                .or_insert_with(|| path_if_cached(avatar_path(root, server, &message.sender_uid, &message.sender_avatar_hash))).clone()
                         }
                     })
                 });
@@ -938,17 +930,6 @@ fn chat_snapshot(store: &ChatStore, storage: Option<&Path>, server: Option<&str>
             .collect(),
     )
 }
-fn publish_chat(
-    out: &Arc<Mutex<Output>>,
-    store: &ChatStore,
-    storage: Option<&Path>,
-    server: Option<&str>,
-) {
-    out.lock()
-        .unwrap()
-        .set_chats(chat_snapshot(store, storage, server));
-}
-
 #[derive(Clone)]
 struct MediaRequest {
     key: String,
@@ -1012,30 +993,13 @@ fn desired_media(con: &Connection, storage: &Path) -> Vec<MediaRequest> {
     }
     result
 }
-fn schedule_media(
-    con: &mut Connection,
-    storage: Option<&Path>,
-    active: &mut HashSet<String>,
-    failed: &mut HashSet<String>,
-    transfers: &mut HashMap<FiletransferHandle, MediaRequest>,
-) {
+fn schedule_media(con: &mut Connection, storage: Option<&Path>, downloads: &mut media::Downloads) {
     let Some(storage) = storage else { return };
     for request in desired_media(con, storage) {
-        if transfers.len() >= MAX_MEDIA_TRANSFERS {
-            break;
-        }
-        if request.local.is_file() || active.contains(&request.key) || failed.contains(&request.key)
-        {
-            continue;
-        }
+        if !downloads.wants(&request.key, &request.local) { continue; }
         match con.download_file(ChannelId(0), &request.remote, None, None) {
-            Ok(handle) => {
-                active.insert(request.key.clone());
-                transfers.insert(handle, request);
-            }
-            Err(_) => {
-                failed.insert(request.key);
-            }
+            Ok(handle) => downloads.wait(handle, request.key, request.local),
+            Err(_) => downloads.reject(request.key),
         }
     }
 }
@@ -1059,62 +1023,13 @@ fn desired_badges(con: &Connection, storage: &Path) -> Vec<BadgeRequest> {
         })
         .collect()
 }
-fn schedule_badges(
-    con: &Connection,
-    storage: Option<&Path>,
-    active: &mut HashSet<String>,
-    failed: &HashSet<String>,
-    tx: &mpsc::UnboundedSender<(BadgeRequest, Result<(), String>)>,
-) {
+fn schedule_badges(con: &Connection, storage: Option<&Path>, downloads: &mut media::Downloads, tx: &mpsc::UnboundedSender<media::Completion>) {
     let Some(storage) = storage else { return };
     for request in desired_badges(con, storage) {
-        if active.len() >= MAX_MEDIA_TRANSFERS {
-            break;
+        if downloads.wants(&request.key, &request.local) {
+            downloads.badge(request.key, request.local, request.url, tx);
         }
-        if request.local.is_file() || active.contains(&request.key) || failed.contains(&request.key)
-        {
-            continue;
-        }
-        active.insert(request.key.clone());
-        let tx = tx.clone();
-        tokio::spawn(async move {
-            let result = download_badge(&request).await;
-            let _ = tx.send((request, result));
-        });
     }
-}
-async fn download_badge(request: &BadgeRequest) -> Result<(), String> {
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(15))
-        .build()
-        .map_err(|error| error.to_string())?;
-    let mut response = client
-        .get(&request.url)
-        .send()
-        .await
-        .and_then(reqwest::Response::error_for_status)
-        .map_err(|error| error.to_string())?;
-    if response
-        .content_length()
-        .is_some_and(|size| size == 0 || size > MAX_IMAGE_BYTES)
-    {
-        return Err("Invalid badge image size".into());
-    }
-    let mut bytes = Vec::new();
-    while let Some(chunk) = response.chunk().await.map_err(|error| error.to_string())? {
-        if bytes.len() + chunk.len() > MAX_IMAGE_BYTES as usize {
-            return Err("Badge image is too large".into());
-        }
-        bytes.extend_from_slice(&chunk);
-    }
-    if !image_data_valid(&bytes) {
-        return Err("Invalid badge image data".into());
-    }
-    let path = request.local.clone();
-    tokio::task::spawn_blocking(move || atomic_write(&path, &bytes))
-        .await
-        .map_err(|error| error.to_string())?
-        .map_err(|error| error.to_string())
 }
 
 enum PendingOperation {
@@ -1125,7 +1040,12 @@ enum PendingOperation {
     AvatarDelete(avatar::Token),
     AvatarDrain(avatar::Token),
     AvatarStop(avatar::Token),
+    Join,
     Other(&'static str),
+}
+
+fn is_joining(operations: &HashMap<MessageHandle, PendingOperation>) -> bool {
+    operations.values().any(|op| matches!(op, PendingOperation::Join))
 }
 
 fn outgoing_message(
@@ -1411,6 +1331,8 @@ async fn session(
     out: &Arc<Mutex<Output>>,
     storage: Option<PathBuf>,
     persist_tx: &std_mpsc::Sender<PersistJob>,
+    chat_worker: &chat::Worker,
+    downloads: &mut media::Downloads,
     app_active: &mut bool,
     processing: &mut AudioProcessingState,
     processor: &mut audio_processing::Processor,
@@ -1421,6 +1343,7 @@ async fn session(
     files_rx: &mut mpsc::UnboundedReceiver<channel_files::Update>,
 ) -> Result<bool, Box<dyn std::error::Error>> {
     let Command::Connect {
+        connection_id,
         address,
         name,
         password,
@@ -1431,8 +1354,12 @@ async fn session(
     };
     let connection_started = Instant::now();
     diagnostic!("Connection startup phase=worker_begin");
-    out.lock().unwrap().status("connecting");
-    out.lock().unwrap().set_chats(json!([]));
+    {
+        let mut output = out.lock().unwrap();
+        output.connection_id = connection_id;
+        output.status("connecting");
+    }
+    let mut chats = chat_worker.session();
     let mut unread = UnreadState {
         app_active: *app_active,
         ..Default::default()
@@ -1479,20 +1406,13 @@ async fn session(
     let mut network = network_quality::History::new(Instant::now());
     #[cfg(feature = "network-diagnostics")]
     let mut network_trace: Option<network_diagnostics::Diagnostics> = None;
-    let mut chats = ChatStore::default();
-    let mut chat_writable = true;
     let mut operations = HashMap::<MessageHandle, PendingOperation>::new();
     let mut avatar = avatar::AvatarSync::default();
     avatar.ready();
     avatar.observe(avatar_store, out);
     let (avatar_tx, mut avatar_rx) = mpsc::unbounded_channel::<avatar::Completion>();
-    let mut media_active = HashSet::<String>::new();
-    let mut media_failed = HashSet::<String>::new();
-    let mut transfers = HashMap::<FiletransferHandle, MediaRequest>::new();
-    let (media_tx, mut media_rx) = mpsc::unbounded_channel::<(MediaRequest, Result<(), String>)>();
-    let mut badge_active = HashSet::<String>::new();
-    let mut badge_failed = HashSet::<String>::new();
-    let (badge_tx, mut badge_rx) = mpsc::unbounded_channel::<(BadgeRequest, Result<(), String>)>();
+    let (media_tx, mut media_rx) = mpsc::unbounded_channel::<media::Completion>();
+    let mut media_retry = Instant::now();
     let mut clock = tokio::time::interval(Duration::from_millis(20));
     clock.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let deadline = tokio::time::sleep(Duration::from_secs(30));
@@ -1644,31 +1564,14 @@ async fn session(
                         network = network_quality::History::new(Instant::now());
                         out.lock().unwrap().network_quality = None;
                         current_server = connected_server;
-                        chats = ChatStore::default();
-                        chat_writable = true;
-                        if let (Some(root), Some(server)) = (storage.as_deref(), current_server.as_deref()) {
-                            match load_chat(root, server) {
-                                Ok(mut loaded) => {
-                                    if loaded.fail_pending("message_unconfirmed_after_restart") {
-                                        persist_chat(persist_tx, Some(root), Some(server), &loaded);
-                                    }
-                                    chats = loaded;
-                                }
-                                Err(error) => {
-                                    chat_writable = false;
-                                    report_code(out, "chat_history_read_failed", Some(error));
-                                }
-                            }
-                        }
-                        publish_chat(out, &chats, storage.as_deref(), current_server.as_deref());
+                        chats.select(storage.clone(), current_server.clone());
                     }
                     unread.sync(current_server.clone(), current_channel_conversation(&con));
                     let received = received_messages(events, &con);
                     if !received.is_empty() {
                         for message in &received { unread.record(message); }
-                        chats.messages.extend(received);
-                        if chat_writable { persist_chat(persist_tx, storage.as_deref(), current_server.as_deref(), &chats); }
-                        publish_chat(out, &chats, storage.as_deref(), current_server.as_deref());
+                        chats.add(received);
+
                     }
                     out.lock().unwrap().set_unread(unread.snapshot());
                     snapshot(&con, out, &audio, voice.speaking(), storage.as_deref(), &receive);
@@ -1676,8 +1579,8 @@ async fn session(
                         diagnostic!("Connection startup phase=snapshot_published total_ms={}", connection_started.elapsed().as_millis());
                     }
                     if subscribed { avatar.check(&mut con, storage.as_deref(), &avatar_tx, &mut operations, out); }
-                    schedule_media(&mut con, storage.as_deref(), &mut media_active, &mut media_failed, &mut transfers);
-                    schedule_badges(&con, storage.as_deref(), &mut badge_active, &badge_failed, &badge_tx);
+                    schedule_media(&mut con, storage.as_deref(), downloads);
+                    schedule_badges(&con, storage.as_deref(), downloads, &media_tx);
                 },
                 Some(Ok(StreamItem::IdentityLevelIncreased)) => {
                     diagnostic!("Connection startup phase=identity_level_ready total_ms={}", connection_started.elapsed().as_millis());
@@ -1733,9 +1636,9 @@ async fn session(
                             Ok(()) => chats.finish(&id, ChatStatus::Sent, None),
                             Err(_) => chats.finish(&id, ChatStatus::Failed, Some("message_send_failed".into())),
                         }
-                        if chat_writable { persist_chat(persist_tx, storage.as_deref(), current_server.as_deref(), &chats); }
-                        publish_chat(out, &chats, storage.as_deref(), current_server.as_deref());
+
                     }
+                    Some(PendingOperation::Join) => if let Err(error) = result { report_code(out, "join_channel_failed", Some(error.to_string())); },
                     Some(PendingOperation::Other(code)) => if let Err(error) = result {
                         report_code(out, code, Some(error.to_string()));
                     },
@@ -1788,27 +1691,7 @@ async fn session(
                         continue;
                     }
                     let download = download.unwrap();
-                    if let Some(request) = transfers.remove(&handle) {
-                        let tx = media_tx.clone();
-                        tokio::spawn(async move {
-                            let result = if download.size == 0 || download.size > MAX_IMAGE_BYTES {
-                                Err("Invalid image size".to_owned())
-                            } else {
-                                let mut bytes = Vec::with_capacity(download.size as usize);
-                                match download.stream.take(MAX_IMAGE_BYTES + 1).read_to_end(&mut bytes).await {
-                                    Ok(_) if bytes.len() as u64 == download.size && image_data_valid(&bytes) => {
-                                        let path = request.local.clone();
-                                        tokio::task::spawn_blocking(move || atomic_write(&path, &bytes)).await
-                                            .map_err(|error| error.to_string())
-                                            .and_then(|result| result.map_err(|error| error.to_string()))
-                                    }
-                                    Ok(_) => Err("Invalid image data".to_owned()),
-                                    Err(error) => Err(error.to_string()),
-                                }
-                            };
-                            let _ = tx.send((request, result));
-                        });
-                    }
+                    downloads.download(handle, download, &media_tx);
                 },
                 Some(Ok(StreamItem::FiletransferFailed(handle, error))) => {
                     if files.owns(handle) { files.failed(handle, error, out); continue; }
@@ -1818,11 +1701,8 @@ async fn session(
                         if subscribed { avatar.check(&mut con, storage.as_deref(), &avatar_tx, &mut operations, out); }
                         continue;
                     }
-                    if let Some(request) = transfers.remove(&handle) {
-                        media_active.remove(&request.key);
-                        media_failed.insert(request.key);
-                    }
-                    schedule_media(&mut con, storage.as_deref(), &mut media_active, &mut media_failed, &mut transfers);
+                    downloads.failed(handle);
+                    schedule_media(&mut con, storage.as_deref(), downloads);
                 },
                 Some(Ok(StreamItem::NetworkStatsUpdated)) => {
                     #[cfg(feature = "network-diagnostics")]
@@ -1837,19 +1717,14 @@ async fn session(
                     files.disconnected(out);
                     network = network_quality::History::new(Instant::now());
                     avatar.observe(avatar_store, out);
-                    if chats.fail_pending("message_unconfirmed_after_reconnect") {
-                        if chat_writable { persist_chat(persist_tx, storage.as_deref(), current_server.as_deref(), &chats); }
-                        publish_chat(out, &chats, storage.as_deref(), current_server.as_deref());
-                    }
+                    chats.fail_pending("message_unconfirmed_after_reconnect");
                     operations.clear();
                     if avatar.disconnected() {
                         out.lock().unwrap().event(json!({"type":"avatar_sync","status":"idle","detail":null}));
                     }
                     subscribed = false;
                     receive.clear();
-                    media_active.clear();
-                    media_failed.clear();
-                    transfers.clear();
+                    for handle in downloads.cancel() { con.cancel_filetransfer(handle); }
                     audio.reset(); receive_traces.clear(); playback.clear();
                     invalidate_capture(processor, capture_epoch); let _ = voice.interrupt(|_, _| Ok(()));
                     voice_channel = None;
@@ -1859,24 +1734,20 @@ async fn session(
                 Some(Err(error)) => return Err(error.into()),
                 None => return Ok(false),
             },
-            Some((request, result)) = media_rx.recv() => {
-                media_active.remove(&request.key);
-                if result.is_err() { media_failed.insert(request.key); }
-                snapshot(&con, out, &audio, voice.speaking(), storage.as_deref(), &receive);
-                publish_chat(out, &chats, storage.as_deref(), current_server.as_deref());
-                schedule_media(&mut con, storage.as_deref(), &mut media_active, &mut media_failed, &mut transfers);
+            Some(completion) = media_rx.recv() => {
+                if downloads.complete(completion) {
+                    chats.refresh();
+                    snapshot(&con, out, &audio, voice.speaking(), storage.as_deref(), &receive);
+
+                }
+                schedule_media(&mut con, storage.as_deref(), downloads);
+                schedule_badges(&con, storage.as_deref(), downloads, &media_tx);
             },
             Some(update) = files_rx.recv() => { files.update(update, out); files.pump(&mut con, &mut operations); },
             Some(completion) = avatar_rx.recv() => {
                 avatar.observe(avatar_store, out);
                 avatar.completed(completion, &mut con, &mut operations, out);
                 if subscribed { avatar.check(&mut con, storage.as_deref(), &avatar_tx, &mut operations, out); }
-            },
-            Some((request, result)) = badge_rx.recv() => {
-                badge_active.remove(&request.key);
-                if result.is_err() { badge_failed.insert(request.key); }
-                snapshot(&con, out, &audio, voice.speaking(), storage.as_deref(), &receive);
-                schedule_badges(&con, storage.as_deref(), &mut badge_active, &badge_failed, &badge_tx);
             },
             received = rx.recv() => match received {
                 Some(Command::FileCacheInspect { request_id }) => { files.cache_command(request_id, false, storage.as_deref(), files_tx, out); },
@@ -1885,6 +1756,7 @@ async fn session(
                     files.command(command, &mut con, storage.as_deref(), &mut operations, out);
                 },
                 Some(Command::Disconnect) | None => {
+                    for handle in downloads.cancel() { con.cancel_filetransfer(handle); }
                     avatar.disconnected();
                     invalidate_capture(processor, capture_epoch); let _ = voice.interrupt(|codec, data| send_voice(&mut con, codec, data));
                     playback.clear(); out.lock().unwrap().status("disconnected");
@@ -1897,7 +1769,7 @@ async fn session(
                     }
                     return Ok(false);
                 },
-                Some(Command::Shutdown) => { avatar.disconnected(); invalidate_capture(processor, capture_epoch); let _ = voice.interrupt(|codec, data| send_voice(&mut con, codec, data)); playback.clear(); out.lock().unwrap().status("disconnected"); let _ = con.disconnect(DisconnectOptions::new()); return Ok(true); },
+                Some(Command::Shutdown) => { for handle in downloads.cancel() { con.cancel_filetransfer(handle); } avatar.disconnected(); invalidate_capture(processor, capture_epoch); let _ = voice.interrupt(|codec, data| send_voice(&mut con, codec, data)); playback.clear(); out.lock().unwrap().status("disconnected"); let _ = con.disconnect(DisconnectOptions::new()); return Ok(true); },
                 #[cfg(test)]
                 Some(Command::PanicSession) => panic!("injected session failure"),
                 Some(Command::Connect { .. }) => report_code(out, "disconnect_before_connect", None),
@@ -1933,7 +1805,7 @@ async fn session(
                     audio.reset(); receive_traces.clear(); playback.clear(); playback.request();
                     snapshot(&con, out, &audio, false, storage.as_deref(), &receive);
                     let handle = request.send_with_result(&mut con)?;
-                    operations.insert(handle, PendingOperation::Other("join_channel_failed"));
+                    operations.insert(handle, PendingOperation::Join);
                 },
                 Some(Command::Mute { input, output }) => {
                     if input || output { invalidate_capture(processor, capture_epoch); let _ = voice.interrupt(|codec, data| send_voice(&mut con, codec, data)); }
@@ -1971,17 +1843,16 @@ async fn session(
                     match outgoing_message(&con, request_id.clone(), target, Some(channel), None, message.clone()) {
                         Ok(chat) => {
                             let id = chat.id.clone();
-                            chats.messages.push(chat);
+                            chats.add(vec![chat]);
                             let send = con.get_state()?.send_message(target, &message).send_with_result(&mut con);
                             match send {
                                 Ok(handle) => { operations.insert(handle, PendingOperation::Chat(id)); },
                                 Err(_) => chats.finish(&id, ChatStatus::Failed, Some("message_send_failed".into())),
                             }
-                            if chat_writable { persist_chat(persist_tx, storage.as_deref(), current_server.as_deref(), &chats); }
-                            publish_chat(out, &chats, storage.as_deref(), current_server.as_deref());
+
                         }
                         Err(error) => {
-                            chats.messages.push(rejected_message(
+                            chats.add(vec![rejected_message(
                                 &con,
                                 request_id,
                                 target,
@@ -1989,9 +1860,8 @@ async fn session(
                                 None,
                                 message,
                                 error.to_owned(),
-                            ));
-                            if chat_writable { persist_chat(persist_tx, storage.as_deref(), current_server.as_deref(), &chats); }
-                            publish_chat(out, &chats, storage.as_deref(), current_server.as_deref());
+                            )]);
+
                             report_code(out, error, None);
                         }
                     }
@@ -2001,17 +1871,16 @@ async fn session(
                     match outgoing_message(&con, request_id.clone(), target, None, Some(&uid), message.clone()) {
                         Ok(chat) => {
                             let id = chat.id.clone();
-                            chats.messages.push(chat);
+                            chats.add(vec![chat]);
                             let send = con.get_state()?.send_message(target, &message).send_with_result(&mut con);
                             match send {
                                 Ok(handle) => { operations.insert(handle, PendingOperation::Chat(id)); },
                                 Err(_) => chats.finish(&id, ChatStatus::Failed, Some("message_send_failed".into())),
                             }
-                            if chat_writable { persist_chat(persist_tx, storage.as_deref(), current_server.as_deref(), &chats); }
-                            publish_chat(out, &chats, storage.as_deref(), current_server.as_deref());
+
                         }
                         Err(error) => {
-                            chats.messages.push(rejected_message(
+                            chats.add(vec![rejected_message(
                                 &con,
                                 request_id,
                                 target,
@@ -2019,9 +1888,8 @@ async fn session(
                                 Some(&uid),
                                 message,
                                 error.to_owned(),
-                            ));
-                            if chat_writable { persist_chat(persist_tx, storage.as_deref(), current_server.as_deref(), &chats); }
-                            publish_chat(out, &chats, storage.as_deref(), current_server.as_deref());
+                            )]);
+
                             report_code(out, error, None);
                         }
                     }
@@ -2030,7 +1898,7 @@ async fn session(
             Some((epoch, samples)) = pcm.recv() => {
                 if epoch != capture_epoch.load(Ordering::Acquire) { continue; }
                 if audio_send_allowed(input_muted, output_muted, subscribed, con.can_send_audio(),
-                    operations.values().any(|op| matches!(op, PendingOperation::Other("join_channel_failed")))) {
+                    is_joining(&operations)) {
                     processor.capture(&samples);
                 }
             },
@@ -2038,7 +1906,7 @@ async fn session(
                 match event {
                     audio_processing::Event::Audio { generation, epoch, frame } => {
                         if epoch!=processor.epoch() || generation!=processing.active_generation || !audio_send_allowed(input_muted, output_muted, subscribed, con.can_send_audio(),
-                            operations.values().any(|op| matches!(op, PendingOperation::Other("join_channel_failed")))) {continue}
+                            is_joining(&operations)) {continue}
                         // Resolve current channel/codec/permissions at consumption; no connection state leaves this loop.
                         let state=con.get_state()?;
                         let codec=state.clients.get(&state.own_client).and_then(|me|state.channels.get(&me.channel)).map(|c|c.codec);
@@ -2063,6 +1931,13 @@ async fn session(
                 }
             },
             _ = clock.tick() => {
+                let (expired, changed) = downloads.expire(Instant::now());
+                for handle in expired { con.cancel_filetransfer(handle); }
+                if changed || Instant::now() >= media_retry {
+                    media_retry = Instant::now() + Duration::from_secs(1);
+                    schedule_media(&mut con, storage.as_deref(), downloads);
+                    schedule_badges(&con, storage.as_deref(), downloads, &media_tx);
+                }
                 receive_prefs.flush(storage.as_deref(), persist_tx, out, false);
                 files.tick(&mut con, &mut operations, out);
                 if let Some(quality) = network.expire(Instant::now()) {
@@ -2110,7 +1985,7 @@ impl Bridge {
         let worker_capture_epoch = capture_epoch.clone();
         let persistence_output = output.clone();
         let (persist_tx, persist_rx) = std_mpsc::channel::<PersistJob>();
-        std::thread::spawn(move || {
+        let persistence_thread = std::thread::spawn(move || {
             while let Ok(first) = persist_rx.recv() {
                 let mut latest = HashMap::from([(first.path, (first.data, first.error_code))]);
                 while let Ok(job) = persist_rx.try_recv() {
@@ -2123,7 +1998,8 @@ impl Bridge {
                 }
             }
         });
-        std::thread::spawn(move || {
+        let chat_worker = chat::Worker::new(output.clone());
+        let worker = std::thread::spawn(move || {
             let runtime = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
@@ -2138,6 +2014,7 @@ impl Bridge {
                 let mut processing = AudioProcessingState::default();
                 let mut processor = audio_processing::Processor::new();
                 let mut files = channel_files::Files::default();
+                let mut downloads = media::Downloads::default();
                 let (files_tx, mut files_rx) = mpsc::unbounded_channel();
                 files.publish(&worker_output);
                 loop {
@@ -2173,6 +2050,8 @@ impl Bridge {
                                 &worker_output,
                                 storage.clone(),
                                 &persist_tx,
+                                &chat_worker,
+                                &mut downloads,
                                 &mut app_active,
                                 &mut processing,
                                 &mut processor,
@@ -2196,12 +2075,13 @@ impl Bridge {
                                 _ => {}
                             }
                             receive_prefs.flush(storage.as_deref(), &persist_tx, &worker_output, true);
+                            downloads.cancel();
                             files.disconnected(&worker_output);
                             worker_playback.clear();
                             invalidate_capture(&mut processor, &worker_capture_epoch);
                             worker_output.lock().unwrap().status("disconnected");
                             avatar::offline(&worker_avatar_store, &worker_output).await;
-                            worker_output.lock().unwrap().set_chats(json!([]));
+                            chat_worker.clear();
                             worker_output
                                 .lock()
                                 .unwrap()
@@ -2220,8 +2100,12 @@ impl Bridge {
                 }
                 receive_prefs.flush(storage.as_deref(), &persist_tx, &worker_output, true);
             });
+            drop(chat_worker);
+            drop(persist_tx);
+            let _ = persistence_thread.join();
         });
         Self {
+            worker: Some(worker),
             tx,
             pcm,
             capture_epoch,
@@ -2265,13 +2149,26 @@ impl Bridge {
             _ => self.tx.try_send(request).map_err(|error| error.to_string()),
         }
     }
-    pub fn poll(&self) -> Value {
-        let mut out = self.output.lock().unwrap();
-        let events: Vec<_> = out.events.drain(..).collect();
-        let chats = out.chat_snapshot.take().unwrap_or(Value::Null);
-        json!({"snapshot":out.snapshot,"events":events,"chats":chats,"unread":out.unread,"channelFiles":out.channel_files,"fileCache":out.file_cache,"receiveAudio":out.receive_audio})
-    }
+    pub fn poll(&self) -> Value { poll_output(&self.output) }
+
 }
+#[cfg(test)]
+static POLL_LOCK_NANOS: AtomicU64 = AtomicU64::new(0);
+fn poll_output(output: &Arc<Mutex<Output>>) -> Value {
+        let (mut envelope, chats) = {
+            let mut out = output.lock().unwrap();
+            #[cfg(test)] let started = Instant::now();
+            let events: Vec<_> = out.events.drain(..).collect();
+            let chats = out.chat_snapshot.take().unwrap_or(Value::Null);
+            let envelope = json!({"snapshot":out.snapshot,"events":events,"unread":out.unread,"channelFiles":out.channel_files,"fileCache":out.file_cache,"receiveAudio":out.receive_audio});
+            #[cfg(test)] POLL_LOCK_NANOS.fetch_max(started.elapsed().as_nanos() as u64, Ordering::Relaxed);
+            (envelope, chats)
+        };
+        // Move the history into the envelope. JSON macro serialization would deep-copy it.
+        envelope.as_object_mut().unwrap().insert("chats".into(), chats);
+        envelope
+    }
+
 impl Default for Bridge {
     fn default() -> Self {
         Self::new()
@@ -2279,7 +2176,9 @@ impl Default for Bridge {
 }
 impl Drop for Bridge {
     fn drop(&mut self) {
-        let _ = self.tx.try_send(Command::Shutdown);
+        self.output.lock().unwrap().notifier = None;
+        let _ = futures::executor::block_on(self.tx.send(Command::Shutdown));
+        if let Some(worker) = self.worker.take() { let _ = worker.join(); }
     }
 }
 
@@ -3010,4 +2909,67 @@ pub unsafe extern "C" fn ts_render_count(handle: *const playback::Playback) -> u
     handle
         .as_ref()
         .map_or(0, |p| p.renders.load(Ordering::Relaxed))
+}
+
+#[cfg(test)]
+mod contract_regressions {
+    use super::*;
+    #[test]
+    fn shared_bridge_samples_match_rust_output() {
+        let mut samples = Vec::new();
+        let output = Arc::new(Mutex::new(Output::default()));
+        let mut legacy = Output::default(); legacy.status("disconnected");
+        let mut missing = legacy.snapshot.clone(); missing.as_object_mut().unwrap().remove("connectionId");
+        samples.push(json!({"snapshot":missing,"events":[],"chats":null}));
+        for status in ["connecting", "connected", "reconnecting", "disconnected"] {
+            let mut out = output.lock().unwrap();
+            out.connection_id = Some("fixture-connection".into()); out.status(status);
+            out.set_unread(UnreadState::default().snapshot());
+            out.receive_audio = json!({"agc":true});
+            out.set_chats(json!([]));
+            if status == "connected" {
+                let store = ChatStore { messages: vec![ChatMessage { id:"fixture-message".into(), conversation:"channel:id:1".into(), kind:ChatKind::Channel, target_id:"id:1".into(), target_name:"Lobby".into(), sender_uid:"uid".into(), sender_name:"Speaker".into(), sender_avatar_hash:String::new(), own:true, text:"contract".into(), timestamp:1, status:ChatStatus::Sent, error:None }] };
+                out.set_chats(chat_snapshot(&store, None, None));
+            }
+            if status == "disconnected" { out.event(json!({"type":"error","code":"core_error","detail":"fixture failure"})); }
+            drop(out);
+            let mut processing = AudioProcessingState::default();
+            processing.requested.noise = NoiseSuppressionMode::Dpdfnet2;
+            processing.publish(&output, "switching", None);
+            samples.push(poll_output(&output));
+        }
+        let data = serde_json::to_string_pretty(&samples).unwrap() + "\n";
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/contracts/bridge.json");
+        if std::env::var_os("UPDATE_BRIDGE_FIXTURES").is_some() { fs::write(&path, &data).unwrap(); }
+        assert_eq!(fs::read_to_string(path).unwrap(), data);
+    }
+    #[test]
+    fn connection_identity_survives_terminal_status_and_global_events_are_unscoped() {
+        let mut out = Output::default(); out.connection_id = Some("new".into());
+        for status in ["connecting", "connected", "reconnecting", "disconnected"] {
+            out.status(status); assert_eq!(out.snapshot["connectionId"], "new");
+        }
+        out.event(json!({"type":"error","code":"core_error"}));
+        out.event(json!({"type":"identity","value":{}}));
+        out.event(json!({"type":"audio_processing"}));
+        assert_eq!(out.events[0]["connectionId"], "new");
+        assert!(out.events[1].get("connectionId").is_none());
+        assert!(out.events[2].get("connectionId").is_none());
+        let legacy: Command = serde_json::from_value(json!({"type":"connect","address":"localhost","name":"test"})).unwrap();
+        assert!(matches!(legacy, Command::Connect { connection_id: None, .. }));
+    }
+    #[test]
+    fn join_gate_tracks_all_requests_and_cleanup() {
+        let mut operations = HashMap::new();
+        operations.insert(MessageHandle(1), PendingOperation::Join);
+        operations.insert(MessageHandle(2), PendingOperation::Join);
+        assert!(!audio_send_allowed(false, false, true, true, is_joining(&operations)));
+        operations.remove(&MessageHandle(1)); // success or failure completes only this operation
+        assert!(is_joining(&operations));
+        operations.remove(&MessageHandle(2));
+        assert!(audio_send_allowed(false, false, true, true, is_joining(&operations)));
+        operations.insert(MessageHandle(3), PendingOperation::Join);
+        operations.clear(); // disconnect/reconnect cancels every outstanding operation
+        assert!(!is_joining(&operations));
+    }
 }

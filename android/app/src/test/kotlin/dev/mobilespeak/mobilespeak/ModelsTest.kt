@@ -90,3 +90,56 @@ class ModelsTest {
         assertEquals(listOf(0, 1, 0, 0), result.map { it.second })
     }
 }
+
+class SessionOrderingTest {
+    @Test fun connectionGateRejectsOldQueuedAndCancelledOutputs() {
+        val gate = ConnectionGate()
+        assertEquals(true, gate.accepts(null, "disconnected"))
+        gate.begin("first")
+        assertEquals(false, gate.accepts(null, "disconnected")) // command queued, Rust not processing yet
+        assertEquals(true, gate.accepts("first", "connecting"))
+        gate.cancel()
+        assertEquals(false, gate.accepts("first", "connected"))
+        gate.begin("second")
+        for (status in listOf("disconnected", "connecting", "connected")) assertEquals(false, gate.accepts("first", status))
+        for (status in listOf("connecting", "connected", "reconnecting", "disconnected")) assertEquals(true, gate.accepts("second", status))
+        assertEquals(false, gate.accepts("first")) // old error
+        assertEquals(true, gate.accepts("second"))
+    }
+
+    @Test fun bookmarkTransactionsSerializeReadComputeSavePublishAndKeepFailuresAtomic() {
+        val original = Bookmark.create("a", "", "host", "9987", "user", "password")
+        var disk = listOf(original)
+        var memory = disk
+        val saving = java.util.concurrent.CountDownLatch(1)
+        val release = java.util.concurrent.CountDownLatch(1)
+        var blockSave = true
+        var failSave = false
+        val transactions = BookmarkTransactions({ disk }, { next ->
+            if (blockSave) { saving.countDown(); check(release.await(5, java.util.concurrent.TimeUnit.SECONDS)); blockSave = false }
+            check(!failSave) { "disk failure" }
+            disk = next
+        }, { memory = it })
+        val pool = java.util.concurrent.Executors.newFixedThreadPool(2)
+        try {
+            val automatic = pool.submit { transactions.change { latest -> latest.map { it.copy(title = "Server") } to Unit } }
+            check(saving.await(5, java.util.concurrent.TimeUnit.SECONDS))
+            val deletionStarted = java.util.concurrent.CountDownLatch(1)
+            val deletion = pool.submit { deletionStarted.countDown(); transactions.change { latest -> latest.filterNot { it.id == "a" } to Unit } }
+            check(deletionStarted.await(5, java.util.concurrent.TimeUnit.SECONDS))
+            release.countDown(); automatic.get(); deletion.get()
+            assertEquals(emptyList<Bookmark>(), disk); assertEquals(disk, memory)
+            transactions.change { latest -> (latest + original) to Unit }
+            transactions.change { latest -> latest.map { it.copy(title = "Manual", automaticallyNamed = false, password = "edited") } to Unit }
+            transactions.change { latest -> latest.map { if (it.automaticallyNamed) it.copy(title = "Auto") else it } to Unit }
+            val second = original.copy(id = "b", host = "second")
+            transactions.change { latest -> (latest + second) to Unit }
+            assertEquals(listOf("Manual", original.title), disk.map { it.title })
+            assertEquals("edited", disk.first().password)
+            val before = disk
+            failSave = true
+            assertThrows(IllegalStateException::class.java) { transactions.change { emptyList<Bookmark>() to Unit } }
+            assertEquals(before, disk); assertEquals(before, memory)
+        } finally { release.countDown(); pool.shutdownNow() }
+    }
+}

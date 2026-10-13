@@ -61,7 +61,7 @@ target/
 native/target/
 
 # Project-specific generated/native binaries
-ios/NativeCore/TeamSpeakCore.xcframework/
+ios/NativeCore/TeamSpeakCore.xcframework
 android/app/src/main/jniLibs/
 
 # Local reference and diagnostic files not used by application builds
@@ -148,3 +148,16 @@ native/vendor/
 # Attribution for the fixed protocol dependency is part of the source tree.
 !/native/patched/tsproto/README.md
 !/native/patched/tsproto/MOBILESPEAK.md
+
+# Local project instructions and validation documents.
+/AGENTS.md
+/docs/bridge-contract.md
+/docs/regression-validation.md
+
+# Maintained regression tools.
+!native/examples/
+native/examples/*
+!native/examples/voice_probe.rs
+ios/NativeCore/.core-*
+!/native/patched/tsclientlib/README.md
+!/native/patched/tsclientlib/MOBILESPEAK.md
