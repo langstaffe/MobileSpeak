@@ -35,7 +35,8 @@
     <tr><td style="vertical-align: middle; text-align: center;">语音通信</td><td style="vertical-align: middle; text-align: center;">✅</td><td style="vertical-align: middle; text-align: center;">✅</td></tr>
     <tr><td style="vertical-align: middle; text-align: center;">协议加密与安全身份</td><td style="vertical-align: middle; text-align: center;">✅</td><td style="vertical-align: middle; text-align: center;">✅</td></tr>
     <tr><td style="vertical-align: middle; text-align: center;">音频编解码器选择</td><td style="vertical-align: middle; text-align: center;">✅</td><td style="vertical-align: middle; text-align: center;">❌</td></tr>
-    <tr><td style="vertical-align: middle; text-align: center;">自动麦克风音量调整</td><td style="vertical-align: middle; text-align: center;">✅</td><td style="vertical-align: middle; text-align: center;">❌</td></tr>
+    <tr><td style="vertical-align: middle; text-align: center;">自动麦克风音量调整</td><td style="vertical-align: middle; text-align: center;">✅</td><td style="vertical-align: middle; text-align: center;">✅（依赖系统支持）</td></tr>
+    <tr><td style="vertical-align: middle; text-align: center;">调节其他用户音量</td><td style="vertical-align: middle; text-align: center;">✅</td><td style="vertical-align: middle; text-align: center;">✅</td></tr>
     <tr><td style="vertical-align: middle; text-align: center;">背景噪声抑制</td><td style="vertical-align: middle; text-align: center;">✅</td><td style="vertical-align: middle; text-align: center;">✅</td></tr>
     <tr><td style="vertical-align: middle; text-align: center;">回声消除</td><td style="vertical-align: middle; text-align: center;">✅</td><td style="vertical-align: middle; text-align: center;">✅</td></tr>
     <tr><td style="vertical-align: middle; text-align: center;">麦克风静音</td><td style="vertical-align: middle; text-align: center;">✅</td><td style="vertical-align: middle; text-align: center;">✅</td></tr>
