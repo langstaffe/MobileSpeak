@@ -431,6 +431,20 @@ impl Connection {
 	/// level needs to be improved.
 	pub fn get_options(&self) -> &ConnectOptions { &self.options }
 
+	/// Set the nickname for future handshakes without changing the confirmed client name.
+	/// A pending handshake is replaced; an established connection is never disconnected.
+	/// Use `client_update().set_name(...).send_with_result(...)` for an online rename.
+	pub fn set_connect_name<S: Into<Cow<'static, str>>>(&mut self, name: S) {
+		let name = name.into();
+		if self.options.name == name { return; }
+		self.options.name = name;
+		if let ConnectionState::Connecting(_, reconnect) = &self.state {
+			let reconnect = *reconnect;
+			let fut = Self::connect(self.options.clone(), reconnect).in_current_span();
+			self.state = ConnectionState::Connecting(Box::pin(fut), reconnect);
+		}
+	}
+
 	/// Get a stream of events. The event stream needs to be polled, otherwise
 	/// nothing will happen in a connection, not even sending packets will work.
 	///
@@ -2094,6 +2108,26 @@ mod cancellation_tests {
             cancel_transfer(&mut jobs, &mut cancelled, &mut events, id);
             assert!(events.is_empty());
             assert_eq!(tokio::time::timeout(Duration::from_secs(1), peer.read(&mut [0])).await.unwrap().unwrap(), 0);
+        });
+    }
+}
+
+#[cfg(test)]
+mod nickname_tests {
+    use super::*;
+    #[test]
+    fn latest_name_replaces_pending_handshake_and_keeps_retry_options() {
+        tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(async {
+            let mut con = Connection::build("127.0.0.1:1").name("Initial").connect().unwrap();
+            for name in ["A", "B", "用户😀"] { con.set_connect_name(name.to_owned()); }
+            assert_eq!(con.get_options().get_name(), "用户😀");
+            assert!(matches!(con.state, ConnectionState::Connecting(_, false)));
+            con.state = ConnectionState::Connecting(Box::pin(std::future::pending()), true);
+            con.set_connect_name("Reconnect latest");
+            assert!(matches!(con.state, ConnectionState::Connecting(_, true)));
+            assert_eq!(con.get_options().get_name(), "Reconnect latest");
+            con.set_connect_name("Reconnect latest");
+            assert_eq!(con.get_options().get_name(), "Reconnect latest");
         });
     }
 }

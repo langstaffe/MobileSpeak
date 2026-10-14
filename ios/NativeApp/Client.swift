@@ -180,19 +180,28 @@ enum NoiseSuppressionMode: String, CaseIterable {
     var title: String { switch self { case .dpdfnet2: return "DPDFNet2"; case .rnnoise: return "RNNoise"; case .none: return L10n.string("settings_noise_none") } }
 }
 
+struct ProfileState: Decodable, Equatable {
+    var nickname = "MobileSpeakUser"
+    var requestId: UInt64 = 0
+    var error: String?
+    var detail: String?
+}
+
 struct Bookmark: Codable, Identifiable {
     var id: UUID
     var title: String
     var host: String
     var port: UInt16
-    var nickname: String
     var password: String? = nil // Legacy plaintext only; new writes keep secrets in Keychain.
     var automaticallyNamed: Bool? = nil // Optional keeps existing bookmarks decodable.
     var address: String { "\(host.contains(":") ? "[\(host)]" : host):\(port)" }
+    static func normalizedHost(_ host: String) -> String {
+        host.trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: "[]")).lowercased()
+    }
 
-    private enum CodingKeys: String, CodingKey { case id, title, host, port, nickname, password, automaticallyNamed }
-    init(id: UUID, title: String, host: String, port: UInt16, nickname: String, password: String? = nil, automaticallyNamed: Bool? = nil) {
-        self.id = id; self.title = title; self.host = host; self.port = port; self.nickname = nickname
+    private enum CodingKeys: String, CodingKey { case id, title, host, port, password, automaticallyNamed }
+    init(id: UUID, title: String, host: String, port: UInt16, password: String? = nil, automaticallyNamed: Bool? = nil) {
+        self.id = id; self.title = title; self.host = host; self.port = port
         self.password = password; self.automaticallyNamed = automaticallyNamed
     }
     init(from decoder: Decoder) throws {
@@ -201,7 +210,6 @@ struct Bookmark: Codable, Identifiable {
         title = try values.decode(String.self, forKey: .title)
         host = try values.decode(String.self, forKey: .host)
         port = try values.decode(UInt16.self, forKey: .port)
-        nickname = try values.decode(String.self, forKey: .nickname)
         password = try values.decodeIfPresent(String.self, forKey: .password)
         automaticallyNamed = try values.decodeIfPresent(Bool.self, forKey: .automaticallyNamed)
     }
@@ -211,7 +219,6 @@ struct Bookmark: Codable, Identifiable {
         try values.encode(title, forKey: .title)
         try values.encode(host, forKey: .host)
         try values.encode(port, forKey: .port)
-        try values.encode(nickname, forKey: .nickname)
         try values.encodeIfPresent(automaticallyNamed, forKey: .automaticallyNamed)
     }
 }
@@ -263,7 +270,11 @@ private func coreChanged(_ context: Int) {
     @Published var audioBusy = false
     @Published var messages: [ChatMessage] = []
     @Published private(set) var unread = UnreadSnapshot()
-    @Published var name = UserDefaults.standard.string(forKey: "mobilespeak.client.name") ?? "MobileSpeakUser"
+    @Published private(set) var profile = ProfileState()
+    @Published private(set) var nicknameSaving = false
+    @Published private(set) var nicknameSaveError: String?
+    private var nicknameRequest: UInt64 = 0
+    private var activeBookmark: (id: UUID, connectionId: String)?
     @Published var address = UserDefaults.standard.string(forKey: "mobilespeak.server.address") ?? ""
     lazy var audio = PhoneAudio(handle: handle)
     @Published var bookmarks: [Bookmark] = []
@@ -295,17 +306,17 @@ private func coreChanged(_ context: Int) {
     private func bookmarkError(_ message: String) -> NSError {
         NSError(domain: "MobileSpeak.Bookmarks", code: 1, userInfo: [NSLocalizedDescriptionKey: message])
     }
-    @discardableResult func saveBookmark(id: UUID?, title: String, host: String, port: String, nickname: String, password: String) throws -> Bookmark {
+    @discardableResult func saveBookmark(id: UUID?, title: String, host: String, port: String, password: String) throws -> Bookmark {
         guard !bookmarkLoadFailed else { throw bookmarkError(L10n.string("error_bookmark_protected")) }
-        let host = host.trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: "[]")).lowercased()
-        let nickname = nickname.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !host.isEmpty, host.utf8.count <= 1000, host.rangeOfCharacter(from: .whitespacesAndNewlines) == nil, !host.contains("/"), let port = UInt16(port), port > 0, !nickname.isEmpty, nickname.utf8.count <= 128, password.utf8.count <= 1024 else { throw bookmarkError(L10n.string("error_bookmark_invalid")) }
-        let duplicate = bookmarks.first { $0.host == host && $0.port == port && $0.nickname == nickname && $0.id != id }
-        if id != nil && duplicate != nil { throw bookmarkError(L10n.string("error_bookmark_duplicate")) }
-        let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let host = Bookmark.normalizedHost(host)
+        guard !host.isEmpty, host.utf8.count <= 1000, host.rangeOfCharacter(from: .whitespacesAndNewlines) == nil, !host.contains("/"), let port = UInt16(port), port > 0, password.utf8.count <= 1024 else { throw bookmarkError(L10n.string("error_bookmark_invalid")) }
         let existing = id.flatMap { id in bookmarks.first { $0.id == id } }
+        let duplicate = bookmarks.first { Bookmark.normalizedHost($0.host) == host && $0.port == port && $0.id != id }
+        let endpointChanged = existing.map { Bookmark.normalizedHost($0.host) != host || $0.port != port } ?? true
+        if id != nil && endpointChanged && duplicate != nil { throw bookmarkError(L10n.string("error_bookmark_duplicate")) }
+        let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
         let automaticallyNamed = title.isEmpty || (existing?.automaticallyNamed == true && title == existing?.title)
-        let bookmark = Bookmark(id: id ?? duplicate?.id ?? UUID(), title: title.isEmpty ? host : title, host: host, port: port, nickname: nickname, password: nil, automaticallyNamed: automaticallyNamed)
+        let bookmark = Bookmark(id: id ?? duplicate?.id ?? UUID(), title: title.isEmpty ? host : title, host: host, port: port, password: nil, automaticallyNamed: automaticallyNamed)
         var next = bookmarks
         if let index = next.firstIndex(where: { $0.id == bookmark.id }) { next[index] = bookmark } else { next.append(bookmark) }
         try saveBookmarkPassword(password, id: bookmark.id)
@@ -316,8 +327,10 @@ private func coreChanged(_ context: Int) {
     }
     func updateAutomaticBookmarkTitle(_ serverName: String) {
         let serverName = serverName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !serverName.isEmpty,
-              let index = bookmarks.firstIndex(where: { $0.automaticallyNamed == true && $0.address == address && $0.nickname == name }),
+        guard connected, acceptingConnection, !serverName.isEmpty,
+              let activeBookmark, activeBookmark.connectionId == connectionId,
+              state.connectionId == activeBookmark.connectionId,
+              let index = bookmarks.firstIndex(where: { $0.automaticallyNamed == true && $0.id == activeBookmark.id }),
               bookmarks[index].title != serverName else { return }
         do {
             var next = bookmarks
@@ -341,7 +354,9 @@ private func coreChanged(_ context: Int) {
         do {
             let password = try bookmarkPassword(bookmark)
             connectionLogger.info("Connection startup phase=bookmark_password elapsed_ms=\(Int((ProcessInfo.processInfo.systemUptime - started) * 1000))")
-            connect(host: bookmark.host, port: String(bookmark.port), nickname: bookmark.nickname, password: password)
+            if connect(host: bookmark.host, port: String(bookmark.port), password: password), let connectionId {
+                activeBookmark = (bookmark.id, connectionId)
+            }
         }
         catch { self.error = error.localizedDescription }
     }
@@ -438,6 +453,13 @@ private func coreChanged(_ context: Int) {
         let result = String(decoding: data, as: UTF8.self).withCString { ts_command(handle, $0) }
         if result != 0 { throw NSError(domain: "MobileSpeak", code: Int(result), userInfo: [NSLocalizedDescriptionKey: L10n.string("error_operation_submit")]) }
     }
+    @discardableResult func saveNickname(_ nickname: String) -> UInt64 {
+        nicknameRequest += 1
+        nicknameSaving = true; nicknameSaveError = nil
+        do { try send(["type": "set_nickname", "nickname": nickname, "request_id": nicknameRequest]) }
+        catch { nicknameSaving = false; nicknameSaveError = error.localizedDescription }
+        return nicknameRequest
+    }
     func beginAvatarSelection() -> Int {
         avatarSelection += 1
         try? send(["type": "avatar_select", "selection": avatarSelection])
@@ -513,6 +535,13 @@ private func coreChanged(_ context: Int) {
         do {
             let data = Data(String(cString: pointer).utf8)
             let envelope = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+            if let value = envelope["profile"], !(value is NSNull) {
+                profile = try JSONDecoder().decode(ProfileState.self, from: JSONSerialization.data(withJSONObject: value))
+                if profile.requestId == nicknameRequest {
+                    nicknameSaving = false
+                    nicknameSaveError = profile.error.map { L10n.coreError($0, detail: profile.detail) }
+                }
+            }
             for event in envelope["events"] as? [[String: Any]] ?? [] {
                 if event.keys.contains("connectionId") &&
                     ((event["connectionId"] as? String) != connectionId || !acceptingConnection) { continue }
@@ -633,13 +662,12 @@ private func coreChanged(_ context: Int) {
             }
         } catch { self.error = L10n.withDetail("error_generic", error.localizedDescription) }
     }
-    func connect(host: String, port: String, nickname: String, password: String) {
-        guard !connected && !busy else { return }
+    @discardableResult func connect(host: String, port: String, password: String) -> Bool {
+        guard !connected && !busy else { return false }
         let host = host.trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
-        let nickname = nickname.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !host.isEmpty, host.rangeOfCharacter(from: .whitespacesAndNewlines) == nil,
-              !host.contains("/"), let port = UInt16(port), port > 0, !nickname.isEmpty else {
-            error = L10n.string("error_server_invalid"); return
+              !host.contains("/"), let port = UInt16(port), port > 0 else {
+            error = L10n.string("error_server_invalid"); return false
         }
         let started = ProcessInfo.processInfo.systemUptime
         connectionLogger.info("Connection startup begin")
@@ -647,25 +675,26 @@ private func coreChanged(_ context: Int) {
             let identity = try loadIdentity()
             connectionLogger.info("Connection startup phase=identity_load elapsed_ms=\(Int((ProcessInfo.processInfo.systemUptime - started) * 1000)) stored=\(identity != nil)")
             address = "\(host.contains(":") ? "[\(host)]" : host):\(port)"
-            name = nickname
             error = nil
             audioInterrupted = false
             let requestId = UUID().uuidString
-            try send(["type": "connect", "connectionId": requestId, "address": address, "name": name, "password": password,
+            try send(["type": "connect", "connectionId": requestId, "address": address, "password": password,
                       "identity": try identity.map { try JSONSerialization.jsonObject(with: $0) } ?? NSNull()])
             connectionId = requestId
+            activeBookmark = nil
             connectionStarted = started
             connectionLogger.info("Connection startup phase=command_submitted total_ms=\(Int((ProcessInfo.processInfo.systemUptime - started) * 1000))")
             state.connectionId = requestId
             state.status = "connecting"
             acceptingConnection = true; intent += 1
             UserDefaults.standard.set(address, forKey: "mobilespeak.server.address")
-            UserDefaults.standard.set(name, forKey: "mobilespeak.client.name")
-        } catch { self.error = error.localizedDescription }
+            return true
+        } catch { self.error = error.localizedDescription; return false }
     }
     func disconnect() {
         do { try send(["type": "disconnect"]) } catch { self.error = error.localizedDescription; return }
         connectionStarted = nil
+        activeBookmark = nil
         acceptingConnection = false; intent += 1
         audioBusy = false
         audioInterrupted = false

@@ -53,8 +53,8 @@
     <string name="avatar_preview">本地个人头像预览</string>
     <string name="avatar_none">尚未选择本地头像</string>
     <string name="avatar_local">已保存在本机</string>
-    <string name="avatar_choose">选择</string>
-    <string name="avatar_change">更换</string>
+    <string name="avatar_choose">选择头像</string>
+    <string name="avatar_change">更换头像</string>
     <string name="avatar_remove">清除头像</string>
     <string name="avatar_help">全局头像设置会在连接各服务器时逐个同步。清除后，其他服务器上的头像将在下次连接时清除。</string>
     <string name="avatar_local_only">已保存在本机；连接后同步。</string>
@@ -88,8 +88,8 @@
     <string name="notification_call_title">MobileSpeak 通话中</string>
     <string name="notification_call_text">TeamSpeak 连接保持在后台</string>
     <string name="error_microphone_permission">请在系统设置中允许麦克风权限。</string>
-    <string name="error_bookmark_invalid">请填写有效的地址、端口、昵称和密码。</string>
-    <string name="error_bookmark_duplicate">已有相同地址、端口和昵称的书签。</string>
+    <string name="error_bookmark_invalid">请输入有效的地址、端口和密码。</string>
+    <string name="error_bookmark_duplicate">相同地址和端口的书签已存在。</string>
     <string name="error_identity_read">无法安全读取 TeamSpeak 身份。</string>
     <string name="error_identity_save">无法安全保存 TeamSpeak 身份。</string>
     <string name="error_bookmark_save">无法安全保存书签。</string>
@@ -273,4 +273,12 @@
     <string name="error_receive_audio_read_failed">无法读取已保存的音频设置，已保留原文件。</string>
     <string name="error_receive_audio_save_failed">无法保存音频设置，重启后可能无法恢复本次更改。</string>
     <string name="error_receive_audio_context_changed">此用户的连接已改变，请重新调节音量。</string>
+    <string name="profile_title">个人资料</string>
+    <string name="profile_nickname_edit">修改昵称</string>
+    <string name="profile_edit_nickname">修改昵称，%1$s</string>
+    <string name="error_nickname_invalid">昵称不能为空，且不能超过 128 个 UTF-8 字节。</string>
+    <string name="error_profile_save_failed">无法保存昵称，请重试。</string>
+    <string name="error_profile_read_failed">无法读取个人资料，已保留原有数据。</string>
+    <string name="error_profile_rename_failed">服务器未能修改你的昵称。</string>
+    <string name="error_server_invalid">请输入有效的服务器地址和端口。</string>
 </resources>

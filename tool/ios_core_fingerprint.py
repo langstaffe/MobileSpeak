@@ -21,7 +21,7 @@ def fingerprint(root=ROOT):
     for pattern in ('native/src/**/*', 'native/patched/**/*', 'native/.cargo/**/*',
                     '.cargo/**/*', 'native/models/**/*', 'tool/*', 'native/Cargo.*',
                     'native/build.rs', 'rust-toolchain*', 'native/rust-toolchain*'):
-        files.update(p for p in root.glob(pattern) if p.is_file() and '__pycache__' not in p.parts and p.suffix != '.pyc')
+        files.update(p for p in root.glob(pattern) if p.is_file() and p.name != '.DS_Store' and '__pycache__' not in p.parts and p.suffix != '.pyc')
     return {'files': {str(p.relative_to(root)): digest(p) for p in sorted(files)},
             'parameters': {'targets': ['aarch64-apple-ios', 'aarch64-apple-ios-sim'],
                            'profile': 'release', 'deployment': '15.0',
@@ -33,7 +33,7 @@ def fingerprint(root=ROOT):
 
 def artifacts(bundle):
     return {str(p.relative_to(bundle)): digest(p) for p in sorted(bundle.rglob('*'))
-            if p.is_file() and p.name != 'core-fingerprint.json'}
+            if p.is_file() and p.name not in ('core-fingerprint.json', '.DS_Store')}
 
 def verify(bundle=OUTPUT):
     manifest = json.loads((bundle/'core-fingerprint.json').read_text())

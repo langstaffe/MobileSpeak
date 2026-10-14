@@ -20,6 +20,7 @@ mod media;
 mod network_diagnostics;
 mod network_quality;
 mod playback;
+mod profile;
 mod receive_audio;
 // Fixed upstream receive module with the queued-packet recovery patch.
 #[allow(dead_code)]
@@ -63,7 +64,6 @@ pub enum Command {
         #[serde(default, rename = "connectionId")]
         connection_id: Option<String>,
         address: String,
-        name: String,
         #[serde(default)]
         password: String,
         identity: Option<Value>,
@@ -87,6 +87,10 @@ pub enum Command {
     },
     SetReceiveAgc {
         enabled: bool,
+    },
+    SetNickname {
+        nickname: String,
+        request_id: u64,
     },
     SetUserVolume {
         server: String,
@@ -228,16 +232,13 @@ impl Command {
             Self::Connect { connection_id: Some(id), .. } if id.is_empty() || id.len() > 128 => Err("Invalid connection ID"),
             Self::Connect {
                 address,
-                name,
                 password,
                 ..
             } if address.trim().is_empty()
                 || address.len() > 1024
-                || name.trim().is_empty()
-                || name.len() > 128
                 || password.len() > 1024 =>
             {
-                Err("Invalid server address, nickname or password")
+                Err("Invalid server address or password")
             }
             Self::Join { channel, password } if *channel == 0 || password.len() > 1024 => {
                 Err("Invalid channel")
@@ -255,7 +256,7 @@ impl Command {
                     .is_some_and(|u| !receive_audio::valid_identity(u))
                 || token.is_empty()
                 || token.len() > 64
-                || *percent > 200 =>
+                || *percent > receive_audio::MAX_VOLUME_PERCENT =>
             {
                 Err("Invalid user volume")
             }
@@ -521,6 +522,7 @@ struct Output {
     chat_snapshot: Option<Value>,
     chat_epoch: u64,
     receive_audio: Value,
+    profile: Value,
     channel_files: Value,
     file_cache: Value,
     unread: Value,
@@ -568,7 +570,7 @@ impl Output {
         let code = event["code"].as_str().unwrap_or_default();
         let global = event["scope"] == "global" || matches!(kind, "identity" | "audio_processing" | "avatar_local" | "avatar_cleanup_failed" | "file_cache_result")
             || (kind == "error" && (code.starts_with("receive_audio_read") || code.starts_with("receive_audio_save")
-                || code.starts_with("audio_processing") || code.starts_with("avatar_local")));
+                || code.starts_with("audio_processing") || code.starts_with("avatar_local") || code == "profile_read_failed"));
         if !global && event.get("connectionId").is_none() {
             event["connectionId"] = json!(self.connection_id);
         }
@@ -1041,7 +1043,19 @@ enum PendingOperation {
     AvatarDrain(avatar::Token),
     AvatarStop(avatar::Token),
     Join,
+    ProfileRename(u64),
     Other(&'static str),
+}
+
+fn apply_nickname(con: &mut Connection, profile: &profile::Profile, application: &mut profile::Application,
+    operations: &mut HashMap<MessageHandle, PendingOperation>, out: &Arc<Mutex<Output>>) {
+    let actual = con.get_state().ok().and_then(|state| state.clients.get(&state.own_client)).map(|me| me.name.as_str());
+    let Some(token) = application.plan(profile, actual) else { return };
+    let update = con.get_state().unwrap().client_update().set_name(&profile.nickname);
+    match update.send_with_result(con) {
+        Ok(handle) => { operations.insert(handle, PendingOperation::ProfileRename(token)); },
+        Err(error) => application.result(token, profile, Err(error.to_string()), out),
+    }
 }
 
 fn is_joining(operations: &HashMap<MessageHandle, PendingOperation>) -> bool {
@@ -1337,6 +1351,7 @@ async fn session(
     processing: &mut AudioProcessingState,
     processor: &mut audio_processing::Processor,
     receive_prefs: &mut receive_audio::Preferences,
+    profile: &mut profile::Profile,
     avatar_store: &Arc<avatar::Store>,
     files: &mut channel_files::Files,
     files_tx: &mpsc::UnboundedSender<channel_files::Update>,
@@ -1345,7 +1360,6 @@ async fn session(
     let Command::Connect {
         connection_id,
         address,
-        name,
         password,
         identity,
     } = first
@@ -1378,7 +1392,7 @@ async fn session(
         .unwrap()
         .event(json!({"type":"identity","value":identity}));
     let mut con = Connection::build(address)
-        .name(name)
+        .name(profile.nickname.clone())
         .password(password)
         .identity(identity)
         .input_muted(true)
@@ -1407,6 +1421,7 @@ async fn session(
     #[cfg(feature = "network-diagnostics")]
     let mut network_trace: Option<network_diagnostics::Diagnostics> = None;
     let mut operations = HashMap::<MessageHandle, PendingOperation>::new();
+    let mut nickname_application = profile::Application::default();
     let mut avatar = avatar::AvatarSync::default();
     avatar.ready();
     avatar.observe(avatar_store, out);
@@ -1518,6 +1533,9 @@ async fn session(
                 event
             }) => match event {
                 Some(Ok(StreamItem::BookEvents(events))) => {
+                    // Server-confirmed names stay in bookkeeping; reconnect intent stays global.
+                    con.set_connect_name(profile.nickname.clone());
+                    apply_nickname(&mut con, profile, &mut nickname_application, &mut operations, out);
                     #[cfg(feature = "network-diagnostics")]
                     if network_trace.is_none() { network_trace = network_diagnostics::Diagnostics::attach(&mut con); }
                     for event in &events {
@@ -1630,6 +1648,10 @@ async fn session(
                     }
                 },
                 Some(Ok(StreamItem::MessageResult(handle, result))) => match operations.remove(&handle) {
+                    Some(PendingOperation::ProfileRename(token)) => {
+                        nickname_application.result(token, profile, result.map_err(|error| error.to_string()), out);
+                        apply_nickname(&mut con, profile, &mut nickname_application, &mut operations, out);
+                    },
                     Some(PendingOperation::FilesList) => { files.list_result(handle, result, out); files.pump(&mut con, &mut operations); },
                     Some(PendingOperation::Chat(id)) => {
                         match result {
@@ -1712,6 +1734,8 @@ async fn session(
                     out.lock().unwrap().set_network_quality(quality);
                 },
                 Some(Ok(StreamItem::DisconnectedTemporarily(_))) => {
+                    con.set_connect_name(profile.nickname.clone());
+                    nickname_application.disconnected();
                     #[cfg(feature = "network-diagnostics")]
                     { network_trace = None; }
                     files.disconnected(out);
@@ -1750,6 +1774,13 @@ async fn session(
                 if subscribed { avatar.check(&mut con, storage.as_deref(), &avatar_tx, &mut operations, out); }
             },
             received = rx.recv() => match received {
+                Some(Command::SetNickname { nickname, request_id }) => {
+                    if profile.save(&nickname, request_id, out) {
+                        con.set_connect_name(profile.nickname.clone());
+                        nickname_application.changed();
+                        apply_nickname(&mut con, profile, &mut nickname_application, &mut operations, out);
+                    }
+                },
                 Some(Command::FileCacheInspect { request_id }) => { files.cache_command(request_id, false, storage.as_deref(), files_tx, out); },
                 Some(Command::FileCacheClear { request_id }) => { files.cache_command(request_id, true, storage.as_deref(), files_tx, out); },
                 Some(command @ (Command::FilesOpen { .. } | Command::FilesBack { .. } | Command::FilesList { .. } | Command::FilesSort { .. } | Command::FilesDownload { .. } | Command::FilesUpload { .. } | Command::FilesRetry { .. })) => {
@@ -2009,6 +2040,8 @@ impl Bridge {
                 let mut storage: Option<PathBuf> = None;
                 let mut app_active = false;
                 let mut receive_prefs = receive_audio::Preferences::default();
+                let mut profile = profile::Profile::default();
+                profile.publish(&worker_output);
                 receive_prefs.publish(&worker_output);
                 let mut save_clock = tokio::time::interval(Duration::from_millis(100));
                 let mut processing = AudioProcessingState::default();
@@ -2028,9 +2061,11 @@ impl Bridge {
                         Command::Shutdown => { receive_prefs.flush(storage.as_deref(), &persist_tx, &worker_output, true); break; },
                         Command::SetAppActive { active } => { app_active = active; if !active { receive_prefs.flush(storage.as_deref(), &persist_tx, &worker_output, true); } },
                         Command::SetReceiveAgc { enabled } => receive_prefs.set_agc(enabled, &worker_output),
+                        Command::SetNickname { nickname, request_id } => { profile.save(&nickname, request_id, &worker_output); },
                         Command::SetUserVolume { .. } => report_code(&worker_output, "receive_audio_context_changed", None),
                         Command::SetNoiseSuppression { mode, request_id } => {processing.request_id=request_id;processing.requested.noise=mode;processing.request(&processor,&worker_output);},
                         Command::Configure { storage: value } => {
+                            profile.load(Path::new(&value), &worker_output);
                             receive_prefs.flush(storage.as_deref(), &persist_tx, &worker_output, true);
                             receive_prefs.load(Path::new(&value), &worker_output);
                             processor.configure(PathBuf::from(&value));
@@ -2056,6 +2091,7 @@ impl Bridge {
                                 &mut processing,
                                 &mut processor,
                                 &mut receive_prefs,
+                                &mut profile,
                                 &worker_avatar_store,
                                 &mut files,
                                 &files_tx,
@@ -2160,7 +2196,7 @@ fn poll_output(output: &Arc<Mutex<Output>>) -> Value {
             #[cfg(test)] let started = Instant::now();
             let events: Vec<_> = out.events.drain(..).collect();
             let chats = out.chat_snapshot.take().unwrap_or(Value::Null);
-            let envelope = json!({"snapshot":out.snapshot,"events":events,"unread":out.unread,"channelFiles":out.channel_files,"fileCache":out.file_cache,"receiveAudio":out.receive_audio});
+            let envelope = json!({"snapshot":out.snapshot,"events":events,"unread":out.unread,"channelFiles":out.channel_files,"fileCache":out.file_cache,"receiveAudio":out.receive_audio,"profile":out.profile});
             #[cfg(test)] POLL_LOCK_NANOS.fetch_max(started.elapsed().as_nanos() as u64, Ordering::Relaxed);
             (envelope, chats)
         };
@@ -2297,13 +2333,16 @@ mod tests {
         wait_until(|| bridge.poll()["receiveAudio"]["agc"] == true);
         for command in [
             json!({"type":"set_receive_agc","enabled":1}),
-            json!({"type":"set_user_volume","server":"s","client":1,"uid":"u","token":"t","percent":201}),
+            json!({"type":"set_user_volume","server":"s","client":1,"uid":"u","token":"t","percent":301}),
             json!({"type":"set_user_volume","server":"s","client":1,"uid":"u","token":"t","percent":-1}),
             json!({"type":"set_user_volume","server":"s","client":1,"uid":"u","token":"t","percent":1.5}),
             json!({"type":"set_user_volume","server":"s","client":1,"uid":"","token":"t","percent":100}),
             json!({"type":"set_user_volume","server":"s","client":0,"uid":null,"token":"t","percent":100}),
         ] {
             assert!(bridge.send(&command.to_string()).is_err());
+        }
+        for percent in [0, 100, 200, 201, 250, 300] {
+            bridge.send(&json!({"type":"set_user_volume","server":"s","client":1,"uid":"u","token":"t","percent":percent}).to_string()).unwrap();
         }
         bridge
             .send(r#"{"type":"set_receive_agc","enabled":false}"#)
@@ -2345,7 +2384,8 @@ mod tests {
             .send(&json!({"type":"configure","storage":root}).to_string())
             .unwrap();
         let identity = Identity::create();
-        let connect = json!({"type":"connect","address":address,"name":"MobileSpeak read-only check","identity":identity}).to_string();
+        bridge.send(&json!({"type":"set_nickname","nickname":"MobileSpeak read-only check","request_id":1}).to_string()).unwrap();
+        let connect = json!({"type":"connect","address":address,"identity":identity}).to_string();
         let mut previous_server = None;
         for _ in 0..2 {
             bridge.send(&connect).unwrap();
@@ -2926,6 +2966,7 @@ mod contract_regressions {
             out.connection_id = Some("fixture-connection".into()); out.status(status);
             out.set_unread(UnreadState::default().snapshot());
             out.receive_audio = json!({"agc":true});
+            out.profile = profile::Profile::default().snapshot();
             out.set_chats(json!([]));
             if status == "connected" {
                 let store = ChatStore { messages: vec![ChatMessage { id:"fixture-message".into(), conversation:"channel:id:1".into(), kind:ChatKind::Channel, target_id:"id:1".into(), target_name:"Lobby".into(), sender_uid:"uid".into(), sender_name:"Speaker".into(), sender_avatar_hash:String::new(), own:true, text:"contract".into(), timestamp:1, status:ChatStatus::Sent, error:None }] };
@@ -2957,6 +2998,16 @@ mod contract_regressions {
         assert!(out.events[2].get("connectionId").is_none());
         let legacy: Command = serde_json::from_value(json!({"type":"connect","address":"localhost","name":"test"})).unwrap();
         assert!(matches!(legacy, Command::Connect { connection_id: None, .. }));
+    }
+    #[test]
+    fn every_connect_uses_profile_instead_of_legacy_name_data() {
+        for name in [json!("Old bookmark nickname"), json!(""), json!({"legacy":true})] {
+            let command: Command = serde_json::from_value(json!({"type":"connect","address":"localhost:9987","name":name})).unwrap();
+            assert!(command.validate().is_ok());
+            assert!(matches!(command, Command::Connect { address, .. } if address == "localhost:9987"));
+        }
+        let command: Command = serde_json::from_value(json!({"type":"connect","address":"localhost:9987"})).unwrap();
+        assert!(command.validate().is_ok());
     }
     #[test]
     fn join_gate_tracks_all_requests_and_cleanup() {

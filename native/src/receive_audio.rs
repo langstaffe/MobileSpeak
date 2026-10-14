@@ -17,6 +17,7 @@ use tsclientlib::{ClientId, Connection};
 const TARGET_DB: f32 = -22.0;
 const MAX_DB: f32 = 18.0;
 const MIN_DB: f32 = -24.0;
+pub(crate) const MAX_VOLUME_PERCENT: u16 = 300;
 static NEXT_TOKEN: AtomicU64 = AtomicU64::new(1);
 fn token() -> String {
     NEXT_TOKEN.fetch_add(1, Ordering::Relaxed).to_string()
@@ -59,7 +60,7 @@ impl Preferences {
         match loaded {
             Ok(value)
                 if value.users.iter().all(|(s, users)| {
-                    valid_identity(s) && users.iter().all(|(u, v)| valid_identity(u) && *v <= 200)
+                    valid_identity(s) && users.iter().all(|(u, v)| valid_identity(u) && *v <= MAX_VOLUME_PERCENT)
                 }) =>
             {
                 *self = value
@@ -250,7 +251,7 @@ impl Session {
         percent: u16,
         prefs: &mut Preferences,
     ) -> Result<(), &'static str> {
-        if percent > 200 || server != self.server {
+        if percent > MAX_VOLUME_PERCENT || server != self.server {
             return Err("receive_audio_context_changed");
         }
         let user = self
@@ -606,7 +607,10 @@ mod tests {
         assert!(session
             .set_volume("server-a", 7, Some("user"), "old", 200, &mut loaded)
             .is_err());
-        for value in 0..=200 {
+        assert!(session
+            .set_volume("server-a", 7, Some("user"), "one", 301, &mut loaded)
+            .is_err());
+        for value in 0..=300 {
             session
                 .set_volume("server-a", 7, Some("user"), "one", value, &mut loaded)
                 .unwrap();
@@ -619,10 +623,10 @@ mod tests {
         atomic_write(&job.path, &job.data).unwrap();
         let mut final_value = Preferences::default();
         final_value.load(&root, &out);
-        assert_eq!(final_value.volume("server-a", Some("user")), 200);
+        assert_eq!(final_value.volume("server-a", Some("user")), 300);
         assert!(!final_value.agc);
         session.remove(ClientId(7));
-        assert_eq!(loaded.volume("server-a", Some("user")), 200);
+        assert_eq!(loaded.volume("server-a", Some("user")), 300);
         session.users.insert(
             ClientId(7),
             User {
@@ -640,12 +644,17 @@ mod tests {
             .set_volume("server-a", 7, None, "new", 160, &mut loaded)
             .unwrap();
         assert_eq!(loaded.volume("server-a", None), 100);
-        assert_eq!(loaded.volume("server-a", Some("user")), 200);
+        assert_eq!(loaded.volume("server-a", Some("user")), 300);
         loaded.set_agc(true, &out);
         assert_eq!(session.fields(ClientId(7)).0, 160);
         atomic_write(&root.join("receive-audio.json"), b"{}").unwrap();
         loaded.load(&root, &out);
         assert!(loaded.agc);
+        let invalid = br#"{"users":{"server-a":{"user":301}}}"#;
+        atomic_write(&root.join("receive-audio.json"), invalid).unwrap();
+        loaded.load(&root, &out);
+        assert!(!loaded.writable);
+        assert_eq!(std::fs::read(root.join("receive-audio.json")).unwrap(), invalid);
         atomic_write(&root.join("receive-audio.json"), b"broken").unwrap();
         loaded.load(&root, &out);
         assert!(!loaded.writable);

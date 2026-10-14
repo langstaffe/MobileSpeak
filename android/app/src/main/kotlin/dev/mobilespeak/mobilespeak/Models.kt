@@ -136,7 +136,6 @@ data class Bookmark(
     val title: String,
     val host: String,
     val port: Int,
-    val nickname: String,
     val password: String,
     val automaticallyNamed: Boolean,
 ) {
@@ -144,18 +143,17 @@ data class Bookmark(
 
     fun json() = JSONObject()
         .put("id", id).put("title", title).put("host", host).put("port", port)
-        .put("nickname", nickname).put("password", password)
+        .put("password", password)
         .put("automaticallyNamed", automaticallyNamed)
 
     companion object {
-        fun create(id: String?, title: String, host: String, port: String, nickname: String, password: String): Bookmark {
-            val cleanHost = host.trim().trim('[', ']').lowercase(Locale.ROOT)
-            val cleanName = nickname.trim()
+        fun normalizedHost(host: String) = host.trim().trim('[', ']').lowercase(Locale.ROOT)
+        fun create(id: String?, title: String, host: String, port: String, password: String): Bookmark {
+            val cleanHost = normalizedHost(host)
             val parsedPort = port.toIntOrNull()
             require(cleanHost.isNotEmpty() && cleanHost.toByteArray().size <= 1000 &&
                 cleanHost.none(Char::isWhitespace) && '/' !in cleanHost &&
                 parsedPort != null && parsedPort in 1..65535 &&
-                cleanName.isNotEmpty() && cleanName.toByteArray().size <= 128 &&
                 password.toByteArray().size <= 1024) { "invalid_bookmark" }
             val cleanTitle = title.trim()
             return Bookmark(
@@ -163,7 +161,6 @@ data class Bookmark(
                 cleanTitle.ifEmpty { cleanHost },
                 cleanHost,
                 parsedPort,
-                cleanName,
                 password,
                 cleanTitle.isEmpty(),
             )
@@ -171,11 +168,20 @@ data class Bookmark(
 
         fun from(json: JSONObject) = Bookmark(
             json.getString("id"), json.getString("title"), json.getString("host"),
-            json.getInt("port"), json.getString("nickname"), json.optString("password"),
+            json.getInt("port"), json.optString("password"),
             json.optBoolean("automaticallyNamed"),
         )
     }
 }
+
+data class ProfileState(
+    val nickname: String = "MobileSpeakUser",
+    val requestId: Long = 0,
+    val error: String? = null,
+    val detail: String? = null,
+)
+
+internal fun JSONObject.profile() = ProfileState(getString("nickname"), getLong("requestId"), stringOrNull("error"), stringOrNull("detail"))
 
 data class SessionUiState(
     val snapshot: Snapshot = Snapshot(),
@@ -190,6 +196,9 @@ data class SessionUiState(
     val unread: Unread = Unread(),
     val bookmarks: List<Bookmark> = emptyList(),
     val error: String? = null,
+    val profile: ProfileState = ProfileState(),
+    val nicknameSaving: Boolean = false,
+    val nicknameSaveError: String? = null,
     val microphoneMuted: Boolean = true,
     val deafened: Boolean = false,
     val receiveAgc: Boolean = true,

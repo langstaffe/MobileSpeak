@@ -19,7 +19,7 @@ import java.util.concurrent.atomic.AtomicLong
 
 @SuppressLint("StaticFieldLeak") // The stored context is applicationContext and owns the process session.
 internal object ClientSession {
-    private val handle by lazy { NativeCore.create().also { check(it != 0L) } }
+    private val handle by lazy { NativeCore.create(context).also { check(it != 0L) } }
     private val mutableState = MutableStateFlow(SessionUiState())
     private val mutableAppActive = MutableStateFlow(false)
     private val coreExecutor = Executors.newSingleThreadExecutor { task ->
@@ -36,6 +36,7 @@ internal object ClientSession {
     private lateinit var context: Context
     private lateinit var store: SecureStore
     private var initialized = false
+    private val nicknameRequest = AtomicLong()
     private val audioRequest = AtomicLong()
     private val audioLock = Any()
     private val fileCacheLock = Any()
@@ -176,7 +177,6 @@ internal object ClientSession {
         val command = JSONObject().put("connectionId", connectionId)
             .put("type", "connect")
             .put("address", bookmark.address)
-            .put("name", bookmark.nickname)
             .put("password", bookmark.password)
             .put("identity", identity ?: JSONObject.NULL)
         if (!send(command)) return@execute
@@ -249,8 +249,20 @@ internal object ClientSession {
         }
     }
 
-    fun saveBookmark(id: String?, title: String, host: String, port: String, nickname: String, password: String): Bookmark? {
-        val bookmark = runCatching { Bookmark.create(id, title, host, port, nickname, password) }.getOrElse {
+    fun saveNickname(nickname: String): Long {
+        val request = nicknameRequest.incrementAndGet()
+        coreExecutor.execute {
+            if (request != nicknameRequest.get()) return@execute
+            mutableState.update { it.copy(nicknameSaving = true, nicknameSaveError = null) }
+            if (!send(JSONObject().put("type", "set_nickname").put("nickname", nickname).put("request_id", request))) {
+                mutableState.update { it.copy(nicknameSaving = false, nicknameSaveError = it.error) }
+            }
+        }
+        return request
+    }
+
+    fun saveBookmark(id: String?, title: String, host: String, port: String, password: String): Bookmark? {
+        val bookmark = runCatching { Bookmark.create(id, title, host, port, password) }.getOrElse {
             fail(context.localized(R.string.error_bookmark_invalid))
             return null
         }
@@ -261,9 +273,10 @@ internal object ClientSession {
                     (original?.automaticallyNamed == true && title.trim() == original.title)
                 val normalized = bookmark.copy(automaticallyNamed = automatic)
                 val duplicate = existing.firstOrNull {
-                    it.id != id && it.host == normalized.host && it.port == normalized.port && it.nickname == normalized.nickname
+                    it.id != id && Bookmark.normalizedHost(it.host) == normalized.host && it.port == normalized.port
                 }
-                check(id == null || duplicate == null) { context.localized(R.string.error_bookmark_duplicate) }
+                val endpointChanged = original == null || Bookmark.normalizedHost(original.host) != normalized.host || original.port != normalized.port
+                check(id == null || !endpointChanged || duplicate == null) { context.localized(R.string.error_bookmark_duplicate) }
                 val resolved = if (id == null && duplicate != null) normalized.copy(id = duplicate.id) else normalized
                 val next = existing.toMutableList().apply {
                     val index = indexOfFirst { it.id == resolved.id }
@@ -357,6 +370,13 @@ internal object ClientSession {
     }
 
     private fun applyEnvelope(envelope: JSONObject) {
+        envelope.optJSONObject("profile")?.let { value ->
+            val profile = value.profile()
+            val completed = profile.requestId == nicknameRequest.get()
+            mutableState.update { it.copy(profile = profile,
+                nicknameSaving = if (completed) false else it.nicknameSaving,
+                nicknameSaveError = if (completed) profile.error?.let { code -> context.localizedCoreError(code, profile.detail) } else it.nicknameSaveError) }
+        }
         val wasAudioReady = state.value.snapshot.canApplyAudioState()
         var eventError: String? = null
         var audioMuted = false
@@ -608,6 +628,8 @@ internal object ClientSession {
     }
 
     private fun updateAutomaticTitle(serverName: String?) {
+        val snapshot = state.value.snapshot
+        if (snapshot.status != "connected" || !connectionGate.accepts(snapshot.connectionId)) return
         val name = serverName?.trim().orEmpty()
         if (name.isEmpty()) return
         val connectedBookmark = activeBookmarkId ?: return

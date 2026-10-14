@@ -462,7 +462,7 @@ private fun fileDate(timestamp: Long, context: android.content.Context) = DateFo
             ClientSession.setUserVolume(snapshot.serverId.orEmpty(), member, value.toInt())
         }, onValueChangeFinished = {
             ClientSession.setUserVolume(snapshot.serverId.orEmpty(), member, value.toInt()); editing = false
-        }, valueRange = 0f..200f, steps = 199, enabled = enabled, interactionSource = interactions,
+        }, valueRange = 0f..300f, steps = 299, enabled = enabled, interactionSource = interactions,
             thumb = { Box(Modifier.size(36.dp, 24.dp).background(Color.White.copy(alpha = if (enabled) 1f else .38f), CircleShape)
                 .then(if (focused && enabled) Modifier.border(2.dp, Palette.accent, CircleShape) else Modifier)) },
             track = { state ->

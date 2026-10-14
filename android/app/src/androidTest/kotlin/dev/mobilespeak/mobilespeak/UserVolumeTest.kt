@@ -26,6 +26,8 @@ class UserVolumeTest {
         val current = JSONObject(member).put("volumePercent",143).put("volumeToken","instance-7")
         val saved = JSONObject().put("status","connected").put("channels",org.json.JSONArray()).put("clients",org.json.JSONArray().put(current)).snapshot()
         assertEquals(143,saved.clients.single().volumePercent); assertEquals("instance-7",saved.clients.single().volumeToken)
+        current.put("volumePercent",300)
+        assertEquals(300, JSONObject().put("status","connected").put("channels",org.json.JSONArray()).put("clients",org.json.JSONArray().put(current)).snapshot().clients.single().volumePercent)
         assertTrue(SessionUiState().receiveAgc)
     }
 
@@ -133,7 +135,7 @@ class UserVolumeTest {
                 assertFalse(nodes().any { it.config.getOrNull(SemanticsProperties.Text)?.any { t -> t.text=="SELF MUST BE EXCLUDED" } == true })
                 val slider=tag("user-volume-2")
                 val range=slider.config[SemanticsProperties.ProgressBarRangeInfo]
-                assertEquals(0f..200f,range.range); assertEquals(143f,range.current); assertEquals(199,range.steps)
+                assertEquals(0f..300f,range.range); assertEquals(143f,range.current); assertEquals(299,range.steps)
                 val shot=requireNotNull(instrumentation.uiAutomation.takeScreenshot())
                 java.io.File(context.getExternalFilesDir(null),"user-volumes-$language-$font.png").outputStream().use { shot.compress(android.graphics.Bitmap.CompressFormat.PNG,100,it) }; shot.recycle()
                 val bounds=slider.boundsInRoot
@@ -144,10 +146,14 @@ class UserVolumeTest {
                     try { instrumentation.sendPointerSync(event) } finally { event.recycle() }
                 }
                 touch(android.view.MotionEvent.ACTION_DOWN,bounds.center.x,bounds.center.y)
-                for(step in 1..6) { android.os.SystemClock.sleep(24); touch(android.view.MotionEvent.ACTION_MOVE,bounds.center.x+step*5*density,bounds.center.y) }
+                val end = bounds.right - density
+                for(step in 1..6) { android.os.SystemClock.sleep(24); touch(android.view.MotionEvent.ACTION_MOVE,bounds.center.x+(end-bounds.center.x)*step/6,bounds.center.y) }
                 instrumentation.runOnMainSync {} // Observe the draft while the pointer is still held.
-                assertNotEquals(143f,tag("user-volume-2").config[SemanticsProperties.ProgressBarRangeInfo].current)
-                touch(android.view.MotionEvent.ACTION_UP,bounds.center.x+30*density,bounds.center.y)
+                assertEquals(300f,tag("user-volume-2").config[SemanticsProperties.ProgressBarRangeInfo].current)
+                android.os.SystemClock.sleep(100); instrumentation.waitForIdleSync()
+                val maximumShot=requireNotNull(instrumentation.uiAutomation.takeScreenshot())
+                java.io.File(context.getExternalFilesDir(null),"user-volumes-300-$language-$font.png").outputStream().use { maximumShot.compress(android.graphics.Bitmap.CompressFormat.PNG,100,it) }; maximumShot.recycle()
+                touch(android.view.MotionEvent.ACTION_UP,end,bounds.center.y)
                 settle(); assertEquals(original,tag("voice-drawer").boundsInRoot)
                 assertEquals("Rejected stale fixture commands restore the effective value",143f,tag("user-volume-2").config[SemanticsProperties.ProgressBarRangeInfo].current)
                 val scroll=tag("user-volumes-list")

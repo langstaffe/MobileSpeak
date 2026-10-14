@@ -68,6 +68,10 @@ internal fun Member.accessibilityLabel(context: Context): String =
 
 internal fun Context.localizedCoreError(code: String?, detail: String? = null): String {
     val resource = when (code) {
+            "nickname_invalid" -> R.string.error_nickname_invalid
+            "profile_save_failed" -> R.string.error_profile_save_failed
+            "profile_read_failed" -> R.string.error_profile_read_failed
+            "profile_rename_failed" -> R.string.error_profile_rename_failed
             "chat_history_read_failed" -> R.string.error_chat_history_read_failed
             "receive_audio_read_failed" -> R.string.error_receive_audio_read_failed
             "receive_audio_save_failed" -> R.string.error_receive_audio_save_failed

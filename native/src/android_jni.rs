@@ -1,7 +1,5 @@
 //! Small Android adapter for the same C ABI used by iOS.
-use crate::{
-    ts_capture, ts_command, ts_create, ts_destroy, ts_free, ts_poll, ts_set_notifier, Bridge,
-};
+use crate::{ts_capture, ts_command, ts_destroy, ts_free, ts_poll, ts_set_notifier, Bridge};
 use jni::{
     errors::{Error, JniError, ThrowRuntimeExAndDefault},
     jni_sig, jni_str,
@@ -20,6 +18,8 @@ struct AndroidNotifier {
 }
 
 static NOTIFIERS: OnceLock<Mutex<HashMap<usize, Box<AndroidNotifier>>>> = OnceLock::new();
+// ndk-context borrows these pointers; keep the application global alive for the process.
+static ANDROID_CONTEXT: Mutex<Option<Global<JObject<'static>>>> = Mutex::new(None);
 
 fn notifiers() -> &'static Mutex<HashMap<usize, Box<AndroidNotifier>>> {
     NOTIFIERS.get_or_init(|| Mutex::new(HashMap::new()))
@@ -47,9 +47,40 @@ fn invalid() -> Error {
 pub extern "system" fn Java_dev_mobilespeak_mobilespeak_NativeCore_create<'a>(
     mut env: EnvUnowned<'a>,
     _object: JObject<'a>,
+    context: JObject<'a>,
 ) -> jlong {
-    env.with_env(|_| -> jni::errors::Result<_> { Ok(ts_create() as jlong) })
-        .resolve::<ThrowRuntimeExAndDefault>()
+    env.with_env(|env| -> jni::errors::Result<_> {
+        if context.is_null() {
+            return Err(invalid());
+        }
+        let vm = env.get_java_vm()?;
+        let application = env
+            .call_method(
+                &context,
+                jni_str!("getApplicationContext"),
+                jni_sig!("()Landroid/content/Context;"),
+                &[],
+            )?
+            .l()?;
+        if application.is_null() {
+            return Err(invalid());
+        }
+        {
+            let mut saved = ANDROID_CONTEXT.lock().map_err(|_| invalid())?;
+            if saved.is_none() {
+                let global = env.new_global_ref(&application)?;
+                let pointer = global.as_raw();
+                *saved = Some(global);
+                // The lock publishes initialization before any core worker can read the pointers.
+                unsafe {
+                    ndk_context::initialize_android_context(vm.get_raw().cast(), pointer.cast());
+                }
+            }
+        }
+        // Use the Rust constructor so creation panics can be handled by with_env, too.
+        Ok(Box::into_raw(Box::new(Bridge::new())) as jlong)
+    })
+    .resolve::<ThrowRuntimeExAndDefault>()
 }
 
 #[no_mangle]

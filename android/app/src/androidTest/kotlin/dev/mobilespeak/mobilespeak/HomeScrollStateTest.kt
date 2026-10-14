@@ -157,7 +157,7 @@ class HomeScrollStateTest {
         val configuration = android.content.res.Configuration(context.resources.configuration).apply { setLocale(java.util.Locale.SIMPLIFIED_CHINESE) }
         val localized = context.createConfigurationContext(configuration)
         fun label(id: Int) = localized.getString(id)
-        val bookmark = Bookmark(title = "Feedback fixture", host = "example.invalid", port = 9987, nickname = "Fixture", password = "", automaticallyNamed = false)
+        val bookmark = Bookmark(title = "Feedback fixture", host = "example.invalid", port = 9987, password = "", automaticallyNamed = false)
         val channel = Channel(1, 0, 0, "Default Channel", false, true, "fixture", null)
         val member = Member(2, 1, "fixture-member", "MobileSpeakuser", null, emptyList(), emptyList(), null, false, false, false)
         val fixture = saved.copy(snapshot = Snapshot(status = "connected", server = "Test Server", serverId = "fixture", ownClient = 1,

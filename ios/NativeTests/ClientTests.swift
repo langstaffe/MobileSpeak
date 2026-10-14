@@ -18,6 +18,18 @@ final class ClientTests: XCTestCase {
         XCTAssertEqual(count(69, 70, 5), 0)
         XCTAssertEqual(count(1_000, 70, 1), 1)
     }
+    func testChannelPreviewNicknameOnlyUsesSingleMemberAndRemainingSpace() {
+        let width = ChannelMemberPreview.nicknameWidth
+        XCTAssertEqual(width(1_000, 70, 0, 100, 20), 0)
+        XCTAssertEqual(width(1_000, 70, 2, 100, 20), 0)
+        XCTAssertEqual(width(133, 70, 5, 100, 20), 0)
+        XCTAssertEqual(width(1_000, 70, 1, 0, 20), 0)
+        XCTAssertEqual(width(1_000, 70, 1, 100, 20), 100)
+        XCTAssertEqual(width(124, 70, 1, 100, 20), 20)
+        XCTAssertEqual(width(CGFloat(124).nextDown, 70, 1, 100, 20), 0)
+        XCTAssertEqual(width(98, 70, 1, 100, 20), 0)
+        XCTAssertEqual(width(109, 70, 1, 5, 20), 5)
+    }
     @MainActor func testChannelCardsAdaptToWidthLanguageAndMembership() async throws {
         let client = Client.shared
         guard !client.connected, !client.busy else { throw XCTSkip("Requires an offline test profile") }
@@ -52,11 +64,16 @@ final class ClientTests: XCTestCase {
                 host.rootView = AnyView(NavigationView { HomeView(client: client) }.navigationViewStyle(.stack)
                     .environmentObject(LanguageSettings()).environment(\.sizeCategory, category).environment(\.legibilityWeight, weight)
                     .preferredColorScheme(.dark).tint(Palette.accent))
-                for total in [5, 9, 10, 100, 5] {
+                let cases = [(5, "A0 User"), (9, "A0 User"), (10, "A0 User"), (100, "A0 User"),
+                             (0, "A0 User"), (1, "Solo User"), (2, "Solo User"), (1, "王小明"),
+                             (1, "👩🏽‍💻é用户 " + String(repeating: "long nickname ", count: 12)),
+                             (1, ""), (1, "Server renamed user"), (2, "Server renamed user"), (1, "Solo User"), (0, ""), (5, "A0 User")]
+                for (caseIndex, fixture) in cases.enumerated() {
+                    let (total, nickname) = fixture
                     let members = [(1, 1), (2, total), (5, 10)].flatMap { (channel, count) in
                         (0..<count).map { Member(id: UInt64(channel * 1000 + $0), channel: UInt64(channel), uid: "fixture-\(channel)-\($0)",
-                            name: "A\($0) User", avatarHash: "", avatarPath: nil, badges: [], serverGroupIcons: [], channelGroupIcon: nil,
-                            muted: false, deafened: false, speaking: $0 == 0) }
+                            name: channel == 2 && count == 1 ? nickname : "A\($0) User", avatarHash: "", avatarPath: nil, badges: [], serverGroupIcons: [], channelGroupIcon: nil,
+                            muted: caseIndex == 7, deafened: caseIndex == 8, speaking: $0 == 0, away: caseIndex == 10) }
                     }
                     client.state = Snapshot(status: "connected", server: "Preview fixture", ownClient: 1000, channels: channels, clients: members)
                     try await Task.sleep(nanoseconds: 150_000_000)
@@ -64,23 +81,41 @@ final class ClientTests: XCTestCase {
                     let summaries = labels(host.view).filter { $0.text?.hasPrefix("· ") == true }.sorted {
                         $0.convert($0.bounds, to: host.view).minY < $1.convert($1.bounds, to: host.view).minY
                     }
-                    XCTAssertEqual(summaries.count, 3, "Empty channels have no preview")
+                    XCTAssertEqual(summaries.count, total == 0 ? 2 : 3, "Empty channels have no preview")
                     let format = UIGraphicsImageRendererFormat(); format.scale = 1
                     let image = UIGraphicsImageRenderer(size: host.view.bounds.size, format: format).image { _ in
                         host.view.drawHierarchy(in: host.view.bounds, afterScreenUpdates: true)
                     }
                     for (index, label) in summaries.enumerated() {
-                        let channel = [1, 2, 5][index], count = [1, total, 10][index]
+                        let populated = total == 0 ? [(1, 1), (5, 10)] : [(1, 1), (2, total), (5, 10)]
+                        let (channel, count) = populated[index]
                         XCTAssertEqual(label.text, L10n.channelMembers(count: count))
                         let rect = label.convert(label.bounds, to: host.view)
                         let start = 58 + CGFloat(channel - 1) * 10
                         let available = width - 138 - CGFloat(channel - 1) * 10
                         let expected = ChannelMemberPreview.avatarCount(width: available, textWidth: label.intrinsicContentSize.width, memberCount: count)
-                        XCTAssertEqual(rect.minX, start + CGFloat(expected) * 29, accuracy: 1)
+                        let member = members.first { $0.channel == UInt64(channel) }!
+                        let nameMeasure = UILabel(); nameMeasure.font = label.font; nameMeasure.text = member.name
+                        let minimum = UILabel(); minimum.font = label.font; minimum.text = String(member.name.prefix(1)) + "…"
+                        let nameWidth = ChannelMemberPreview.nicknameWidth(width: available, textWidth: label.intrinsicContentSize.width,
+                            memberCount: count, nameWidth: member.name.isEmpty ? 0 : nameMeasure.intrinsicContentSize.width,
+                            minimumNameWidth: minimum.intrinsicContentSize.width)
+                        let namesHere = labels(host.view).filter {
+                            $0.text == member.name && abs($0.convert($0.bounds, to: host.view).midY - rect.midY) < 1
+                        }
+                        XCTAssertEqual(namesHere.count, nameWidth > 0 ? 1 : 0)
+                        if let name = namesHere.first {
+                            let nameRect = name.convert(name.bounds, to: host.view)
+                            XCTAssertEqual(nameRect.minX, start + 29, accuracy: 1)
+                            XCTAssertEqual(nameRect.width, nameWidth, accuracy: 1)
+                            XCTAssertEqual(name.font.pointSize, 11); XCTAssertEqual(name.font, label.font)
+                            XCTAssertEqual(name.numberOfLines, 1); XCTAssertEqual(name.lineBreakMode, .byTruncatingTail)
+                        }
+                        XCTAssertEqual(rect.minX, start + CGFloat(expected) * 29 + (nameWidth > 0 ? nameWidth + 5 : 0), accuracy: 1)
                         XCTAssertLessThanOrEqual(rect.maxX, start + available + 1)
                     }
-                    if total == 5 {
-                        let name = "channel-preview-\(language)-\(Int(width))-\(category)-\(weight)"
+                    if total == 5 || total == 1 || total == 2 || total == 0 {
+                        let name = "channel-preview-\(language)-\(Int(width))-\(category)-\(weight)-case-\(caseIndex)"
                         try image.pngData()?.write(to: FileManager.default.temporaryDirectory.appendingPathComponent(name + ".png"))
                         let attachment = XCTAttachment(image: image); attachment.name = name; attachment.lifetime = .keepAlways; add(attachment)
                     }
@@ -95,6 +130,8 @@ final class ClientTests: XCTestCase {
         let current = String(old.dropLast()) + #", "volumePercent":143,"volumeToken":"instance-7"}"#
         let saved = try JSONDecoder().decode(Member.self,from:Data(current.utf8))
         XCTAssertEqual(saved.volumePercent,143); XCTAssertEqual(saved.volumeRowId,"instance-7")
+        let maximum = try JSONDecoder().decode(Member.self,from:Data(current.replacingOccurrences(of:"\"volumePercent\":143",with:"\"volumePercent\":300").utf8))
+        XCTAssertEqual(maximum.volumePercent,300)
         XCTAssertEqual(saved.uid,member.uid)
     }
     @MainActor func testUserVolumesLongListAndEmptyStateAtLargeFonts() async throws {
@@ -119,7 +156,7 @@ final class ClientTests: XCTestCase {
         let members: [Member] = (1...41).map { (id: Int) -> Member in
             let channel: UInt64 = id % 2 == 0 ? 9 : 7
             let name = id == 1 ? "SELF MUST BE EXCLUDED" : "User \(id)"
-            return Member(id:UInt64(id),channel:channel,uid:"fixture-\(id)",name:name,avatarHash:"",avatarPath:nil,badges:[],serverGroupIcons:[],channelGroupIcon:nil,muted:false,deafened:false,speaking:false,volumePercent:id == 2 ? 143 : 100,volumeToken:"instance-\(id)")
+            return Member(id:UInt64(id),channel:channel,uid:"fixture-\(id)",name:name,avatarHash:"",avatarPath:nil,badges:[],serverGroupIcons:[],channelGroupIcon:nil,muted:false,deafened:false,speaking:false,volumePercent:id == 2 ? 300 : 100,volumeToken:"instance-\(id)")
         }
         func scrolls(_ v:UIView)->[UIScrollView] { (v as? UIScrollView).map { [$0] } ?? v.subviews.flatMap(scrolls) }
         for lang in ["en","zh-Hans"] {
@@ -916,7 +953,7 @@ final class ClientTests: XCTestCase {
         XCTAssertEqual(scope.count, 2)
         let client = Client.shared
         guard !client.connected, scope.count == 2 else { throw XCTSkip("Do not replace an existing voice connection") }
-        guard let bookmark = client.bookmarks.first(where: { $0.address == scope[0] && $0.nickname == scope[1] }) else { throw XCTSkip("The authorized existing bookmark is unavailable; never create another test identity") }
+        guard let bookmark = client.bookmarks.first(where: { $0.address == scope[0] && client.profile.nickname == scope[1] }) else { throw XCTSkip("The authorized existing bookmark is unavailable; never create another test identity") }
         let original = UserDefaults.standard.object(forKey: AppLanguage.preferenceKey)
         let language = LanguageSettings()
         defer {
@@ -1580,10 +1617,10 @@ final class ClientTests: XCTestCase {
     @MainActor func testBookmarkPersistenceDeduplicationAndDeletion() throws {
         let client = Client.shared
         let host = "test-" + UUID().uuidString.lowercased() + ".invalid"
-        let first = try client.saveBookmark(id: nil, title: "Test", host: host, port: "9987", nickname: "Tester", password: "secret")
+        let first = try client.saveBookmark(id: nil, title: "Test", host: host, port: "9987", password: "secret")
         defer { if let existing = client.bookmarks.first(where: { $0.id == first.id }) { client.deleteBookmark(existing) } }
         XCTAssertEqual(try client.bookmarkPassword(first), "secret")
-        let updated = try client.saveBookmark(id: nil, title: "Updated", host: host.uppercased(), port: "9987", nickname: "Tester", password: "new")
+        let updated = try client.saveBookmark(id: nil, title: "Updated", host: host.uppercased(), port: "9987", password: "new")
         XCTAssertEqual(updated.id, first.id)
         XCTAssertEqual(try client.bookmarkPassword(updated), "new")
         let saved = try XCTUnwrap(UserDefaults.standard.data(forKey: "mobilespeak.server.bookmarks"))
@@ -1593,16 +1630,16 @@ final class ClientTests: XCTestCase {
         XCTAssertFalse(String(decoding: saved, as: UTF8.self).contains("new"))
         XCTAssertFalse(String(decoding: saved, as: UTF8.self).contains("\"password\""))
         let automaticHost = "automatic-" + UUID().uuidString.lowercased() + ".invalid"
-        let automatic = try client.saveBookmark(id: nil, title: " ", host: automaticHost, port: "9987", nickname: "Auto", password: "")
+        let automatic = try client.saveBookmark(id: nil, title: " ", host: automaticHost, port: "9987", password: "")
         defer { if let existing = client.bookmarks.first(where: { $0.id == automatic.id }) { client.deleteBookmark(existing) } }
         XCTAssertEqual(automatic.title, automaticHost)
         XCTAssertEqual(automatic.automaticallyNamed, true)
-        let originalAddress = client.address, originalName = client.name
-        defer { client.address = originalAddress; client.name = originalName }
-        client.address = automatic.address; client.name = automatic.nickname
-        client.updateAutomaticBookmarkTitle("TeamSpeak Server")
-        XCTAssertEqual(client.bookmarks.first { $0.id == automatic.id }?.title, "TeamSpeak Server")
-        XCTAssertThrowsError(try client.saveBookmark(id: first.id, title: "Bad", host: "bad/path", port: "0", nickname: "", password: ""))
+        let originalAddress = client.address
+        defer { client.address = originalAddress }
+        client.address = automatic.address
+        client.updateAutomaticBookmarkTitle("Stale server")
+        XCTAssertEqual(client.bookmarks.first { $0.id == automatic.id }?.title, automaticHost)
+        XCTAssertThrowsError(try client.saveBookmark(id: first.id, title: "Bad", host: "bad/path", port: "0", password: ""))
         client.deleteBookmark(updated)
         XCTAssertFalse(client.bookmarks.contains { $0.id == first.id })
         XCTAssertEqual(try client.bookmarkPassword(updated), "")
@@ -1683,7 +1720,7 @@ final class ClientTests: XCTestCase {
         ]
         XCTAssertEqual(client.orderedChannels.map { $0.channel.id }, [1, 3, 2, 4])
         XCTAssertEqual(client.orderedChannels.map { $0.depth }, [0, 1, 0, 0])
-        client.connect(host: "invalid/address", port: "9987", nickname: "Test", password: "")
+        client.connect(host: "invalid/address", port: "9987", password: "")
         XCTAssertFalse(client.busy)
         XCTAssertNotNil(client.error)
         client.error = nil
@@ -2060,6 +2097,13 @@ final class BridgeContractTests: XCTestCase {
             let decoded = try JSONDecoder().decode(Snapshot.self, from: JSONSerialization.data(withJSONObject: snapshot))
             XCTAssertEqual(decoded.status, ["disconnected", "connecting", "connected", "reconnecting", "disconnected"][index])
             XCTAssertEqual(snapshot["connectionId"] as? String, index == 0 ? nil : "fixture-connection")
+            if index > 0 {
+                let profile = try XCTUnwrap(envelope["profile"])
+                let decoded = try JSONDecoder().decode(ProfileState.self, from: JSONSerialization.data(withJSONObject: profile))
+                XCTAssertEqual(decoded.nickname, "MobileSpeakUser")
+                XCTAssertEqual(decoded.requestId, 0)
+                XCTAssertNil(decoded.error)
+            }
             if let chats = envelope["chats"], !(chats is NSNull) {
                 let messages = try JSONDecoder().decode([ChatMessage].self, from: JSONSerialization.data(withJSONObject: chats))
                 XCTAssertEqual(messages.count, index == 2 ? 1 : 0)
@@ -2073,6 +2117,173 @@ final class BridgeContractTests: XCTestCase {
                     XCTAssertNil(event["connectionId"])
                     XCTAssertEqual((event["requested"] as? [String: String])?["noise"], "dpdfnet2")
                 }
+            }
+        }
+    }
+}
+
+final class ProfileTests: XCTestCase {
+    private func poll(_ handle: UnsafeMutableRawPointer) throws -> [String: Any] {
+        let pointer = try XCTUnwrap(ts_poll(handle)); defer { ts_free(pointer) }
+        return try XCTUnwrap(JSONSerialization.jsonObject(with: Data(String(cString: pointer).utf8)) as? [String: Any])
+    }
+    private func send(_ handle: UnsafeMutableRawPointer, _ command: [String: Any]) throws {
+        let data = try JSONSerialization.data(withJSONObject: command)
+        XCTAssertEqual(String(decoding: data, as: UTF8.self).withCString { ts_command(handle, $0) }, 0)
+    }
+    private func wait(_ handle: UnsafeMutableRawPointer, request: UInt64) throws -> ProfileState {
+        let deadline = Date().addingTimeInterval(5)
+        while Date() < deadline {
+            let envelope = try poll(handle)
+            if let value = envelope["profile"], !(value is NSNull) {
+                let profile = try JSONDecoder().decode(ProfileState.self, from: JSONSerialization.data(withJSONObject: value))
+                if profile.requestId == request { return profile }
+            }
+            Thread.sleep(forTimeInterval: 0.02)
+        }
+        throw NSError(domain: "ProfileTests", code: 1)
+    }
+    func testCAbiProfileDefaultsSaveRestartAndWriteFailure() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("profile-" + UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let first = try XCTUnwrap(ts_create()); defer { ts_destroy(first) }
+        try send(first, ["type":"configure", "storage":root.path])
+        XCTAssertEqual(try wait(first, request: 0).nickname, "MobileSpeakUser")
+        try send(first, ["type":"set_nickname", "nickname":" 用户😀 ", "request_id":1])
+        XCTAssertEqual(try wait(first, request: 1).nickname, "用户😀")
+        let second = try XCTUnwrap(ts_create()); defer { ts_destroy(second) }
+        try send(second, ["type":"configure", "storage":root.path])
+        let deadline = Date().addingTimeInterval(5)
+        var restored = try wait(second, request: 0)
+        while restored.nickname != "用户😀" && Date() < deadline { Thread.sleep(forTimeInterval: 0.02); restored = try wait(second, request: 0) }
+        XCTAssertEqual(restored.nickname, "用户😀")
+        try FileManager.default.createDirectory(at: root.appendingPathComponent("profile.tmp"), withIntermediateDirectories: true)
+        try send(second, ["type":"set_nickname", "nickname":"Failed", "request_id":1])
+        let failed = try wait(second, request: 1)
+        XCTAssertEqual(failed.nickname, "用户😀"); XCTAssertEqual(failed.error, "profile_save_failed")
+        try send(second, ["type":"set_nickname", "nickname":String(repeating:"😀", count:33), "request_id":2])
+        XCTAssertEqual(try wait(second, request: 2).error, "nickname_invalid")
+    }
+    func testOldBookmarkNicknameIsIgnoredAndDuplicateIdsSurvive() throws {
+        let id1 = UUID(), id2 = UUID()
+        let data = Data("""
+        [{"id":"\(id1)","title":"One","host":"EXAMPLE.com","port":9987,"nickname":"Old one","password":"secret"},
+         {"id":"\(id2)","title":"Two","host":"example.com","port":9987,"nickname":{"ignored":true}}]
+        """.utf8)
+        let bookmarks = try JSONDecoder().decode([Bookmark].self, from:data)
+        XCTAssertEqual(bookmarks.map(\.id), [id1,id2]); XCTAssertEqual(bookmarks[0].password,"secret")
+        let encoded = try JSONEncoder().encode(bookmarks)
+        XCTAssertFalse(String(decoding:encoded,as:UTF8.self).contains("nickname"))
+        XCTAssertEqual(Bookmark.normalizedHost(bookmarks[0].host), Bookmark.normalizedHost(bookmarks[1].host))
+    }
+    @MainActor func testDuplicateEditsAndAutomaticTitleUseConnectionIdAfterProfileChange() async throws {
+        let client = Client.shared
+        guard !client.connected, !client.busy else { throw XCTSkip("Requires offline test installation") }
+        let original = client.bookmarks
+        let disk = UserDefaults.standard.object(forKey:"mobilespeak.server.bookmarks")
+        let nickname = client.profile.nickname
+        let first = Bookmark(id:UUID(), title:"First", host:"127.0.0.1", port:1, automaticallyNamed:true)
+        let second = Bookmark(id:UUID(), title:"Second", host:"127.0.0.1", port:1, automaticallyNamed:true)
+        client.bookmarks = [first,second]
+        defer {
+            client.disconnect()
+            client.deleteBookmark(first); client.deleteBookmark(second)
+            client.bookmarks=original
+            if let disk { UserDefaults.standard.set(disk,forKey:"mobilespeak.server.bookmarks") }
+            else { UserDefaults.standard.removeObject(forKey:"mobilespeak.server.bookmarks") }
+            client.saveNickname(nickname)
+        }
+        let edited = try client.saveBookmark(id:second.id,title:"Updated",host:"127.0.0.1",port:"1",password:"test password")
+        XCTAssertEqual(client.bookmarks.count,2); XCTAssertEqual(edited.id,second.id)
+        XCTAssertEqual(try client.bookmarkPassword(edited),"test password")
+        client.connectBookmark(first)
+        let id = try XCTUnwrap(client.state.connectionId)
+        client.state=Snapshot(connectionId:id,status:"connected")
+        client.saveNickname("Changed global profile")
+        client.updateAutomaticBookmarkTitle("Confirmed server")
+        XCTAssertEqual(client.bookmarks.first { $0.id==first.id }?.title,"Confirmed server")
+        XCTAssertEqual(client.bookmarks.first { $0.id==second.id }?.title,"Updated")
+        client.state=Snapshot(connectionId:"late old connection",status:"connected")
+        client.updateAutomaticBookmarkTitle("Stale server")
+        XCTAssertEqual(client.bookmarks.first { $0.id==first.id }?.title,"Confirmed server")
+    }
+    @MainActor func testFullSettingsReflectsSavedProfileAndPreservesAvatar() async throws {
+        let client = Client.shared
+        guard !client.connected, !client.busy else { throw XCTSkip("Requires offline test installation") }
+        let original = client.profile.nickname
+        let avatar = client.avatarPreview
+        let language = UserDefaults.standard.object(forKey: AppLanguage.preferenceKey)
+        UserDefaults.standard.set("en", forKey: AppLanguage.preferenceKey)
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let window = UIWindow(windowScene: scene)
+        let host = UIHostingController(rootView: NavigationView { HomeView(client:client, tab:2) }.navigationViewStyle(.stack)
+            .environmentObject(LanguageSettings()).preferredColorScheme(.dark).tint(Palette.accent))
+        window.rootViewController = host; window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true; client.saveNickname(original)
+            if let language { UserDefaults.standard.set(language,forKey:AppLanguage.preferenceKey) }
+            else { UserDefaults.standard.removeObject(forKey:AppLanguage.preferenceKey) }
+        }
+        func capture(_ name:String) throws {
+            let image=UIGraphicsImageRenderer(size:window.bounds.size).image { _ in window.drawHierarchy(in:window.bounds,afterScreenUpdates:true) }
+            try image.pngData()?.write(to:FileManager.default.temporaryDirectory.appendingPathComponent("profile-"+name+".png"))
+            let attachment=XCTAttachment(image:image); attachment.name="profile-"+name; attachment.lifetime = .keepAlways; add(attachment)
+        }
+        func save(_ value:String) async throws {
+            let request=client.saveNickname(value)
+            let deadline=Date().addingTimeInterval(5)
+            while client.profile.requestId != request && Date() < deadline { try await Task.sleep(nanoseconds:20_000_000) }
+            XCTAssertEqual(client.profile.requestId,request); XCTAssertNil(client.nicknameSaveError)
+            try await Task.sleep(nanoseconds:300_000_000)
+        }
+        try await save("MobileSpeakUser"); try capture("settings-full-default")
+        try await save(String(repeating:"用户😀",count:12)); try capture("settings-full-long")
+        XCTAssertTrue(client.avatarPreview === avatar)
+        try await save(original)
+    }
+    @MainActor func testNativeProfileCardAndEditorLayouts() async throws {
+        let client = Client.shared
+        guard !client.connected, !client.busy else { throw XCTSkip("Requires an offline test installation") }
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let window = UIWindow(windowScene: scene)
+        let host = UIHostingController(rootView: AnyView(EmptyView()))
+        let container = UIViewController(); window.rootViewController = container
+        container.addChild(host); container.view.addSubview(host.view); host.didMove(toParent:container)
+        host.view.frame = CGRect(x:0,y:0,width:390,height:844); window.makeKeyAndVisible()
+        let language = UserDefaults.standard.object(forKey:AppLanguage.preferenceKey)
+        defer {
+            window.isHidden=true
+            if let language { UserDefaults.standard.set(language,forKey:AppLanguage.preferenceKey) }
+            else { UserDefaults.standard.removeObject(forKey:AppLanguage.preferenceKey) }
+        }
+        func capture(_ name:String) throws {
+            host.view.layoutIfNeeded()
+            let image=UIGraphicsImageRenderer(size:host.view.bounds.size).image { _ in host.view.drawHierarchy(in:host.view.bounds,afterScreenUpdates:true) }
+            try image.pngData()?.write(to:FileManager.default.temporaryDirectory.appendingPathComponent("profile-"+name+".png"))
+            let attachment=XCTAttachment(image:image); attachment.name="profile-"+name; attachment.lifetime = .keepAlways; add(attachment)
+        }
+        for language in ["en","zh-Hans"] {
+            UserDefaults.standard.set(language,forKey:AppLanguage.preferenceKey)
+            for category in [ContentSizeCategory.large,.accessibilityExtraExtraExtraLarge] {
+                for state in 0..<4 {
+                    let nickname = state==2 ? String(repeating:"用户😀",count:12) : "MobileSpeakUser"
+                    let card = ProfileCard(nickname:nickname,preview:state==1 ? UIImage(named:"AppLogo") : nil,
+                        subtitle:L10n.string(state==1 ? "avatar_local" : "avatar_none"),edit:{})
+                    let profile = VStack(alignment: HorizontalAlignment.leading, spacing: 10) {
+                        card
+                        if state == 3 { Text(L10n.string("avatar_uploading")).font(.footnote).foregroundStyle(Color(hex: 0x949BA4)) }
+                        Spacer()
+                    }
+                    let sized = profile.padding(20).frame(width: 390, height: 844, alignment: Alignment.topLeading)
+                    let colored = sized.foregroundStyle(Color(hex: 0xF2F3F5)).background(Color(hex: 0x2B2D31))
+                    host.rootView = AnyView(colored.environment(\.sizeCategory, category).preferredColorScheme(.dark))
+                    try await Task.sleep(nanoseconds:150_000_000)
+                    try capture("card-\(state)-\(language)-\(category)")
+                }
+                host.rootView=AnyView(NicknameEditor(client:client).environment(\.sizeCategory,category).preferredColorScheme(.dark).tint(Palette.accent))
+                try await Task.sleep(nanoseconds:250_000_000)
+                try capture("editor-\(language)-\(category)")
             }
         }
     }

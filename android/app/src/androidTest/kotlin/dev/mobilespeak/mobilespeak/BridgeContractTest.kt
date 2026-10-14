@@ -17,6 +17,7 @@ class BridgeContractTest {
             val snapshot = envelope.getJSONObject("snapshot")
             assertEquals(listOf("disconnected", "connecting", "connected", "reconnecting", "disconnected")[i], snapshot.snapshot().status)
             assertEquals(if (i == 0) null else "fixture-connection", snapshot.stringOrNull("connectionId"))
+            if (i > 0) assertEquals(ProfileState(), envelope.getJSONObject("profile").profile())
             if (!envelope.isNull("chats")) {
                 val messages = envelope.getJSONArray("chats").objects().map(JSONObject::chatMessage)
                 assertEquals(if (i == 2) 1 else 0, messages.size)
@@ -137,7 +138,7 @@ class SecureStoreFailureTest {
             override fun getSharedPreferences(name: String, mode: Int) = preferences
         }
         val store = SecureStore(context)
-        val bookmark = Bookmark.create("failure-test", "Manual", "example.invalid", "9987", "Tester", "secret")
+        val bookmark = Bookmark.create("failure-test", "Manual", "example.invalid", "9987", "secret")
         store.saveBookmarks(listOf(bookmark))
         val original = persisted
         fail = true

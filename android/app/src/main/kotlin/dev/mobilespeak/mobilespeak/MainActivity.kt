@@ -509,7 +509,6 @@ internal fun BookmarkScreen(
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                         Text(bookmark.title, fontSize = 17.sp, lineHeight = 20.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Text(bookmark.address, fontSize = 12.sp, lineHeight = 14.sp, color = Palette.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(bookmark.nickname, fontSize = 12.sp, lineHeight = 14.sp, color = Palette.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                 }
                 Box {
@@ -540,7 +539,6 @@ private fun BookmarkDialog(existing: Bookmark?, onDismiss: () -> Unit, onSaved: 
     var title by remember(existing) { mutableStateOf(existing?.title.orEmpty()) }
     var host by remember(existing) { mutableStateOf(existing?.host.orEmpty()) }
     var port by remember(existing) { mutableStateOf(existing?.port?.toString() ?: "9987") }
-    var nickname by remember(existing) { mutableStateOf(existing?.nickname ?: "MobileSpeakUser") }
     var password by remember(existing) { mutableStateOf(existing?.password.orEmpty()) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     ModalBottomSheet(
@@ -579,10 +577,6 @@ private fun BookmarkDialog(existing: Bookmark?, onDismiss: () -> Unit, onSaved: 
                 HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = Palette.border)
                 BookmarkField(password, { password = it }, stringResource(R.string.server_password_optional), KeyboardType.Password, PasswordVisualTransformation())
             }
-            Text(stringResource(R.string.nickname), Modifier.padding(start = 16.dp, top = 28.dp, bottom = 10.dp), color = Palette.muted, fontWeight = FontWeight.SemiBold)
-            Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Palette.card)) {
-                BookmarkField(nickname, { nickname = it }, stringResource(R.string.nickname))
-            }
             Spacer(Modifier.height(28.dp))
             PressFeedback(null) { source, _, pressed ->
                 val background by animateColorAsState(if (pressed) lerp(Palette.card, Color.White, 0.066f) else Palette.card,
@@ -590,7 +584,7 @@ private fun BookmarkDialog(existing: Bookmark?, onDismiss: () -> Unit, onSaved: 
                 Surface(
                     interactionSource = source,
                     onClick = {
-                        ClientSession.saveBookmark(existing?.id, title, host, port, nickname, password)?.let(onSaved)
+                        ClientSession.saveBookmark(existing?.id, title, host, port, password)?.let(onSaved)
                     },
                     modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp),
                     shape = RoundedCornerShape(14.dp),
@@ -757,9 +751,58 @@ private fun MemberRow(member: Member, modifier: Modifier = Modifier, unread: Int
 }
 
 @Composable
+internal fun ProfileCard(ui: SessionUiState, edit: () -> Unit) {
+    val editLabel = stringResource(R.string.profile_edit_nickname, ui.profile.nickname)
+    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Palette.card).padding(16.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+        Box(Modifier.size(64.dp).clip(CircleShape).background(Palette.selected), contentAlignment = Alignment.Center) {
+            if (ui.avatarPreviewPath == null) Icon(UiIcons.Person, stringResource(R.string.avatar_preview), Modifier.size(28.dp), tint = Palette.muted)
+            else LocalImage(ui.avatarPreviewPath, Modifier.fillMaxSize(), stringResource(R.string.avatar_preview), ui.avatarRevision)
+        }
+        Column(Modifier.weight(1f).heightIn(min = 64.dp).semantics { contentDescription = editLabel }
+            .clickable(interactionSource = null, indication = RowPressFeedback, role = Role.Button, onClick = edit),
+            verticalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterVertically)) {
+            Row(Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(ui.profile.nickname, Modifier.weight(1f, fill = false), fontSize = 17.sp, lineHeight = 22.sp,
+                    fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Icon(UiIcons.Pencil, null, Modifier.size(17.dp), tint = Palette.accent)
+            }
+            Text(stringResource(if (ui.avatarIntent == "clear") R.string.avatar_cleared_local else if (ui.avatarPreviewPath == null) R.string.avatar_none else R.string.avatar_local),
+                fontSize = 13.sp, lineHeight = 17.sp, color = Palette.muted)
+        }
+    }
+}
+
+@Composable
+internal fun NicknameDialog(ui: SessionUiState, onDismiss: () -> Unit) {
+    var draft by rememberSaveable { mutableStateOf(ui.profile.nickname) }
+    var submitted by rememberSaveable { mutableStateOf<Long?>(null) }
+    LaunchedEffect(ui.nicknameSaving, ui.profile.requestId) {
+        if (submitted != null && ui.profile.requestId == submitted && !ui.nicknameSaving && ui.nicknameSaveError == null) onDismiss()
+    }
+    AlertDialog(onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.profile_nickname_edit)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(draft, { draft = it }, singleLine = true,
+                    label = { Text(stringResource(R.string.nickname)) },
+                    keyboardOptions = KeyboardOptions(autoCorrectEnabled = false, capitalization = androidx.compose.ui.text.input.KeyboardCapitalization.None),
+                    colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Palette.text, unfocusedTextColor = Palette.text))
+                if (submitted != null) ui.nicknameSaveError?.let { Text(it, color = Palette.disconnect, fontSize = 13.sp) }
+            }
+        },
+        confirmButton = { TextButton(enabled = !ui.nicknameSaving, onClick = { submitted = ClientSession.saveNickname(draft) }) { Text(stringResource(R.string.action_save)) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) } },
+        containerColor = Palette.card, titleContentColor = Palette.text, textContentColor = Palette.text)
+}
+
+@Composable
 @OptIn(ExperimentalMaterial3Api::class)
 internal fun SettingsScreen(ui: SessionUiState, requestPermissions: () -> Unit, onPage: (String) -> Unit) {
     val haptic = LocalHapticFeedback.current
+    var nicknamePresented by rememberSaveable { mutableStateOf(false) }
+    if (nicknamePresented) NicknameDialog(ui) { nicknamePresented = false }
     var avatarClearPresented by rememberSaveable { mutableStateOf(false) }
     var avatarUri by rememberSaveable { mutableStateOf<String?>(null) }
     var avatarSelection by rememberSaveable { mutableStateOf(0L) }
@@ -786,37 +829,33 @@ internal fun SettingsScreen(ui: SessionUiState, requestPermissions: () -> Unit, 
         PageTitle(stringResource(R.string.tab_settings), Modifier.padding(horizontal = pageTitleInset))
         Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Palette.card)
-                    .padding(16.dp), verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                    Box(Modifier.size(64.dp).clip(CircleShape).background(Palette.selected), contentAlignment = Alignment.Center) {
-                        if (ui.avatarPreviewPath == null) Icon(UiIcons.Person, null, Modifier.size(28.dp), tint = Palette.muted)
-                        else LocalImage(ui.avatarPreviewPath, Modifier.fillMaxSize(), stringResource(R.string.avatar_preview), ui.avatarRevision)
-                    }
-                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text(stringResource(R.string.avatar_title), fontSize = 17.sp, lineHeight = 22.sp)
-                        Text(stringResource(if (ui.avatarIntent == "clear") R.string.avatar_cleared_local else if (ui.avatarPreviewPath == null) R.string.avatar_none else R.string.avatar_local),
-                            fontSize = 13.sp, lineHeight = 17.sp, color = Palette.muted)
+                Text(stringResource(R.string.profile_title), fontSize = 13.sp, lineHeight = 17.sp, color = Palette.muted)
+                ProfileCard(ui) {
+                    haptic.performHapticFeedback(HapticFeedbackType.SegmentTick)
+                    nicknamePresented = true
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    PressFeedback(RowPressFeedback) { source, feedback, _ ->
+                        TextButton(onClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.SegmentTick)
+                            avatarClearPresented = true
+                        }, enabled = !ui.avatarClearingLocally && ui.avatarStatus != "clearing",
+                            interactionSource = source, modifier = Modifier.heightIn(min = 48.dp).then(feedback),
+                            contentPadding = PaddingValues(0.dp),
+                            colors = ButtonDefaults.textButtonColors(contentColor = Palette.disconnect,
+                                disabledContentColor = Palette.disconnect.copy(alpha = 0.38f))) {
+                            Text(stringResource(R.string.avatar_remove), fontSize = 17.sp, lineHeight = 22.sp, fontWeight = FontWeight.Normal)
+                        }
                     }
                     PressFeedback(RowPressFeedback) { source, feedback, _ ->
-                        TextButton(interactionSource = source, modifier = feedback, onClick = {
+                        TextButton(interactionSource = source, modifier = Modifier.heightIn(min = 48.dp).then(feedback),
+                            contentPadding = PaddingValues(0.dp), onClick = {
                             haptic.performHapticFeedback(HapticFeedbackType.SegmentTick)
                             avatarSelection = ClientSession.beginAvatarSelection(); avatarPicker.launch(
                                 androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
                             )
-                        }) { Text(stringResource(if (ui.avatarPreviewPath == null) R.string.avatar_choose else R.string.avatar_change)) }
-                    }
-                }
-                PressFeedback(RowPressFeedback) { source, feedback, _ ->
-                    TextButton(onClick = {
-                        haptic.performHapticFeedback(HapticFeedbackType.SegmentTick)
-                        avatarClearPresented = true
-                    }, enabled = !ui.avatarClearingLocally && ui.avatarStatus != "clearing",
-                        interactionSource = source, modifier = Modifier.align(Alignment.End).heightIn(min = 48.dp).then(feedback),
-                        contentPadding = PaddingValues(0.dp),
-                        colors = ButtonDefaults.textButtonColors(contentColor = Palette.disconnect,
-                            disabledContentColor = Palette.disconnect.copy(alpha = 0.38f))) {
-                        Text(stringResource(R.string.avatar_remove), fontSize = 17.sp, lineHeight = 22.sp, fontWeight = FontWeight.Normal)
+                        }) { Text(stringResource(if (ui.avatarPreviewPath == null) R.string.avatar_choose else R.string.avatar_change),
+                            fontSize = 17.sp, lineHeight = 22.sp, fontWeight = FontWeight.Normal) }
                     }
                 }
                 ui.avatarCleanupDetail?.let { Text(it, fontSize = 13.sp, color = Palette.disconnect) }

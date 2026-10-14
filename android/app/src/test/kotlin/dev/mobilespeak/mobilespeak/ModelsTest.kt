@@ -67,15 +67,14 @@ class ModelsTest {
     }
     @Test
     fun bookmarkValidationNormalizesAddressAndProtectsLimits() {
-        val bookmark = Bookmark.create(null, "", " [2001:DB8::1] ", "9987", " 用户😀 ", "secret")
+        val bookmark = Bookmark.create(null, "", " [2001:DB8::1] ", "9987", "secret")
         assertEquals("2001:db8::1", bookmark.host)
         assertEquals("[2001:db8::1]:9987", bookmark.address)
-        assertEquals("用户😀", bookmark.nickname)
         assertThrows(IllegalArgumentException::class.java) {
-            Bookmark.create(null, "", "bad host", "9987", "name", "")
+            Bookmark.create(null, "", "bad host", "9987", "")
         }
         assertThrows(IllegalArgumentException::class.java) {
-            Bookmark.create(null, "", "host", "0", "name", "")
+            Bookmark.create(null, "", "host", "0", "")
         }
     }
 
@@ -108,7 +107,7 @@ class SessionOrderingTest {
     }
 
     @Test fun bookmarkTransactionsSerializeReadComputeSavePublishAndKeepFailuresAtomic() {
-        val original = Bookmark.create("a", "", "host", "9987", "user", "password")
+        val original = Bookmark.create("a", "", "host", "9987", "password")
         var disk = listOf(original)
         var memory = disk
         val saving = java.util.concurrent.CountDownLatch(1)

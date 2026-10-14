@@ -521,23 +521,48 @@ struct ChannelMemberPreview: View {
         Int(min(CGFloat(max(0, memberCount)), floor(max(0, width - textWidth) / 29)))
     }
 
+    static func nicknameWidth(width: CGFloat, textWidth: CGFloat, memberCount: Int,
+                              nameWidth: CGFloat, minimumNameWidth: CGFloat) -> CGFloat {
+        guard memberCount == 1, nameWidth > 0 else { return 0 }
+        let available = width - textWidth - 34 // Avatar and two gaps; summary has priority.
+        return available >= min(nameWidth, minimumNameWidth) ? min(nameWidth, available) : 0
+    }
+
     var body: some View {
         if !members.isEmpty {
-            let text = ChannelMemberCountText(text: summary,
-                                             font: .systemFont(ofSize: 11, weight: legibilityWeight == .bold ? .semibold : .regular))
+            let font = UIFont.systemFont(ofSize: 11, weight: legibilityWeight == .bold ? .semibold : .regular)
+            let text = ChannelMemberPreviewText(text: summary, font: font)
             let textSize = text.size
             GeometryReader { proxy in
-                HStack(spacing: 5) {
-                    ForEach(Array(members.prefix(Self.avatarCount(width: proxy.size.width, textWidth: textSize.width, memberCount: members.count)))) { member in
-                        Avatar(name: member.name, path: member.avatarPath, speaking: member.speaking, size: 24, member: member)
+                Group {
+                    if members.count == 1, let member = members.first {
+                        let name = ChannelMemberPreviewText(text: member.name, font: font)
+                        let minimum = ChannelMemberPreviewText(text: String(member.name.prefix(1)) + "…", font: font).size.width
+                        let nameWidth = Self.nicknameWidth(width: proxy.size.width, textWidth: textSize.width,
+                            memberCount: members.count, nameWidth: name.size.width, minimumNameWidth: minimum)
+                        HStack(spacing: 5) {
+                            if Self.avatarCount(width: proxy.size.width, textWidth: textSize.width, memberCount: 1) == 1 {
+                                Avatar(name: member.name, path: member.avatarPath, speaking: member.speaking, size: 24, member: member)
+                            }
+                            if nameWidth > 0 { name.frame(width: nameWidth, height: name.size.height) }
+                            text.frame(width: min(textSize.width, proxy.size.width), height: textSize.height)
+                        }
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel(member.accessibilityLabel + ", " + summary)
+                    } else {
+                        HStack(spacing: 5) {
+                            ForEach(Array(members.prefix(Self.avatarCount(width: proxy.size.width, textWidth: textSize.width, memberCount: members.count)))) { member in
+                                Avatar(name: member.name, path: member.avatarPath, speaking: member.speaking, size: 24, member: member)
+                            }
+                            text.frame(width: min(textSize.width, proxy.size.width), height: textSize.height)
+                        }
                     }
-                    text.frame(width: min(textSize.width, proxy.size.width), height: textSize.height)
                 }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
             }.frame(height: max(24, textSize.height))
         }
     }
 }
-private struct ChannelMemberCountText: UIViewRepresentable {
+private struct ChannelMemberPreviewText: UIViewRepresentable {
     let text: String
     let font: UIFont
 
@@ -947,6 +972,7 @@ struct HomeView: View {
     @State private var showConnect = false
     @State private var editingBookmark: Bookmark?
     @State private var deletingBookmark: Bookmark?
+    @State private var nicknamePresented = false
     @State private var avatarClearPresented = false
     @State private var avatarSelection: AvatarSelectionRequest?
     @State private var channelSheet = ChannelSheetState()
@@ -1090,7 +1116,6 @@ struct HomeView: View {
                                 VStack(alignment: .leading, spacing: 5) {
                                     Text(bookmark.title).font(.headline)
                                     Text(bookmark.address).font(.caption).foregroundStyle(Palette.muted)
-                                    Text(bookmark.nickname).font(.caption).foregroundStyle(Palette.muted)
                                 }
                                 Spacer()
                             }.frame(minHeight: 64).contentShape(Rectangle())
@@ -1225,50 +1250,37 @@ struct HomeView: View {
                 PageTitle(key: "tab_settings").padding(.horizontal, PageTitle.inset)
                 VStack(alignment: .leading, spacing: 24) {
                     VStack(alignment: .leading, spacing: 10) {
-                        HStack(spacing: 14) {
-                            Group {
-                                if let preview = client.avatarPreview {
-                                    Image(uiImage: preview).resizable().scaledToFill()
-                                } else {
-                                    AppIcon(name: "avatar-placeholder", size: 28).foregroundStyle(Palette.muted)
-                                }
+                        Text(L10n.string("profile_title")).font(.footnote).foregroundStyle(Palette.muted)
+                        ProfileCard(nickname: client.profile.nickname, preview: client.avatarPreview,
+                                    subtitle: L10n.string(client.avatarIntent == "clear" ? "avatar_cleared_local" : (client.avatarPreview == nil ? "avatar_none" : "avatar_local"))) {
+                            UISelectionFeedbackGenerator().selectionChanged()
+                            nicknamePresented = true
+                        }
+                        HStack {
+                            Button(role: .destructive) {
+                                UISelectionFeedbackGenerator().selectionChanged()
+                                avatarClearPresented = true
+                            } label: {
+                                Text(L10n.string("avatar_remove"))
+                                    .font(.body)
+                                    .frame(minWidth: 48, minHeight: 48, alignment: .leading)
+                                    .contentShape(Rectangle())
                             }
-                            .frame(width: 64, height: 64)
-                            .background(Palette.selected)
-                            .clipShape(Circle())
-                            .accessibilityLabel(L10n.string("avatar_preview"))
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(L10n.string("avatar_title"))
-                                Text(L10n.string(client.avatarIntent == "clear" ? "avatar_cleared_local" : (client.avatarPreview == nil ? "avatar_none" : "avatar_local")))
-                                    .font(.footnote).foregroundStyle(Palette.muted)
-                            }
-                            Spacer(minLength: 0)
+                                .buttonStyle(.plain)
+                                .foregroundStyle(Palette.disconnect)
+                                .opacity(client.avatarClearingLocally || client.avatarStatus == "clearing" ? 0.38 : 1)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .disabled(client.avatarClearingLocally || client.avatarStatus == "clearing")
+                                .avatarClearConfirmation(isPresented: $avatarClearPresented, connected: client.connected, clear: client.clearAvatar)
+                            Spacer(minLength: 12)
                             Button(L10n.string(client.avatarPreview == nil ? "avatar_choose" : "avatar_change")) {
                                 UISelectionFeedbackGenerator().selectionChanged()
                                 avatarSelection = AvatarSelectionRequest(id: client.beginAvatarSelection())
                             }
                             .buttonStyle(.plain).foregroundStyle(Palette.accent)
-                            .frame(minHeight: 44)
+                            .frame(minWidth: 48, minHeight: 48, alignment: .trailing)
                             .accessibilityHint(L10n.string("avatar_choose_hint"))
                         }
-                        .padding(16)
-                        .background(Palette.card)
-                        .clipShape(RoundedRectangle(cornerRadius: 14))
-                        Button(role: .destructive) {
-                            UISelectionFeedbackGenerator().selectionChanged()
-                            avatarClearPresented = true
-                        } label: {
-                            Text(L10n.string("avatar_remove"))
-                                .font(.body)
-                                .frame(minWidth: 48, minHeight: 48, alignment: .trailing)
-                                .contentShape(Rectangle())
-                        }
-                            .buttonStyle(.plain)
-                            .foregroundStyle(Palette.disconnect)
-                            .opacity(client.avatarClearingLocally || client.avatarStatus == "clearing" ? 0.38 : 1)
-                            .frame(maxWidth: .infinity, alignment: .trailing)
-                            .disabled(client.avatarClearingLocally || client.avatarStatus == "clearing")
-                            .avatarClearConfirmation(isPresented: $avatarClearPresented, connected: client.connected, clear: client.clearAvatar)
                         if let detail = client.avatarCleanupDetail { Text(detail).font(.footnote).foregroundStyle(Palette.disconnect) }
                         if ["checking", "uploading", "clearing", "failed", "clear_failed", "clear_save_failed"].contains(client.avatarStatus) {
                             Text(L10n.string("avatar_\(client.avatarStatus)")
@@ -1278,6 +1290,7 @@ struct HomeView: View {
                         }
                     }
                     .avatarSelectionSheet(selection: $avatarSelection)
+                    .sheet(isPresented: $nicknamePresented) { NicknameEditor(client: client) }
                     Toggle(L10n.string("settings_microphone"), isOn: Binding(get: { !client.microphoneMuted }, set: { value in Task { await client.setAudio(input: !value) } })).disabled(client.audioBusy || client.deafened)
                     Toggle(L10n.string("settings_listening"), isOn: Binding(get: { !client.deafened }, set: { value in Task { await client.setAudio(output: !value) } })).disabled(client.audioBusy)
                     VStack(alignment: .leading, spacing: 4) {
@@ -1606,6 +1619,72 @@ struct ChatView: View {
     }
 }
 
+struct ProfileCard: View {
+    let nickname: String
+    let preview: UIImage?
+    let subtitle: String
+    let edit: () -> Void
+    var body: some View {
+        HStack(spacing: 14) {
+            Group {
+                if let preview { Image(uiImage: preview).resizable().scaledToFill() }
+                else { AppIcon(name: "avatar-placeholder", size: 28).foregroundStyle(Palette.muted) }
+            }
+            .frame(width: 64, height: 64).background(Palette.selected).clipShape(Circle())
+            .accessibilityLabel(L10n.string("avatar_preview"))
+            Button(action: edit) {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 10) {
+                        Text(nickname).font(.body.weight(.semibold)).lineLimit(1).truncationMode(.tail)
+                        AppIcon(name: "pencil", size: 17).foregroundStyle(Palette.accent).fixedSize().layoutPriority(1)
+                    }
+                    Text(subtitle).font(.footnote).foregroundStyle(Palette.muted)
+                }
+                .frame(maxWidth: .infinity, minHeight: 64, alignment: .leading).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(L10n.format("profile_edit_nickname", nickname))
+            .accessibilityValue(subtitle)
+            .accessibilityIdentifier("profile-nickname")
+        }
+        .padding(16).background(Palette.card).clipShape(RoundedRectangle(cornerRadius: 14))
+    }
+}
+
+struct NicknameEditor: View {
+    @ObservedObject var client: Client
+    @Environment(\.dismiss) private var dismiss
+    @State private var draft: String
+    @State private var submitted: UInt64?
+    init(client: Client) {
+        self.client = client
+        _draft = State(initialValue: client.profile.nickname)
+    }
+    var body: some View {
+        NavigationView {
+            Form {
+                TextField(L10n.string("nickname"), text: $draft)
+                    .textInputAutocapitalization(.never).autocorrectionDisabled()
+                    .accessibilityIdentifier("nickname-input")
+                if submitted != nil, let error = client.nicknameSaveError {
+                    Text(error).font(.footnote).foregroundStyle(Palette.disconnect)
+                }
+            }
+            .navigationTitle(L10n.string("profile_nickname_edit")).navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button(L10n.string("action_cancel")) { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(L10n.string("action_save")) { submitted = client.saveNickname(draft) }
+                        .disabled(client.nicknameSaving).accessibilityIdentifier("nickname-save")
+                }
+            }
+        }
+        .onChange(of: client.profile) { profile in
+            if profile.requestId == submitted && !client.nicknameSaving && client.nicknameSaveError == nil { dismiss() }
+        }
+    }
+}
+
 struct ConnectView: View {
     @ObservedObject var client: Client
     var bookmark: Bookmark? = nil
@@ -1615,7 +1694,6 @@ struct ConnectView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var host = ""
     @State private var port = "9987"
-    @State private var name = ""
     @State private var password = ""
     var body: some View {
         NavigationView {
@@ -1628,11 +1706,10 @@ struct ConnectView: View {
                         .textContentType(.oneTimeCode)
                         .autocorrectionDisabled()
                 }
-                Section(L10n.string("nickname")) { TextField(L10n.string("nickname"), text: $name).autocorrectionDisabled() }
                 Section {
                     Button(L10n.string(bookmark != nil || client.connected || client.busy ? "bookmark_save" : "action_save_and_connect")) {
                         do {
-                            let saved = try client.saveBookmark(id: bookmark?.id, title: title, host: host, port: port, nickname: name, password: password)
+                            let saved = try client.saveBookmark(id: bookmark?.id, title: title, host: host, port: port, password: password)
                             if bookmark == nil && !client.connected && !client.busy { client.connectBookmark(saved) }
                             dismiss()
                         } catch { formError = error.localizedDescription }
@@ -1643,7 +1720,7 @@ struct ConnectView: View {
                 .toolbar { ToolbarItem(placement: .cancellationAction) { Button(L10n.string("action_cancel")) { dismiss() } } }
         }.onAppear {
             let url = URLComponents(string: "ts://" + client.address)
-            host = bookmark?.host ?? url?.host ?? ""; port = String(bookmark?.port ?? UInt16(url?.port ?? 9987)); name = bookmark?.nickname ?? client.name
+            host = bookmark?.host ?? url?.host ?? ""; port = String(bookmark?.port ?? UInt16(url?.port ?? 9987))
             title = bookmark?.title ?? ""
             do { password = try bookmark.map { try client.bookmarkPassword($0) } ?? ""; passwordLoaded = true }
             catch { formError = error.localizedDescription }
@@ -1761,7 +1838,7 @@ private struct UserVolumeRow: View {
             Slider(value: Binding(get: { value }, set: { next in
                 value = next
                 client.setUserVolume(server: server, member: member, percent: Int(next))
-            }), in: 0...200, step: 1, onEditingChanged: { active in
+            }), in: 0...300, step: 1, onEditingChanged: { active in
                 editing = active
                 if !active {
                     client.setUserVolume(server: server, member: member, percent: Int(value))

@@ -138,7 +138,7 @@ class NativeCoreTest {
 
     @Test
     fun jniStartsAndMovesUtf8AndExactAudioFrames() {
-        val handle = NativeCore.create()
+        val handle = NativeCore.create(InstrumentationRegistry.getInstrumentation().targetContext)
         assertTrue(handle != 0L)
         try {
             val initial = JSONObject(String(NativeCore.poll(handle), Charsets.UTF_8))

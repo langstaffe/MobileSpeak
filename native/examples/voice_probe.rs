@@ -7,6 +7,11 @@ use std::{ffi::c_void, io::{self, BufRead}, time::{Duration, Instant}};
 struct Probe {
     bridge: Box<Bridge>,
     playback: *const c_void,
+    _storage: ProbeStorage,
+}
+struct ProbeStorage(std::path::PathBuf);
+impl Drop for ProbeStorage {
+    fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.0); }
 }
 impl Probe {
     fn new() -> Self {
@@ -14,7 +19,9 @@ impl Probe {
         let playback = unsafe { ts_playback_acquire(&mut *bridge) };
         assert!(!playback.is_null());
         unsafe { ts_playback_active(playback, true); }
-        Self { bridge, playback: playback.cast() }
+        let root = std::env::temp_dir().join(format!("mobilespeak-voice-profile-{}-{:p}", std::process::id(), &*bridge));
+        bridge.send(&json!({"type":"configure","storage":root}).to_string()).expect("isolated probe storage");
+        Self { bridge, playback: playback.cast(), _storage: ProbeStorage(root) }
     }
     fn send(&self, value: Value) -> Result<(), String> { self.bridge.send(&value.to_string()) }
     fn read(&self) -> Result<Value, String> {
@@ -43,9 +50,12 @@ fn speech() -> Vec<i16> {
     include_bytes!("../tests/fixtures/speech.pcm").chunks_exact(2).map(|b| i16::from_le_bytes([b[0], b[1]])).collect()
 }
 fn run(sender: &mut Probe, receiver: &Probe, mut config: Value) -> Result<(), String> {
-    config["type"] = json!("connect"); config["connectionId"] = json!("probe-sender"); config["name"] = json!("MobileSpeak-Probe-A");
+    sender.send(json!({"type":"set_nickname","nickname":"MobileSpeak-Probe-A","request_id":1}))?;
+    receiver.send(json!({"type":"set_nickname","nickname":"MobileSpeak-Probe-B","request_id":1}))?;
+    config.as_object_mut().ok_or("connect JSON must be an object")?.remove("name");
+    config["type"] = json!("connect"); config["connectionId"] = json!("probe-sender");
     sender.send(config.clone())?;
-    config["connectionId"] = json!("probe-receiver"); config["name"] = json!("MobileSpeak-Probe-B");
+    config["connectionId"] = json!("probe-receiver");
     receiver.send(config)?;
     let deadline = Instant::now() + Duration::from_secs(35);
     loop {

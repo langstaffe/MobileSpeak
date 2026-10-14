@@ -204,7 +204,7 @@ class ClickHighlightTest {
         val channel = Channel(1, 0, 0, "Fixture channel", false, true, "fixture", null)
         val member = Member(2, 1, "fixture-user", "Fixture member", null, emptyList(), emptyList(), null, false, false, false)
         val bookmark = Bookmark(title = "Fixture bookmark", host = "example.invalid", port = 9987,
-            nickname = "fixture", password = "", automaticallyNamed = false)
+            password = "", automaticallyNamed = false)
         val ui = SessionUiState(snapshot = Snapshot(status = "connected", ownClient = 99,
             channels = listOf(channel), clients = listOf(member)), bookmarks = listOf(bookmark))
 

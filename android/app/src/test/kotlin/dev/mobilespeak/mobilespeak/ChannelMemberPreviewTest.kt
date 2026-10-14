@@ -18,4 +18,18 @@ class ChannelMemberPreviewTest {
         assertEquals(4, channelPreviewAvatarCount(217, 65, 5, 38))
         assertEquals(3, channelPreviewAvatarCount(216, 65, 5, 38))
     }
+
+    @Test fun onlySingleMemberGetsNicknameAfterAvatarAndSummary() {
+        fun width(available: Int, members: Int = 1, name: Int = 100) =
+            channelPreviewNicknameWidth(available, 70, members, name, 20, 29, 5)
+        assertEquals(0, width(1000, 0))
+        assertEquals(0, width(1000, 2))
+        assertEquals(0, width(133, 5)) // Multiple members, even when only one avatar fits.
+        assertEquals(0, width(1000, name = 0))
+        assertEquals(100, width(1000))
+        assertEquals(20, width(124))
+        assertEquals(0, width(123))
+        assertEquals(0, width(98))
+        assertEquals(5, width(109, name = 5)) // A complete short name needs no ellipsis.
+    }
 }

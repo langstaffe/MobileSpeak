@@ -28,6 +28,12 @@
       }
     ],
     "fileCache": null,
+    "profile": {
+      "detail": null,
+      "error": null,
+      "nickname": "MobileSpeakUser",
+      "requestId": 0
+    },
     "receiveAudio": {
       "agc": true
     },
@@ -81,6 +87,12 @@
       }
     ],
     "fileCache": null,
+    "profile": {
+      "detail": null,
+      "error": null,
+      "nickname": "MobileSpeakUser",
+      "requestId": 0
+    },
     "receiveAudio": {
       "agc": true
     },
@@ -117,6 +129,12 @@
       }
     ],
     "fileCache": null,
+    "profile": {
+      "detail": null,
+      "error": null,
+      "nickname": "MobileSpeakUser",
+      "requestId": 0
+    },
     "receiveAudio": {
       "agc": true
     },
@@ -159,6 +177,12 @@
       }
     ],
     "fileCache": null,
+    "profile": {
+      "detail": null,
+      "error": null,
+      "nickname": "MobileSpeakUser",
+      "requestId": 0
+    },
     "receiveAudio": {
       "agc": true
     },

@@ -621,7 +621,7 @@ impl<Id: Clone + Debug + Eq + Hash + PartialEq> AudioHandler<Id> {
             }
 
             let vol = if queue.volume.is_finite() {
-                queue.volume.clamp(0., 2.)
+                queue.volume.clamp(0., crate::receive_audio::MAX_VOLUME_PERCENT as f32 / 100.)
             } else {
                 1.
             };
@@ -777,7 +777,7 @@ mod tests {
             .unwrap()
         };
         let mut audio = AudioHandler::<ClientId>::new();
-        for percent in [0, 100, 200] {
+        for percent in [0, 100, 200, 250, 300] {
             audio
                 .handle_packet(ClientId(7), packet(0, &encoded[..length]))
                 .unwrap();
@@ -806,7 +806,9 @@ mod tests {
             });
             assert!(input_was_seen);
             assert!((output[0] - percent as f32 / 1000.).abs() < 0.001);
-            assert!((output[output.len() - 2] - 0.1).abs() < 0.015);
+            let expected = 0.1 + (percent as f32 / 1000. - 0.1)
+                * (1. - 0.0020811647f32).powi((output.len() / CHANNEL_NUM) as i32);
+            assert!((output[output.len() - 2] - expected).abs() < 1e-5);
             for _ in 0..4 {
                 audio.fill_buffer(&mut [0.; USUAL_FRAME_SIZE * CHANNEL_NUM]);
             }

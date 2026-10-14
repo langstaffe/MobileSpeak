@@ -15,7 +15,7 @@ class BookmarkMenuTest {
         val context = instrumentation.targetContext
         assumeTrue("Use the isolated test app", context.packageName.endsWith(".uitest"))
         ClientSession.initialize(context)
-        val bookmark = requireNotNull(ClientSession.saveBookmark(null, "IconMenuTest", "example.invalid", "9987", "fixture", ""))
+        val bookmark = requireNotNull(ClientSession.saveBookmark(null, "IconMenuTest", "example.invalid", "9987", ""))
         fun node(label: String): AccessibilityNodeInfo? {
             fun find(n: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
                 if (n == null) return null

@@ -399,13 +399,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Change"
+            "value" : "Change avatar"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "更换"
+            "value" : "更换头像"
           }
         }
       }
@@ -433,13 +433,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Choose"
+            "value" : "Choose avatar"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "选择"
+            "value" : "选择头像"
           }
         }
       }
@@ -1687,35 +1687,35 @@
       }
     },
     "error_bookmark_duplicate" : {
-      "extractionState" : "stale",
+      "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "A bookmark with the same address, port, and nickname already exists."
+            "value" : "A bookmark with the same address and port already exists."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "已有相同地址、端口和昵称的书签。"
+            "value" : "相同地址和端口的书签已存在。"
           }
         }
       }
     },
     "error_bookmark_invalid" : {
-      "extractionState" : "stale",
+      "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Enter a valid address, port, nickname, and password."
+            "value" : "Enter a valid address, port, and password."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "请填写有效的地址、端口、昵称和密码。"
+            "value" : "请输入有效的地址、端口和密码。"
           }
         }
       }
@@ -2129,18 +2129,18 @@
       }
     },
     "error_server_invalid" : {
-      "extractionState" : "stale",
+      "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Enter a valid server address, port, and nickname."
+            "value" : "Enter a valid server address and port."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "请填写有效的服务器地址、端口和昵称。"
+            "value" : "请输入有效的服务器地址和端口。"
           }
         }
       }
@@ -2352,8 +2352,18 @@
     "member_away" : {
       "extractionState" : "manual",
       "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Away" } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "离开" } }
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Away"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "离开"
+          }
+        }
       }
     },
     "member_muted" : {
@@ -3036,12 +3046,8 @@
         }
       }
     },
-    " ms ± " : {
-
-    },
-    "%" : {
-
-    },
+    " ms ± " : {},
+    "%" : {},
     "network_chart" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -4044,6 +4050,125 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "上传"
+          }
+        }
+      }
+    },
+    "profile_title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Profile"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "个人资料"
+          }
+        }
+      }
+    },
+    "profile_nickname_edit" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Edit nickname"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "修改昵称"
+          }
+        }
+      }
+    },
+    "profile_edit_nickname" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Edit nickname, %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "修改昵称，%@"
+          }
+        }
+      }
+    },
+    "error_nickname_invalid" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enter a nickname of 1–128 UTF-8 bytes."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "昵称不能为空，且不能超过 128 个 UTF-8 字节。"
+          }
+        }
+      }
+    },
+    "error_profile_save_failed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unable to save nickname. Please try again."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法保存昵称，请重试。"
+          }
+        }
+      }
+    },
+    "error_profile_read_failed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unable to read profile. Existing data was preserved."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法读取个人资料，已保留原有数据。"
+          }
+        }
+      }
+    },
+    "error_profile_rename_failed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The server could not change your nickname."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "服务器未能修改你的昵称。"
           }
         }
       }

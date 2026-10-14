@@ -7,6 +7,20 @@ from unittest.mock import patch
 import ios_core_fingerprint as core
 
 class FingerprintTests(unittest.TestCase):
+    def test_finder_metadata_does_not_invalidate(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root/'native').mkdir()
+            before = core.fingerprint(root)
+            for name in ('native/src/.DS_Store', 'native/patched/.DS_Store',
+                         'native/patched/tsclientlib/src/.DS_Store', 'native/.cargo/.DS_Store',
+                         'native/models/.DS_Store', '.cargo/.DS_Store', 'tool/.DS_Store'):
+                path = root/name; path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(b'original metadata')
+                self.assertEqual(before, core.fingerprint(root), name)
+                path.write_bytes(b'changed metadata')
+                self.assertEqual(before, core.fingerprint(root), name)
+
     def test_source_patch_lock_config_script_and_parameters_invalidate(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -34,6 +48,12 @@ class FingerprintTests(unittest.TestCase):
                 manifest = {'source': core.fingerprint(), 'artifacts': core.artifacts(bundle)}
                 (bundle/'core-fingerprint.json').write_text(json.dumps(manifest))
                 core.verify(bundle); core.verify(bundle)
+                for directory in (bundle, bundle/'ios-arm64', bundle/'ios-arm64-simulator'):
+                    metadata = directory/'.DS_Store'
+                    metadata.write_bytes(b'original metadata')
+                    core.verify(bundle)
+                    metadata.write_bytes(b'changed metadata')
+                    core.verify(bundle)
                 with patch.object(core, 'fingerprint', return_value={'source': 2}):
                     with self.assertRaises(ValueError): core.verify(bundle)
                 (bundle/'ios-arm64/libmobilespeak_core.a').write_bytes(b'wrong')
