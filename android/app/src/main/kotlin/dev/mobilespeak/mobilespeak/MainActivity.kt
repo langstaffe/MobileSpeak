@@ -929,7 +929,7 @@ private fun SettingSwitch(title: String, checked: Boolean, enabled: Boolean = tr
         onChange(it)
     }, verticalAlignment = Alignment.CenterVertically) {
         Text(title, Modifier.weight(1f), fontSize = 17.sp, lineHeight = 20.sp)
-        Canvas(Modifier.size(63.dp, 28.dp)) {
+        Canvas(Modifier.size(63.dp, 28.dp).alpha(if (enabled) 1f else 0.5f)) {
             drawRoundRect(if (checked) Palette.accent else Color(0xFF63656B), cornerRadius = androidx.compose.ui.geometry.CornerRadius(size.height / 2))
             val inset = 2.dp.toPx()
             val width = 37.dp.toPx()
