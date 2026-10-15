@@ -5,6 +5,8 @@ import android.webkit.MimeTypeMap
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.updateTransition
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
@@ -24,6 +26,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.Color
@@ -200,52 +206,89 @@ private fun fileDate(timestamp: Long, context: android.content.Context) = DateFo
     }
 }
 
+private enum class DrawerPage { Home, Volumes, Files }
+
 @Composable internal fun ChannelFileTools(ui: SessionUiState, fileHeaderModifier: Modifier = Modifier) {
-    if (ui.userVolumesOpen) { UserVolumesDrawer(ui, fileHeaderModifier); return }
-    if (ui.channelFiles.open) { ChannelFilesDrawer(ui, fileHeaderModifier); return }
-    // Keep the network header draggable and tools scrollable at the current drawer height.
-    BoxWithConstraints(Modifier.fillMaxSize()) {
-        val density = LocalDensity.current
-        var networkHeight by remember { mutableIntStateOf(0) }
-        val toolsHeight = (maxHeight - with(density) { networkHeight.toDp() }).coerceAtLeast(0.dp)
-        Column(Modifier.wrapContentHeight(align = Alignment.Top, unbounded = true)) {
-            NetworkQualityPanel(ui.snapshot.networkQuality ?: NetworkQuality(), fileHeaderModifier.onSizeChanged { networkHeight = it.height })
-            CompositionLocalProvider(LocalDensity provides Density(density.density, minOf(density.fontScale, 1.4f))) {
-                Column(Modifier.height(toolsHeight).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text(stringResource(R.string.volume_tools), color = Palette.muted, fontSize = 12.sp, lineHeight = 14.sp,
-                        fontWeight = FontWeight.Normal, letterSpacing = 0.sp)
-                    Row(Modifier.fillMaxWidth()
-                        .clickable(interactionSource = null, indication = RowPressFeedback, enabled = ui.snapshot.status == "connected" && ui.snapshot.ownClient != null) { ClientSession.openUserVolumes() }
-                        .background(Palette.card, RoundedCornerShape(14.dp)).testTag("user-volumes-tool")
-                        .heightIn(min = 72.dp).padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                        Icon(UiIcons.Speaker, null, Modifier.size(26.dp), tint = Palette.accent)
-                        Text(stringResource(R.string.volume_title), Modifier.weight(1f), color = Palette.text)
-                        Icon(UiIcons.ChevronRight, null, Modifier.size(18.dp), tint = Palette.muted)
-                    }
-                    Text(stringResource(R.string.files_tools), color = Palette.muted, fontSize = 12.sp, lineHeight = 14.sp,
-                        fontWeight = FontWeight.Normal, letterSpacing = 0.sp)
-                    Row(Modifier.fillMaxWidth()
-                        .clickable(interactionSource = null, indication = RowPressFeedback, enabled = ui.snapshot.status == "connected" && ui.snapshot.ownClient != null) { ClientSession.openChannelFiles() }
-                        .background(Palette.card, RoundedCornerShape(14.dp))
-                        .testTag("channel-files-tool").heightIn(min = 72.dp).padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                        Icon(UiIcons.Folder, null, Modifier.size(26.dp).testTag("channel-files-tool-icon"), tint = Palette.accent)
-                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text(stringResource(R.string.files_title), color = Palette.text)
-                            Text(stringResource(R.string.files_subtitle), color = Palette.muted, style = MaterialTheme.typography.bodySmall)
+    val page = when {
+        ui.snapshot.status != "connected" -> DrawerPage.Home
+        ui.userVolumesOpen -> DrawerPage.Volumes
+        ui.channelFiles.open -> DrawerPage.Files
+        else -> DrawerPage.Home
+    }
+    val navigation = updateTransition(page, label = "Drawer navigation")
+    val transitioning = navigation.isRunning || navigation.currentState != page
+    val homeScroll = rememberScrollState()
+    var networkHeight by remember { mutableIntStateOf(0) }
+    BackHandler(enabled = transitioning) { /* A second back must not collapse the drawer during a pop. */ }
+    navigation.AnimatedContent(
+        modifier = Modifier.fillMaxSize().clipToBounds().background(Palette.bottom)
+            .pointerInput(transitioning) {
+                if (transitioning) awaitPointerEventScope {
+                    while (true) awaitPointerEvent(PointerEventPass.Initial).changes.forEach { it.consume() }
+                }
+            }.onPreviewKeyEvent { transitioning },
+        transitionSpec = { detailNavigationTransition(targetState != DrawerPage.Home).using(null) },
+    ) { target ->
+        val active = target == page
+        // The core clears files immediately on root back; only the departing UI keeps its last frame.
+        var retained by remember { mutableStateOf(ui) }
+        if (active) retained = ui
+        val contentUi = if (active) ui else retained
+        val header = if (active) fileHeaderModifier else Modifier
+        Box(Modifier.fillMaxSize().background(Palette.bottom).testTag("drawer-page-${target.name.lowercase()}").then(
+            if (!active || transitioning) Modifier.clearAndSetSemantics {} else Modifier,
+        )) {
+            when (target) {
+                DrawerPage.Volumes -> UserVolumesDrawer(contentUi, header, active)
+                DrawerPage.Files -> ChannelFilesDrawer(contentUi, header, active)
+                DrawerPage.Home -> {
+                    // Keep the network header draggable and tools scrollable at the current drawer height.
+                    BoxWithConstraints(Modifier.fillMaxSize()) {
+                        val density = LocalDensity.current
+                        val toolsHeight = (maxHeight - with(density) { networkHeight.toDp() }).coerceAtLeast(0.dp)
+                        Column(Modifier.wrapContentHeight(align = Alignment.Top, unbounded = true)) {
+                            NetworkQualityPanel(contentUi.snapshot.networkQuality ?: NetworkQuality(), header.onSizeChanged { networkHeight = it.height })
+                            CompositionLocalProvider(LocalDensity provides Density(density.density, minOf(density.fontScale, 1.4f))) {
+                                Column(Modifier.height(toolsHeight).verticalScroll(homeScroll).testTag("drawer-tools-list").padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                    Text(stringResource(R.string.volume_tools), color = Palette.muted, fontSize = 12.sp, lineHeight = 14.sp,
+                                        fontWeight = FontWeight.Normal, letterSpacing = 0.sp)
+                                    Row(Modifier.fillMaxWidth()
+                                        .clickable(interactionSource = null, indication = RowPressFeedback, enabled = ui.snapshot.status == "connected" && ui.snapshot.ownClient != null) { if (active && !transitioning) ClientSession.openUserVolumes() }
+                                        .background(Palette.card, RoundedCornerShape(14.dp)).testTag("user-volumes-tool")
+                                        .heightIn(min = 72.dp).padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                                        Icon(UiIcons.Speaker, null, Modifier.size(26.dp), tint = Palette.accent)
+                                        Text(stringResource(R.string.volume_title), Modifier.weight(1f), color = Palette.text)
+                                        Icon(UiIcons.ChevronRight, null, Modifier.size(18.dp), tint = Palette.muted)
+                                    }
+                                    Text(stringResource(R.string.files_tools), color = Palette.muted, fontSize = 12.sp, lineHeight = 14.sp,
+                                        fontWeight = FontWeight.Normal, letterSpacing = 0.sp)
+                                    Row(Modifier.fillMaxWidth()
+                                        .clickable(interactionSource = null, indication = RowPressFeedback, enabled = ui.snapshot.status == "connected" && ui.snapshot.ownClient != null) { if (active && !transitioning) ClientSession.openChannelFiles() }
+                                        .background(Palette.card, RoundedCornerShape(14.dp))
+                                        .testTag("channel-files-tool").heightIn(min = 72.dp).padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                                        Icon(UiIcons.Folder, null, Modifier.size(26.dp).testTag("channel-files-tool-icon"), tint = Palette.accent)
+                                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                            Text(stringResource(R.string.files_title), color = Palette.text)
+                                            Text(stringResource(R.string.files_subtitle), color = Palette.muted, style = MaterialTheme.typography.bodySmall)
+                                        }
+                                        Icon(UiIcons.ChevronRight, null, Modifier.size(18.dp), tint = Palette.muted)
+                                    }
+                                }
+                            }
                         }
-                        Icon(UiIcons.ChevronRight, null, Modifier.size(18.dp), tint = Palette.muted)
                     }
                 }
             }
         }
     }
 }
-@Composable internal fun ChannelFilesDrawer(ui: SessionUiState, headerModifier: Modifier = Modifier) {
+@Composable internal fun ChannelFilesDrawer(ui: SessionUiState, headerModifier: Modifier = Modifier, active: Boolean = true) {
     val files = ui.channelFiles
     val context = LocalContext.current
     val target = if (files.server != null && files.channel != null) ChannelFileTarget(files.server, files.channel, files.path) else null
     val canRefresh = target != null && files.status != "loading" && ui.snapshot.status == "connected"
     fun command(type: String, fields: JSONObject = JSONObject()) {
+        if (!active) return
         val bound = target?.command() ?: JSONObject()
         fields.keys().forEach { key -> bound.put(key, fields.get(key)) }
         ClientSession.fileCommand(type, bound)
@@ -260,13 +303,13 @@ private fun fileDate(timestamp: Long, context: android.content.Context) = DateFo
         if (uri != null && target != null) scope.launch { preparing = true; ClientSession.uploadChannelFile(uri, target); preparing = false }
     }
     val upload = {
-        files.server?.let { server -> files.channel?.let { channel ->
+        if (active) files.server?.let { server -> files.channel?.let { channel ->
             uploadTarget = ChannelFileTarget(server, channel, files.path); picker.launch(arrayOf("*/*"))
         } }
         Unit
     }
-    val back: () -> Unit = { if (info != null) info = null else command("files_back") }
-    BackHandler { back() }
+    val back: () -> Unit = { if (active) { if (info != null) info = null else command("files_back") } }
+    BackHandler(enabled = active) { back() }
     Column(Modifier.fillMaxSize()) {
         val density = LocalDensity.current
         // Keep the measured drag boundary inside the unbounded header, and the lazy list bounded.
@@ -294,7 +337,7 @@ private fun fileDate(timestamp: Long, context: android.content.Context) = DateFo
                                 Text(stringResource(if (files.sort == "newest") R.string.files_sort_newest else R.string.files_sort_name), style = MaterialTheme.typography.labelSmall, maxLines = 1)
                             }
                         }
-                        DropdownMenu(expanded = sortMenu, onDismissRequest = { sortMenu = false }) {
+                        DropdownMenu(expanded = sortMenu && active, onDismissRequest = { sortMenu = false }) {
                             for ((key, newest) in listOf(R.string.files_sort_name to false, R.string.files_sort_newest to true)) {
                                 DropdownMenuItem(text = { Text(stringResource(key)) }, onClick = { sortMenu = false; command("files_sort", JSONObject().put("newest", newest)) })
                             }
@@ -316,15 +359,15 @@ private fun fileDate(timestamp: Long, context: android.content.Context) = DateFo
                     FileMetadata(R.string.files_size, android.text.format.Formatter.formatFileSize(context, selected.size))
                     FileMetadata(R.string.files_time, fileDate(selected.timestamp, context))
                     FileMetadata(R.string.files_location, files.path)
-                    TextButton(onClick = { target?.let { ClientSession.downloadChannelFile(selected.name, it) } }, enabled = files.transfer(selected.name)?.status != "running") {
+                    TextButton(onClick = { if (active) target?.let { ClientSession.downloadChannelFile(selected.name, it) } }, enabled = files.transfer(selected.name)?.status != "running") {
                         Icon(UiIcons.Download, null, Modifier.size(20.dp)); Text(stringResource(R.string.files_download))
                     }
                     val task = files.transfer(selected.name)
-                    if (task != null) FileTransferStatus(task) else files.entries.firstOrNull { it.name == selected.name }?.localPath?.let { DownloadedFile(it) }
+                    if (task != null) FileTransferStatus(task, active) else files.entries.firstOrNull { it.name == selected.name }?.localPath?.let { DownloadedFile(it, active) }
                 }
             } else {
                 items(files.transfers.filter { it.path == files.path && it.upload && (files.status != "ready" || files.entries.none { e -> e.name == it.name }) }, key = { "transfer:${it.id}" }) { task ->
-                    Column(Modifier.padding(14.dp)) { Text(task.name, color = Palette.text, maxLines = 1, overflow = TextOverflow.MiddleEllipsis); FileTransferStatus(task) }
+                    Column(Modifier.padding(14.dp)) { Text(task.name, color = Palette.text, maxLines = 1, overflow = TextOverflow.MiddleEllipsis); FileTransferStatus(task, active) }
                 }
                 when(files.status) {
                     "loading" -> item { Column(Modifier.fillMaxWidth().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -359,14 +402,14 @@ private fun fileDate(timestamp: Long, context: android.content.Context) = DateFo
                                 PressFeedback(null) { source, _, _ ->
                                     IconButton(interactionSource = source, onClick = { menu = true }) { Icon(UiIcons.More, stringResource(R.string.files_info) + ": " + entry.name, tint = Palette.text) }
                                 }
-                                DropdownMenu(menu, { menu = false }) {
-                                    DropdownMenuItem(text = { Text(stringResource(R.string.files_download)) }, leadingIcon = { Icon(UiIcons.Download, null) }, onClick = { menu = false; target?.let { ClientSession.downloadChannelFile(entry.name, it) } })
+                                DropdownMenu(menu && active, { menu = false }) {
+                                    DropdownMenuItem(text = { Text(stringResource(R.string.files_download)) }, leadingIcon = { Icon(UiIcons.Download, null) }, onClick = { menu = false; if (active) target?.let { ClientSession.downloadChannelFile(entry.name, it) } })
                                     DropdownMenuItem(text = { Text(stringResource(R.string.files_info)) }, leadingIcon = { Icon(UiIcons.Info, null) }, onClick = { menu = false; info = entry })
                                 }
                             }
                         }
                         val task = files.transfer(entry.name)
-                        Column(Modifier.padding(horizontal = 14.dp)) { if (task != null) FileTransferStatus(task) else entry.localPath?.let { DownloadedFile(it) } }
+                        Column(Modifier.padding(horizontal = 14.dp)) { if (task != null) FileTransferStatus(task, active) else entry.localPath?.let { DownloadedFile(it, active) } }
                         HorizontalDivider(color = Palette.border)
                     }
                 }
@@ -384,7 +427,7 @@ private fun fileDate(timestamp: Long, context: android.content.Context) = DateFo
 @Composable private fun FileMetadata(key: Int, value: String) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) { Text(stringResource(key), color = Palette.muted, style = MaterialTheme.typography.bodySmall); Text(value, color = Palette.text) }
 }
-@Composable private fun FileTransferStatus(task: ChannelFileTransfer) {
+@Composable private fun FileTransferStatus(task: ChannelFileTransfer, active: Boolean) {
     val context = LocalContext.current
     when(task.status) {
         "running" -> Column(Modifier.padding(vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -393,16 +436,17 @@ private fun fileDate(timestamp: Long, context: android.content.Context) = DateFo
         }
         "failed" -> Column {
             Row(verticalAlignment = Alignment.CenterVertically) { Icon(UiIcons.Error, null, Modifier.size(16.dp), tint = Palette.disconnect); Text(context.fileError(task.error ?: context.localized(R.string.files_failed)), Modifier.padding(4.dp), color = Palette.disconnect, style = MaterialTheme.typography.bodySmall) }
-            TextButton(onClick = { ClientSession.fileCommand("files_retry", JSONObject().put("id", task.id)) }) { Text(stringResource(R.string.files_retry)) }
+            TextButton(onClick = { if (active) ClientSession.fileCommand("files_retry", JSONObject().put("id", task.id)) }) { Text(stringResource(R.string.files_retry)) }
         }
-        "complete" -> if (!task.upload && task.localPath != null) DownloadedFile(task.localPath) else Row(verticalAlignment = Alignment.CenterVertically) {
+        "complete" -> if (!task.upload && task.localPath != null) DownloadedFile(task.localPath, active) else Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(UiIcons.Check, null, Modifier.size(16.dp), tint = Palette.green); Text(stringResource(R.string.files_complete), Modifier.padding(4.dp), color = Palette.green, style = MaterialTheme.typography.bodySmall)
         }
     }
 }
-@Composable private fun DownloadedFile(path: String) {
+@Composable private fun DownloadedFile(path: String, active: Boolean) {
     val context = LocalContext.current
     fun launch(share: Boolean) {
+        if (!active) return
         runCatching {
             val file = File(path)
             val uri = FileProvider.getUriForFile(context, "${context.packageName}.files", file)
@@ -421,24 +465,24 @@ private fun fileDate(timestamp: Long, context: android.content.Context) = DateFo
     }
 }
 
-@Composable internal fun UserVolumesDrawer(ui: SessionUiState, headerModifier: Modifier = Modifier) {
-    BackHandler { ClientSession.closeUserVolumes() }
+@Composable internal fun UserVolumesDrawer(ui: SessionUiState, headerModifier: Modifier = Modifier, active: Boolean = true) {
+    BackHandler(enabled = active) { ClientSession.closeUserVolumes() }
     Column(Modifier.fillMaxSize().testTag("user-volumes-page")) {
         Column(Modifier.wrapContentHeight(align = Alignment.Top, unbounded = true).then(headerModifier)) {
-            DrawerPageHeader(stringResource(R.string.volume_title), ui.snapshot.server.orEmpty(), ClientSession::closeUserVolumes)
+            DrawerPageHeader(stringResource(R.string.volume_title), ui.snapshot.server.orEmpty(), { if (active) ClientSession.closeUserVolumes() })
             HorizontalDivider(color = Palette.border)
         }
         val members = ui.snapshot.clients.filter { it.id != ui.snapshot.ownClient }.sortedBy { it.id }
         LazyColumn(Modifier.weight(1f).fillMaxWidth().testTag("user-volumes-list"), contentPadding = PaddingValues(top = if (members.isEmpty()) 0.dp else 12.dp)) {
             if (members.isEmpty()) item { Text(stringResource(R.string.volume_empty), Modifier.fillMaxWidth().padding(24.dp), color = Palette.muted, textAlign = androidx.compose.ui.text.style.TextAlign.Center) }
             items(members, key = { it.volumeToken ?: "client:${it.id}" }) { member ->
-                UserVolumeRow(ui.snapshot, member)
+                UserVolumeRow(ui.snapshot, member, active)
             }
         }
     }
 }
 @OptIn(ExperimentalMaterial3Api::class)
-@Composable private fun UserVolumeRow(snapshot: Snapshot, member: Member) {
+@Composable private fun UserVolumeRow(snapshot: Snapshot, member: Member, active: Boolean) {
     var value by remember(snapshot.serverId, member.volumeToken) { mutableFloatStateOf(member.volumePercent.toFloat()) }
     var editing by remember(snapshot.serverId, member.volumeToken) { mutableStateOf(false) }
     LaunchedEffect(member.volumePercent, editing) { if (!editing) value = member.volumePercent.toFloat() }
@@ -458,10 +502,13 @@ private fun fileDate(timestamp: Long, context: android.content.Context) = DateFo
             Text("${value.toInt()}%", color = Palette.muted, maxLines = 1)
         }
         Slider(value, onValueChange = { next ->
-            editing = true; value = kotlin.math.round(next)
-            ClientSession.setUserVolume(snapshot.serverId.orEmpty(), member, value.toInt())
+            if (active) {
+                editing = true; value = kotlin.math.round(next)
+                ClientSession.setUserVolume(snapshot.serverId.orEmpty(), member, value.toInt())
+            }
         }, onValueChangeFinished = {
-            ClientSession.setUserVolume(snapshot.serverId.orEmpty(), member, value.toInt()); editing = false
+            if (active) ClientSession.setUserVolume(snapshot.serverId.orEmpty(), member, value.toInt())
+            editing = false
         }, valueRange = 0f..300f, steps = 299, enabled = enabled, interactionSource = interactions,
             thumb = { Box(Modifier.size(36.dp, 24.dp).background(Color.White.copy(alpha = if (enabled) 1f else .38f), CircleShape)
                 .then(if (focused && enabled) Modifier.border(2.dp, Palette.accent, CircleShape) else Modifier)) },

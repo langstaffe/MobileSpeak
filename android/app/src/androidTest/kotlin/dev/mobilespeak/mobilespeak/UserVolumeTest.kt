@@ -110,7 +110,7 @@ class UserVolumeTest {
                         }
                     }
                 } }
-                fun settle() { android.os.SystemClock.sleep(300); instrumentation.runOnMainSync {} }
+                fun settle() { android.os.SystemClock.sleep(500); instrumentation.runOnMainSync {} }
                 fun nodes(): List<SemanticsNode> {
                     lateinit var result: List<SemanticsNode>
                     instrumentation.runOnMainSync {

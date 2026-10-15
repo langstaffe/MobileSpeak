@@ -11,6 +11,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.ContentTransform
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
@@ -292,16 +293,7 @@ internal fun MobileSpeakApp(requestPermissions: () -> Unit, openAbout: Boolean =
             },
         contentKey = { it.key },
         transitionSpec = {
-            val timing = tween<androidx.compose.ui.unit.IntOffset>(350, easing = FastOutSlowInEasing)
-            if (targetState.key != "home") {
-                (slideInHorizontally(timing) { it } togetherWith
-                    slideOutHorizontally(timing) { -(it * .28f).toInt() })
-                    .apply { targetContentZIndex = 1f }.using(null)
-            } else {
-                (slideInHorizontally(timing) { -(it * .28f).toInt() } togetherWith
-                    slideOutHorizontally(timing) { it })
-                    .apply { targetContentZIndex = 0f }.using(null)
-            }
+            detailNavigationTransition(targetState.key != "home").using(null)
         },
     ) { target ->
         Box(Modifier.fillMaxSize().then(
@@ -945,6 +937,17 @@ private fun toggleHapticType(enabled: Boolean) = when {
     else -> HapticFeedbackType.ToggleOn
 }
 
+internal fun detailNavigationTransition(entering: Boolean): ContentTransform {
+    val timing = tween<IntOffset>(350, easing = FastOutSlowInEasing)
+    return if (entering) {
+        (slideInHorizontally(timing) { it } togetherWith
+            slideOutHorizontally(timing) { -(it * .28f).toInt() }).apply { targetContentZIndex = 1f }
+    } else {
+        (slideInHorizontally(timing) { -(it * .28f).toInt() } togetherWith
+            slideOutHorizontally(timing) { it }).apply { targetContentZIndex = 0f }
+    }
+}
+
 @Composable
 internal fun VoiceDrawer(ui: SessionUiState, requestPermissions: () -> Unit, expanded: Boolean, onExpandedChange: (Boolean) -> Unit, availableHeight: Dp, availableWidth: Dp, modifier: Modifier = Modifier) {
     val density = LocalDensity.current
@@ -963,8 +966,7 @@ internal fun VoiceDrawer(ui: SessionUiState, requestPermissions: () -> Unit, exp
     var settleRequest by remember { mutableIntStateOf(0) }
     var automaticallyClosing by remember { mutableStateOf(false) }
     val currentAutomaticClose by rememberUpdatedState(automaticallyClosing)
-    val internalPage = ui.channelFiles.open || ui.userVolumesOpen
-    var filesHeaderHeight by remember(internalPage) { mutableIntStateOf(0) }
+    var filesHeaderHeight by remember { mutableIntStateOf(0) }
     val containerOffset = with(density) { (availableHeight.toPx() - 64.dp.toPx()).coerceAtLeast(0f) }
     // A resized expansion anchor must not clip an automatic close or the user's next gesture.
     val maximumOffset = maxOf(travel + limit, height).coerceAtMost(containerOffset)
@@ -1008,7 +1010,7 @@ internal fun VoiceDrawer(ui: SessionUiState, requestPermissions: () -> Unit, exp
             }
         }
     }
-    val drag = Modifier.pointerInput(session, internalPage) {
+    val drag = Modifier.pointerInput(session) {
         awaitEachGesture {
             val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
             // Measure through the file toolbar divider; content below it keeps its own scrolling.

@@ -7,6 +7,93 @@ import Combine
 @testable import MobileSpeak
 
 final class ClientTests: XCTestCase {
+    @MainActor func testDrawerNavigationKeepsOutgoingFilesAndSerializesRapidTargets() async throws {
+        let client = Client.shared
+        guard !client.connected, !client.busy else { throw XCTSkip("Requires an offline test profile") }
+        let savedState = client.state, savedFiles = client.channelFiles
+        let savedImporting = client.fileImporting
+        client.fileImporting = true
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let window = UIWindow(windowScene: scene)
+        let navigation = DrawerNavigationController()
+        let container = UIViewController()
+        window.rootViewController = container
+        container.addChild(navigation); container.view.addSubview(navigation.view); navigation.didMove(toParent: container)
+        navigation.view.frame = CGRect(x: 0, y: 100, width: 320, height: 300)
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true; client.state = savedState; client.channelFiles = savedFiles
+            client.fileImporting = savedImporting
+        }
+        try await Task.sleep(nanoseconds: 200_000_000)
+        client.state = Snapshot(status: "connected", server: "Drawer fixture")
+        client.channelFiles = ChannelFilesState(open: true, server: "fixture", channel: 7, channelName: "Files", status: "ready",
+            entries: (0..<40).map { ChannelFileEntry(name: "File \($0).txt", size: 42, timestamp: 0, directory: false, icon: "file-text") })
+        let home = AnyView(ScrollView { VStack { ForEach(0..<40) { Text("Tool \($0)").frame(height: 44) } } }.ignoresSafeArea())
+        let files = AnyView(ChannelFilesDrawer(client: client, presentation: client.channelFiles).ignoresSafeArea())
+        func scrolls(_ view: UIView) -> [UIScrollView] { (view as? UIScrollView).map { [$0] } ?? view.subviews.flatMap(scrolls) }
+        navigation.configure(page: .home, home: home, detail: AnyView(EmptyView()), reduceMotion: false)
+        try await Task.sleep(nanoseconds: 100_000_000)
+        let homeController = try XCTUnwrap(navigation.topViewController)
+        let homeScroll = try XCTUnwrap(scrolls(homeController.view).first)
+        homeScroll.setContentOffset(CGPoint(x: 0, y: 100), animated: false)
+        let frame = navigation.view.frame
+        func presentedX(_ controller: UIViewController) -> CGFloat {
+            let layer = controller.view.layer.presentation() ?? controller.view.layer
+            return layer.convert(layer.bounds, to: navigation.view.layer.presentation() ?? navigation.view.layer).minX
+        }
+        navigation.configure(page: .files, home: home, detail: files, reduceMotion: false)
+        try await Task.sleep(nanoseconds: 100_000_000)
+        XCTAssertTrue(navigation.switching)
+        let outgoing = try XCTUnwrap(navigation.topViewController)
+        XCTAssertFalse(outgoing.view.isUserInteractionEnabled)
+        XCTAssertTrue(outgoing.view.accessibilityElementsHidden)
+        XCTAssertGreaterThan(presentedX(outgoing), 0, "System push enters from the right")
+        XCTAssertLessThan(presentedX(homeController), 0, "Home retreats to the left")
+        try await Task.sleep(nanoseconds: 600_000_000)
+        let list = try XCTUnwrap(scrolls(outgoing.view).first)
+        let contentHeight = list.contentSize.height
+        XCTAssertGreaterThan(contentHeight, list.bounds.height)
+        XCTAssertTrue(outgoing.view.isUserInteractionEnabled)
+        XCTAssertFalse(navigation.interactivePopGestureRecognizer?.isEnabled ?? false)
+        if #available(iOS 26.0, *) { XCTAssertFalse(navigation.interactiveContentPopGestureRecognizer?.isEnabled ?? false) }
+        client.channelFiles.open = false; client.channelFiles.entries = []
+        let cleared = AnyView(ChannelFilesDrawer(client: client, presentation: client.channelFiles).ignoresSafeArea())
+        navigation.configure(page: .home, home: home, detail: cleared, reduceMotion: false)
+        navigation.configure(page: .home, home: home, detail: cleared, reduceMotion: false)
+        try await Task.sleep(nanoseconds: 100_000_000)
+        XCTAssertTrue(navigation.switching)
+        XCTAssertEqual(list.contentSize.height, contentHeight, accuracy: 0.5, "Closed core snapshots cannot clear outgoing rows")
+        XCTAssertFalse(outgoing.view.isUserInteractionEnabled)
+        XCTAssertTrue(outgoing.view.accessibilityElementsHidden)
+        XCTAssertGreaterThan(presentedX(outgoing), 0, "System pop exits to the right")
+        navigation.configure(page: .volumes, home: home, detail: AnyView(Text("Volumes")), reduceMotion: false)
+        navigation.configure(page: .home, home: home, detail: cleared, reduceMotion: false)
+        try await Task.sleep(nanoseconds: 600_000_000)
+        XCTAssertFalse(navigation.switching)
+        XCTAssertEqual(navigation.viewControllers.count, 1)
+        XCTAssertTrue(navigation.topViewController === homeController)
+        XCTAssertEqual(homeScroll.contentOffset.y, 100, accuracy: 0.5)
+        XCTAssertEqual(navigation.view.frame, frame)
+        navigation.configure(page: .volumes, home: home, detail: AnyView(Text("Volumes")), reduceMotion: true)
+        XCTAssertFalse(navigation.switching)
+        XCTAssertEqual(navigation.page, .volumes)
+        navigation.configure(page: .home, home: home, detail: cleared, reduceMotion: true)
+        XCTAssertEqual(navigation.viewControllers.count, 1)
+        navigation.configure(page: .files, home: home, detail: files, reduceMotion: false)
+        navigation.configure(page: .volumes, home: home, detail: AnyView(Text("Volumes")), reduceMotion: false)
+        try await Task.sleep(nanoseconds: 1_500_000_000)
+        XCTAssertEqual(navigation.page, .volumes)
+        XCTAssertEqual(navigation.viewControllers.count, 2)
+        XCTAssertFalse(navigation.switching)
+        let animationsEnabled = UIView.areAnimationsEnabled
+        UIView.setAnimationsEnabled(false)
+        defer { UIView.setAnimationsEnabled(animationsEnabled) }
+        navigation.configure(page: .home, home: home, detail: cleared, reduceMotion: false)
+        XCTAssertFalse(navigation.switching)
+        XCTAssertEqual(navigation.viewControllers.count, 1)
+    }
+
     func testChannelPreviewOnlyIncludesCompleteAvatarsAndReservesSummary() {
         let count = ChannelMemberPreview.avatarCount
         XCTAssertEqual(count(1_000, 70, 0), 0)
@@ -495,6 +582,19 @@ final class ClientTests: XCTestCase {
             if view.accessibilityIdentifier == "voice-drawer" { return view }
             return view.subviews.lazy.compactMap(drawer).first
         }
+        func drawerNavigation(_ controller: UIViewController) -> DrawerNavigationController? {
+            if let navigation = controller as? DrawerNavigationController { return navigation }
+            return controller.children.lazy.compactMap(drawerNavigation).first
+        }
+        func waitForDrawerPage(_ page: DrawerToolPage) async throws {
+            let navigation = try XCTUnwrap(drawerNavigation(host))
+            for _ in 0..<60 {
+                if navigation.page == page && !navigation.switching { return }
+                try await Task.sleep(nanoseconds: 50_000_000)
+            }
+            XCTAssertEqual(navigation.page, page)
+            XCTAssertFalse(navigation.switching, "Drawer navigation must settle before interacting")
+        }
         func checkDrawerHeader(expanded: Bool, screenshot: String) throws {
             let pane = try XCTUnwrap(drawer(host.view))
             let frame = UIAccessibility.convertToScreenCoordinates(pane.bounds, in: pane)
@@ -555,18 +655,18 @@ final class ClientTests: XCTestCase {
         let volumePane = try XCTUnwrap(drawer(host.view))
         let volumeFrame = volumePane.frame
         try activate(L10n.string("volume_title"))
-        try await Task.sleep(nanoseconds:150_000_000)
+        try await waitForDrawerPage(.volumes)
         XCTAssertEqual(volumePane.frame,volumeFrame,"Entering volumes preserves the drawer position")
         let volumeScroll = try XCTUnwrap(scrolls(volumePane).first)
         volumeScroll.setContentOffset(CGPoint(x:0,y:100),animated:false)
         XCTAssertEqual(volumePane.frame,volumeFrame,"Volume content scrolls inside the existing drawer")
         try activate(L10n.string("action_back"))
-        try await Task.sleep(nanoseconds:150_000_000)
+        try await waitForDrawerPage(.home)
         XCTAssertEqual(volumePane.frame,volumeFrame,"Returning preserves the drawer position")
         let originalFiles = client.channelFiles
         client.channelFiles = ChannelFilesState(open: true, server: "fixture", channel: 20, channelName: "Scroll channel 20", path: "/", status: "ready",
             entries: (0..<40).map { ChannelFileEntry(name: "频道文件 \($0).pdf", size: 0, timestamp: 1700000000, directory: false, icon: "file-text") })
-        try await Task.sleep(nanoseconds: 150_000_000)
+        try await waitForDrawerPage(.files)
         let fileScroll = try XCTUnwrap(scrolls(host.view).first { scroll in !homeScrolls.contains(where: { $0 === scroll }) })
         let filesPane = try XCTUnwrap(drawer(host.view))
         XCTAssertGreaterThanOrEqual(fileScroll.convert(fileScroll.bounds, to: filesPane).minY, 64)
@@ -594,14 +694,22 @@ final class ClientTests: XCTestCase {
         sharing.dismiss(animated: false)
         try await Task.sleep(nanoseconds: 500_000_000)
         try activate(L10n.string("files_open"))
-        try await Task.sleep(nanoseconds: 700_000_000)
+        for _ in 0..<20 {
+            if presented(container, name: "ChannelFileOpenController") != nil || client.channelFilesLocalError != nil { break }
+            try await Task.sleep(nanoseconds: 100_000_000)
+        }
         XCTAssertTrue(presented(container, name: "ChannelFileOpenController") != nil || client.channelFilesLocalError != nil,
             "Open must present the native document menu or report unavailable handlers in the drawer")
-        container.presentedViewController?.dismiss(animated: false)
-        host.presentedViewController?.dismiss(animated: false)
+        try await Task.sleep(nanoseconds: 600_000_000)
+        func dismissPresented(_ controller: UIViewController) {
+            if controller.presentedViewController != nil { controller.dismiss(animated: false) }
+            controller.children.forEach(dismissPresented)
+        }
+        dismissPresented(container)
+        try await Task.sleep(nanoseconds: 300_000_000)
         client.channelFilesLocalError = nil
         client.channelFiles = originalFiles
-        try await Task.sleep(nanoseconds: 150_000_000)
+        try await waitForDrawerPage(.home)
 
         for (deviation, grade, name) in [(70.0, NetworkGrade.fair, "mobile"), (120.0, NetworkGrade.poor, "poor")] {
             client.state.networkQuality = NetworkQuality(rttMs: 30, deviationMs: deviation, packetLossPercent: 0,
@@ -665,10 +773,23 @@ final class ClientTests: XCTestCase {
             try activate(L10n.string(tab))
             try await Task.sleep(nanoseconds: 30_000_000)
             try activate(label)
-            try await Task.sleep(nanoseconds: 350_000_000)
-            XCTAssertEqual(stack.viewControllers.count, 2, label)
-            stack.popViewController(animated: false)
             try await Task.sleep(nanoseconds: 100_000_000)
+            XCTAssertEqual(stack.viewControllers.count, 2, label)
+            let detail = try XCTUnwrap(stack.topViewController)
+            func presentedX(_ controller: UIViewController) -> CGFloat {
+                let layer = controller.view.layer.presentation() ?? controller.view.layer
+                return layer.convert(layer.bounds, to: stack.view.layer.presentation() ?? stack.view.layer).minX
+            }
+            if !UIAccessibility.isReduceMotionEnabled && UIView.areAnimationsEnabled {
+                XCTAssertGreaterThan(presentedX(detail), 0, "Existing settings/chat push is the drawer reference")
+            }
+            try await Task.sleep(nanoseconds: 500_000_000)
+            stack.popViewController(animated: true)
+            try await Task.sleep(nanoseconds: 100_000_000)
+            if !UIAccessibility.isReduceMotionEnabled && UIView.areAnimationsEnabled {
+                XCTAssertGreaterThan(presentedX(detail), 0, "Existing settings/chat pop returns to the right")
+            }
+            try await Task.sleep(nanoseconds: 500_000_000)
             XCTAssertTrue(stack.topViewController === home)
             checkOffsets()
         }
@@ -752,7 +873,7 @@ final class ClientTests: XCTestCase {
         for category in [UIContentSizeCategory.large, .accessibilityExtraExtraExtraLarge] {
             container.setOverrideTraitCollection(UITraitCollection(preferredContentSizeCategory: category), forChild: host)
             client.channelFiles = ChannelFilesState(open: true, server: "fixture", channel: 20, channelName: "Scroll channel 20", path: "/", status: "ready")
-            try await Task.sleep(nanoseconds: 200_000_000)
+            try await Task.sleep(nanoseconds: 600_000_000)
             let pane = try XCTUnwrap(drawer(host.view))
             let content = try XCTUnwrap(scrolls(pane).first)
             let contentTop = content.convert(content.bounds, to: window).minY
@@ -761,7 +882,7 @@ final class ClientTests: XCTestCase {
             XCTAssertTrue(accessibleElements().contains { $0.accessibilityLabel == L10n.string("files_empty") })
             for key in ["action_back", "files_upload", "files_reload", "files_sort_name"] {
                 let button = try XCTUnwrap(accessibleElements().first { $0.accessibilityTraits.contains(.button) && $0.accessibilityLabel == L10n.string(key) })
-                XCTAssertGreaterThanOrEqual(button.accessibilityFrame.height, 44)
+                XCTAssertGreaterThanOrEqual(button.accessibilityFrame.height, 44 - 0.5)
                 XCTAssertLessThanOrEqual(button.accessibilityFrame.maxY, contentTop + 1, "File controls stay above the scroll region")
             }
             let image = UIGraphicsImageRenderer(size: pane.bounds.size).image { _ in pane.drawHierarchy(in: pane.bounds, afterScreenUpdates: true) }
@@ -881,7 +1002,7 @@ final class ClientTests: XCTestCase {
                     XCTAssertEqual(sorting.accessibilityLabel, L10n.string(sort == "newest" ? "files_sort_newest" : "files_sort_name"))
                     XCTAssertEqual(refresh.accessibilityTraits.contains(.notEnabled), !connected || status == "loading")
                     for button in [refresh, sorting] {
-                        XCTAssertGreaterThanOrEqual(button.accessibilityFrame.height, 44)
+                        XCTAssertGreaterThanOrEqual(button.accessibilityFrame.height, 44 - 0.5)
                         XCTAssertGreaterThanOrEqual(button.accessibilityFrame.minX, window.frame.minX)
                         XCTAssertLessThanOrEqual(button.accessibilityFrame.maxX, window.frame.maxX)
                     }

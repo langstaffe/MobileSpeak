@@ -8,6 +8,11 @@ import android.view.ViewGroup
 import androidx.activity.compose.setContent
 import androidx.compose.ui.platform.ViewRootForTest
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.unit.dp
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.height
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.semantics.SemanticsProperties
@@ -143,6 +148,144 @@ class HomeScrollStateTest {
             }
         } finally {
             instrumentation.runOnMainSync { state.value = saved }
+            NativeCore.setNotifier(handle, Runnable { poll.invoke(ClientSession) })
+            poll.invoke(ClientSession)
+        }
+    }
+
+    @Test fun drawerNavigationKeepsGeometryScrollAndFrozenFileExit() {
+        ClientSession.initialize(context)
+        assumeTrue(!ClientSession.shouldRunService() && state.value.snapshot.status == "disconnected")
+        val handle = (field("handle\$delegate").get(ClientSession) as Lazy<*>).value as Long
+        val poll = ClientSession.javaClass.getDeclaredMethod("scheduleCorePoll").apply { isAccessible = true }
+        val saved = state.value
+        val originalScale = Settings.Global.getString(context.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE)
+        fun scale(value: String?) {
+            val command = if (value == null) "settings delete global animator_duration_scale" else "settings put global animator_duration_scale $value"
+            instrumentation.uiAutomation.executeShellCommand(command).use { android.os.ParcelFileDescriptor.AutoCloseInputStream(it).readBytes() }
+            settle(150)
+        }
+        fun tag(value: String) = nodes().single { it.config.getOrNull(SemanticsProperties.TestTag) == value }
+        fun shot(phase: String) {
+            val bitmap = requireNotNull(instrumentation.uiAutomation.takeScreenshot())
+            java.io.File(context.getExternalFilesDir(null), "drawer-navigation-$phase.png").outputStream().use { bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
+            bitmap.recycle()
+        }
+        fun waitForMovingPages() {
+            val deadline = SystemClock.elapsedRealtime() + 800
+            while (SystemClock.elapsedRealtime() < deadline) {
+                if (onMain {
+                    val pages = nodes().associateBy { it.config.getOrNull(SemanticsProperties.TestTag) }
+                    (pages["drawer-page-home"]?.positionInRoot?.x ?: 0f) < 0f &&
+                        (pages["drawer-page-files"]?.positionInRoot?.x ?: 0f) > 0f
+                }) return
+                settle(16)
+            }
+        }
+        val own = Member(1, 7, "fixture-own", "Own", null, emptyList(), emptyList(), null, false, false, false)
+        val member = own.copy(id = 2, uid = "fixture-member", name = "Volume fixture", volumeToken = "fixture-2")
+        val fixture = saved.copy(snapshot = Snapshot(status = "connected", server = "Drawer fixture", serverId = "drawer-fixture", ownClient = 1,
+            channels = listOf(Channel(7, 0, 0, "Fixture channel", false, true, "fixture", null)), clients = listOf(own, member)),
+            userVolumesOpen = false, channelFiles = ChannelFilesState(), channelFilesLocalError = null, microphoneMuted = false)
+        val files = ChannelFilesState(open = true, server = "drawer-fixture", channel = 7, channelName = "Fixture channel", status = "ready",
+            entries = listOf(ChannelFileEntry("Retained exit row.txt", 1024, 1700000000, false, "file-text", null)))
+        try {
+            NativeCore.setNotifier(handle, Runnable {})
+            (field("coreExecutor").get(ClientSession) as ExecutorService).submit {}.get(10, TimeUnit.SECONDS)
+            scale("1")
+            var surfaceWidth by androidx.compose.runtime.mutableStateOf(320.dp)
+            ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+                scenario.onActivity { a ->
+                    activity = a
+                    a.setContent {
+                        val density = androidx.compose.ui.platform.LocalDensity.current
+                        androidx.compose.runtime.CompositionLocalProvider(androidx.compose.ui.platform.LocalDensity provides androidx.compose.ui.unit.Density(density.density, 1.4f)) {
+                            androidx.compose.material3.MaterialTheme(colorScheme = androidx.compose.material3.darkColorScheme(primary = Palette.accent, surface = Palette.card, onSurface = Palette.text)) {
+                                androidx.compose.runtime.CompositionLocalProvider(androidx.compose.material3.LocalContentColor provides Palette.text,
+                                    androidx.compose.material3.LocalTextStyle provides androidx.compose.ui.text.TextStyle(fontSize = 17.sp, lineHeight = 20.sp)) {
+                                    androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.width(surfaceWidth).height(720.dp)) { MobileSpeakApp({}) }
+                                }
+                            }
+                        }
+                    }
+                }
+                publish(fixture)
+                click(context.localized(R.string.voice_drawer_expand))
+                val originalDrawer = onMain { tag("voice-drawer").boundsInRoot }
+                val originalVoice = onMain { nodes().first { it.config.getOrNull(SemanticsProperties.ContentDescription)?.contains(context.localized(R.string.voice_mute)) == true }.boundsInRoot }
+                onMain { tag("drawer-tools-list").config[SemanticsActions.ScrollBy].action!!(0f, 10000f) }
+                settle()
+                val homeOffset = onMain { tag("drawer-tools-list").config[SemanticsProperties.VerticalScrollAxisRange].value() }
+                assertTrue("Narrow, large-font tools must have a meaningful saved offset", homeOffset > 0f)
+                onMain { ClientSession.openChannelFiles() }
+                settle(100)
+                assertFalse("Submitting files_open waits for core confirmation", state.value.channelFiles.open)
+                scale("3")
+                publish(fixture.copy(channelFiles = files), wait = false)
+                settle(180)
+                waitForMovingPages()
+                onMain {
+                    assertTrue("Files push from the right", tag("drawer-page-files").positionInRoot.x > 0)
+                    assertTrue("Home moves to the left", tag("drawer-page-home").positionInRoot.x < 0)
+                    assertFalse("Departing and moving pages expose no actionable descendants", nodes().any { it.config.getOrNull(SemanticsProperties.TestTag) == "files-upload" })
+                    assertEquals(originalDrawer, tag("voice-drawer").boundsInRoot)
+                }
+                shot("files-push")
+                settle(1100)
+                assertTrue(onMain { nodes().any { it.config.getOrNull(SemanticsProperties.ContentDescription)?.contains("Retained exit row.txt") == true } })
+                shot("files-ready")
+                // Match the immediate Rust root-back result, including entries.clear().
+                publish(fixture.copy(channelFiles = files.copy(open = false, entries = emptyList())), wait = false)
+                settle(180)
+                waitForMovingPages()
+                onMain {
+                    assertTrue("The old file page exits to the right", tag("drawer-page-files").positionInRoot.x > 0)
+                    assertTrue("Home returns from the left", tag("drawer-page-home").positionInRoot.x < 0)
+                    assertEquals(originalDrawer, tag("voice-drawer").boundsInRoot)
+                }
+                shot("files-pop-retained")
+                instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
+                assertFalse("Outgoing files must not receive back", state.value.channelFiles.open)
+                settle(1100)
+                onMain {
+                    assertFalse(nodes().any { it.config.getOrNull(SemanticsProperties.TestTag) == "drawer-page-files" })
+                    assertEquals(homeOffset, tag("drawer-tools-list").config[SemanticsProperties.VerticalScrollAxisRange].value(), 1f)
+                    assertEquals("Repeated back during the pop keeps the drawer expanded", originalDrawer, tag("voice-drawer").boundsInRoot)
+                    assertEquals(originalVoice, nodes().first { it.config.getOrNull(SemanticsProperties.ContentDescription)?.contains(context.localized(R.string.voice_mute)) == true }.boundsInRoot)
+                }
+                publish(fixture.copy(userVolumesOpen = true), wait = false)
+                settle(150)
+                instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
+                settle(1200)
+                assertFalse("Back during push reverses to home", state.value.userVolumesOpen)
+                assertTrue(onMain { nodes().any { it.config.getOrNull(SemanticsProperties.TestTag) == "drawer-page-home" } })
+                assertEquals(originalDrawer, onMain { tag("voice-drawer").boundsInRoot })
+                scale("0")
+                publish(fixture.copy(channelFiles = files), wait = false)
+                settle(150)
+                assertEquals("Animator scale zero skips moving pages", 0f, onMain { tag("drawer-page-files").positionInRoot.x }, 1f)
+                assertTrue(onMain { nodes().any { it.config.getOrNull(SemanticsProperties.TestTag) == "files-upload" } })
+                onMain { surfaceWidth = 280.dp }
+                settle(150)
+                assertEquals("Resize leaves the current page settled", 0f, onMain { tag("drawer-page-files").positionInRoot.x }, 1f)
+                assertTrue(onMain { tag("voice-drawer").boundsInRoot.width < originalDrawer.width })
+                onMain { surfaceWidth = 320.dp }
+                publish(fixture.copy(snapshot = Snapshot(status = "disconnected")))
+                assertFalse(onMain { nodes().any { it.config.getOrNull(SemanticsProperties.TestTag) == "drawer-page-files" } })
+                publish(fixture)
+                scale("3")
+                click(context.localized(R.string.tab_settings))
+                scroll(pixels = 10000f)
+                click(context.localized(R.string.settings_language))
+                shot("settings-push")
+                settle(1100)
+                click(context.localized(R.string.action_back))
+                shot("settings-pop")
+                settle(1100)
+            }
+        } finally {
+            scale(originalScale)
+            onMain { state.value = saved }
             NativeCore.setNotifier(handle, Runnable { poll.invoke(ClientSession) })
             poll.invoke(ClientSession)
         }

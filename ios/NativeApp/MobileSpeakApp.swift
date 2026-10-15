@@ -960,6 +960,92 @@ private final class VoiceDrawerController: UIViewController, UIGestureRecognizer
     }
 }
 
+enum DrawerToolPage { case home, volumes, files }
+
+// A local system navigation stack keeps the drawer's fixed chrome and vertical pan outside the push.
+private struct DrawerNavigationHost: UIViewControllerRepresentable {
+    let page: DrawerToolPage
+    let home: AnyView
+    let detail: AnyView
+    let reduceMotion: Bool
+
+    func makeUIViewController(context: Context) -> DrawerNavigationController { DrawerNavigationController() }
+    func updateUIViewController(_ controller: DrawerNavigationController, context: Context) {
+        controller.configure(page: page, home: home, detail: detail, reduceMotion: reduceMotion)
+    }
+}
+
+final class DrawerNavigationController: UINavigationController, UINavigationControllerDelegate {
+    private let home = UIHostingController(rootView: AnyView(EmptyView()))
+    private var detail: UIHostingController<AnyView>?
+    private var requestedPage = DrawerToolPage.home
+    private var detailContent = AnyView(EmptyView())
+    private var reduceMotion = false
+    private(set) var page = DrawerToolPage.home
+    private(set) var switching = false
+
+    init() { super.init(nibName: nil, bundle: nil) }
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        delegate = self
+        setNavigationBarHidden(true, animated: false)
+        interactivePopGestureRecognizer?.isEnabled = false
+        if #available(iOS 26.0, *) { interactiveContentPopGestureRecognizer?.isEnabled = false }
+        view.backgroundColor = UIColor(Palette.bottom)
+        view.clipsToBounds = true
+        home.view.backgroundColor = UIColor(Palette.bottom)
+        setViewControllers([home], animated: false)
+    }
+
+    func configure(page: DrawerToolPage, home: AnyView, detail: AnyView, reduceMotion: Bool) {
+        loadViewIfNeeded()
+        requestedPage = page
+        detailContent = detail
+        self.reduceMotion = reduceMotion
+        self.home.rootView = home
+        // Do not feed a closed/cleared core snapshot into the outgoing file page.
+        if page != .home && page == self.page { self.detail?.rootView = detail }
+        synchronize()
+    }
+
+    private func synchronize() {
+        guard !switching, requestedPage != page else { return }
+        let animated = view.window != nil && !reduceMotion && !UIAccessibility.isReduceMotionEnabled && UIView.areAnimationsEnabled
+        if page != .home {
+            page = .home
+            switching = animated
+            setViewControllers([home], animated: animated)
+        } else {
+            page = requestedPage
+            let controller = UIHostingController(rootView: detailContent)
+            controller.view.backgroundColor = UIColor(Palette.bottom)
+            detail = controller
+            switching = animated
+            setViewControllers([home, controller], animated: animated)
+        }
+        if !animated { synchronize() }
+    }
+
+    func navigationController(_ navigationController: UINavigationController, willShow viewController: UIViewController, animated: Bool) {
+        for controller in [home, detail].compactMap({ $0 }) {
+            controller.view.isUserInteractionEnabled = !animated && controller === viewController
+            controller.view.accessibilityElementsHidden = animated || controller !== viewController
+        }
+    }
+
+    func navigationController(_ navigationController: UINavigationController, didShow viewController: UIViewController, animated: Bool) {
+        switching = false
+        for controller in [home, detail].compactMap({ $0 }) {
+            controller.view.isUserInteractionEnabled = controller === viewController
+            controller.view.accessibilityElementsHidden = controller !== viewController
+        }
+        if viewController === home { detail = nil }
+        synchronize()
+    }
+}
+
 struct HomeView: View {
     @ObservedObject var client: Client
     @EnvironmentObject private var language: LanguageSettings
@@ -1366,40 +1452,15 @@ struct HomeView: View {
                     .accessibilityLabel(L10n.string(drawerExpanded && client.connected ? "voice_drawer_collapse" : "voice_drawer_expand"))
                     .accessibilityValue(L10n.string(drawerExpanded && client.connected ? "voice_drawer_expanded" : "voice_drawer_collapsed"))
                 }
-                Group {
-                    if userVolumesOpen { UserVolumesDrawer(client: client, onBack: { userVolumesOpen = false }) }
-                    else if client.channelFiles.open { ChannelFilesDrawer(client: client) }
-                    else {
-                        VStack(spacing: 0) {
-                            NetworkQualityPanel(quality: client.state.networkQuality ?? NetworkQuality()).fixedSize(horizontal: false, vertical: true)
-                            ScrollView {
-                                VStack(alignment: .leading, spacing: 12) {
-                                    Text(L10n.string("volume_tools")).font(.caption).foregroundStyle(Palette.muted)
-                                    Button { userVolumesOpen = true } label: {
-                                        HStack(spacing: 14) {
-                                            AppIcon(name: "speaker-on", scaledSize: 26).foregroundStyle(Palette.accent)
-                                            Text(L10n.string("volume_title")).foregroundStyle(.white).frame(maxWidth: .infinity, alignment: .leading)
-                                            AppIcon(name: "chevron-right", size: 18).foregroundStyle(Palette.muted)
-                                        }.padding(16).frame(minHeight: 72).background(Palette.card).clipShape(RoundedRectangle(cornerRadius: 14))
-                                    }.buttonStyle(.plain).disabled(!client.connected || client.state.ownClient == nil)
-                                    .accessibilityIdentifier("user-volumes-tool")
-                                    Text(L10n.string("files_tools")).font(.caption).foregroundStyle(Palette.muted)
-                                    Button { client.openChannelFiles() } label: {
-                                        HStack(spacing: 14) {
-                                            AppIcon(name: "folder", scaledSize: 26).foregroundStyle(Palette.accent)
-                                            VStack(alignment: .leading, spacing: 4) {
-                                                Text(L10n.string("files_title")).foregroundStyle(.white)
-                                                Text(L10n.string("files_subtitle")).font(.caption).foregroundStyle(Palette.muted)
-                                            }.frame(maxWidth: .infinity, alignment: .leading)
-                                            AppIcon(name: "chevron-right", size: 18).foregroundStyle(Palette.muted)
-                                        }.padding(16).frame(minHeight: 72).background(Palette.card).clipShape(RoundedRectangle(cornerRadius: 14))
-                                    }.buttonStyle(.plain).disabled(!client.connected || client.state.ownClient == nil)
-                                    .accessibilityIdentifier("channel-files-tool")
-                                }.padding(16).dynamicTypeSize(...DynamicTypeSize.xxxLarge)
-                            }
-                        }
-                    }
-                }.frame(maxWidth: .infinity, minHeight: 0, maxHeight: .infinity, alignment: .top).clipped()
+                DrawerNavigationHost(
+                    page: !client.connected ? .home : userVolumesOpen ? .volumes : client.channelFiles.open ? .files : .home,
+                    home: drawerPage(drawerTools),
+                    detail: drawerPage(Group {
+                        if userVolumesOpen { UserVolumesDrawer(client: client, presentation: client.state, onBack: { userVolumesOpen = false }) }
+                        else { ChannelFilesDrawer(client: client, presentation: client.channelFiles, presentationError: client.channelFilesLocalError) }
+                    }),
+                    reduceMotion: reduceMotion)
+                    .frame(maxWidth: .infinity, minHeight: 0, maxHeight: .infinity, alignment: .top).clipped()
                     .accessibilityHidden(!drawerExpanded || !client.connected)
             }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 .foregroundStyle(Color(hex: 0xF2F3F5)).background(Palette.bottom)
@@ -1408,6 +1469,42 @@ struct HomeView: View {
             connected: client.connected, expanded: drawerExpanded, travel: travel, reduceMotion: reduceMotion,
             onExpanded: setDrawerExpanded, onTouch: { drawerBlocksClick = $0 })
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+    private func drawerPage<Content: View>(_ content: Content) -> AnyView {
+        AnyView(content.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .foregroundStyle(Color(hex: 0xF2F3F5)).background(Palette.bottom)
+            .environment(\.sizeCategory, sizeCategory).environment(\.locale, language.locale)
+            .tint(Palette.accent).ignoresSafeArea(.container))
+    }
+    private var drawerTools: some View {
+        VStack(spacing: 0) {
+            NetworkQualityPanel(quality: client.state.networkQuality ?? NetworkQuality()).fixedSize(horizontal: false, vertical: true)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(L10n.string("volume_tools")).font(.caption).foregroundStyle(Palette.muted)
+                    Button { userVolumesOpen = true } label: {
+                        HStack(spacing: 14) {
+                            AppIcon(name: "speaker-on", scaledSize: 26).foregroundStyle(Palette.accent)
+                            Text(L10n.string("volume_title")).foregroundStyle(.white).frame(maxWidth: .infinity, alignment: .leading)
+                            AppIcon(name: "chevron-right", size: 18).foregroundStyle(Palette.muted)
+                        }.padding(16).frame(minHeight: 72).background(Palette.card).clipShape(RoundedRectangle(cornerRadius: 14))
+                    }.buttonStyle(.plain).disabled(!client.connected || client.state.ownClient == nil)
+                    .accessibilityIdentifier("user-volumes-tool")
+                    Text(L10n.string("files_tools")).font(.caption).foregroundStyle(Palette.muted)
+                    Button { client.openChannelFiles() } label: {
+                        HStack(spacing: 14) {
+                            AppIcon(name: "folder", scaledSize: 26).foregroundStyle(Palette.accent)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(L10n.string("files_title")).foregroundStyle(.white)
+                                Text(L10n.string("files_subtitle")).font(.caption).foregroundStyle(Palette.muted)
+                            }.frame(maxWidth: .infinity, alignment: .leading)
+                            AppIcon(name: "chevron-right", size: 18).foregroundStyle(Palette.muted)
+                        }.padding(16).frame(minHeight: 72).background(Palette.card).clipShape(RoundedRectangle(cornerRadius: 14))
+                    }.buttonStyle(.plain).disabled(!client.connected || client.state.ownClient == nil)
+                    .accessibilityIdentifier("channel-files-tool")
+                }.padding(16).dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+            }
+        }
     }
     private func setDrawerExpanded(_ expanded: Bool) {
         guard client.connected, expanded != drawerExpanded else { return }
@@ -1788,10 +1885,12 @@ struct SettingsDetailPage: View {
 
 struct UserVolumesDrawer: View {
     @ObservedObject var client: Client
+    var presentation: Snapshot? = nil
     var onBack: () -> Void
     @ScaledMetric(relativeTo: .headline) private var titleSize: CGFloat = 17
     @ScaledMetric(relativeTo: .callout) private var actionSize: CGFloat = 14
     @ScaledMetric(relativeTo: .caption) private var chromeSize: CGFloat = 12
+    private var snapshot: Snapshot { presentation ?? client.state }
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 4) {
@@ -1801,17 +1900,17 @@ struct UserVolumesDrawer: View {
                 }.accessibilityIdentifier("volumes-back")
                 VStack(spacing: 2) {
                     Text(L10n.string("volume_title")).font(.system(size: min(titleSize, 22), weight: .semibold))
-                    Text(client.state.server ?? "").font(.system(size: min(chromeSize, 16))).foregroundStyle(Palette.muted).lineLimit(1)
+                    Text(snapshot.server ?? "").font(.system(size: min(chromeSize, 16))).foregroundStyle(Palette.muted).lineLimit(1)
                 }.frame(maxWidth: .infinity)
                 Color.clear.frame(width: 64, height: 44).accessibilityHidden(true)
             }.font(.system(size: min(actionSize, 20))).padding(.horizontal, 8)
             Divider().overlay(Palette.border)
             ScrollView {
-                let members = client.state.clients.filter { $0.id != client.state.ownClient }.sorted { $0.id < $1.id }
+                let members = snapshot.clients.filter { $0.id != snapshot.ownClient }.sorted { $0.id < $1.id }
                 LazyVStack(spacing: 0) {
                     if members.isEmpty { Text(L10n.string("volume_empty")).foregroundStyle(Palette.muted).padding(24) }
                     ForEach(members, id: \.volumeRowId) { member in
-                        UserVolumeRow(client: client, server: client.state.serverId ?? "", member: member)
+                        UserVolumeRow(client: client, server: snapshot.serverId ?? "", member: member)
                     }
                 }.padding(.top, members.isEmpty ? 0 : 12)
             }.accessibilityIdentifier("user-volumes-list")

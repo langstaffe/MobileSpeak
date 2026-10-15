@@ -179,6 +179,8 @@ private struct ChannelFileAction: Identifiable {
 }
 struct ChannelFilesDrawer: View {
     @ObservedObject var client: Client
+    var presentation: ChannelFilesState? = nil
+    var presentationError: String? = nil
     @State private var info: ChannelFileEntry?
     @State private var choosing = false
     @State private var uploadTarget: ChannelFileTarget?
@@ -187,9 +189,9 @@ struct ChannelFilesDrawer: View {
     @ScaledMetric(relativeTo: .headline) private var titleSize: CGFloat = 17
     @ScaledMetric(relativeTo: .callout) private var actionSize: CGFloat = 14
     @ScaledMetric(relativeTo: .caption) private var chromeSize: CGFloat = 12
-    private var files: ChannelFilesState { client.channelFiles }
+    private var files: ChannelFilesState { presentation ?? client.channelFiles }
     var body: some View {
-        let target = client.channelFileTarget
+        let target = client.connected ? files.server.flatMap { server in files.channel.map { ChannelFileTarget(server: server, channel: $0, path: files.path) } } : nil
         let canRefresh = target != nil && files.status != "loading" && client.connected
         VStack(spacing: 0) {
             HStack(spacing: 4) {
@@ -230,7 +232,7 @@ struct ChannelFilesDrawer: View {
             ScrollView {
                 LazyVStack(spacing: 0) {
                     if preparing { ProgressView(L10n.string("files_staging")).padding() }
-                    if let error = client.channelFilesLocalError ?? files.error {
+                    if let error = (presentation == nil ? client.channelFilesLocalError : presentationError) ?? files.error {
                         Text(fileError(error)).font(.callout).foregroundStyle(Palette.disconnect).frame(maxWidth: .infinity, alignment: .leading).padding()
                     }
                     if let info { information(info, target: target) }
@@ -358,6 +360,7 @@ private struct ChannelFileOpen: UIViewControllerRepresentable {
     let onClose: () -> Void
     func makeUIViewController(context: Context) -> ChannelFileOpenController { ChannelFileOpenController(url: url, onFailure: onFailure, onClose: onClose) }
     func updateUIViewController(_ controller: ChannelFileOpenController, context: Context) {}
+    static func dismantleUIViewController(_ controller: ChannelFileOpenController, coordinator: ()) { controller.stopPresentation() }
 }
 private final class ChannelFileOpenController: UIViewController, UIDocumentInteractionControllerDelegate {
     private let document: UIDocumentInteractionController
@@ -374,5 +377,23 @@ private final class ChannelFileOpenController: UIViewController, UIDocumentInter
         guard !presented else { return }; presented = true
         if !document.presentOpenInMenu(from: view.bounds, in: view, animated: true) { onFailure(); onClose() }
     }
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        var ancestor: UIViewController? = self
+        while let controller = ancestor {
+            if controller.isBeingDismissed {
+                // Interactive dismissal may cancel; dismantle cleans up a completed one.
+                if controller.transitionCoordinator?.isInteractive != true { stopPresentation() }
+                break
+            }
+            ancestor = controller.parent
+        }
+    }
     func documentInteractionControllerDidDismissOpenInMenu(_ controller: UIDocumentInteractionController) { onClose() }
+    func stopPresentation() {
+        // A sheet dismissed while opening must not present its document menu later.
+        presented = true
+        document.delegate = nil
+        document.dismissMenu(animated: false)
+    }
 }
