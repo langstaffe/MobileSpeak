@@ -44,6 +44,12 @@
       "networkQuality": null,
       "status": "connecting"
     },
+    "speech": {
+      "available": false,
+      "mode": "push_to_talk",
+      "token": "fixture-speech",
+      "transmitting": false
+    },
     "unread": {
       "channel": null,
       "channelCount": 0,
@@ -103,6 +109,12 @@
       "networkQuality": null,
       "status": "connected"
     },
+    "speech": {
+      "available": true,
+      "mode": "push_to_talk",
+      "token": "fixture-speech",
+      "transmitting": false
+    },
     "unread": {
       "channel": null,
       "channelCount": 0,
@@ -144,6 +156,12 @@
       "connectionId": "fixture-connection",
       "networkQuality": null,
       "status": "reconnecting"
+    },
+    "speech": {
+      "available": false,
+      "mode": "push_to_talk",
+      "token": "fixture-speech",
+      "transmitting": false
     },
     "unread": {
       "channel": null,
@@ -192,6 +210,12 @@
       "connectionId": "fixture-connection",
       "networkQuality": null,
       "status": "disconnected"
+    },
+    "speech": {
+      "available": false,
+      "mode": "push_to_talk",
+      "token": "fixture-speech",
+      "transmitting": false
     },
     "unread": {
       "channel": null,

@@ -7,6 +7,479 @@ import Combine
 @testable import MobileSpeak
 
 final class ClientTests: XCTestCase {
+    @MainActor func testSpeechModePreservesInFlightManualAudioIntent() async throws {
+        let client = Client.shared
+        guard !client.connected, !client.busy else { throw XCTSkip("Requires an offline test profile") }
+        let previous = client.state, mode = client.speech.mode
+        let microphone = client.microphoneMuted, listening = client.deafened
+        let previousError = client.error
+        // Isolate the real audio controller from the offline core's connection snapshots.
+        ts_set_notifier(client.handle, nil, 0)
+        let entered = expectation(description: "Audio queue blocked before manual change")
+        let release = DispatchSemaphore(value: 0)
+        defer {
+            release.signal(); client.audio.stop(); client.state = previous
+            client.audioBusy = false; client.error = previousError; client.setSpeechMode(mode)
+            ts_set_notifier(client.handle, { context in
+                DispatchQueue.main.async {
+                    Unmanaged<Client>.fromOpaque(UnsafeRawPointer(bitPattern: context)!).takeUnretainedValue().receive()
+                }
+            }, Int(bitPattern: Unmanaged.passUnretained(client).toOpaque()))
+        }
+        await client.setAudio(input: false, output: false)
+        let work = Task { try await client.audio.perform {
+            entered.fulfill(); _ = release.wait(timeout: .now() + 5)
+        } }
+        await fulfillment(of: [entered], timeout: 2)
+        client.state = Snapshot(status: "connected")
+        let manual = Task { await client.setAudio(input: true, output: true) }
+        await Task.yield()
+        XCTAssertTrue(client.audioBusy)
+        client.setSpeechMode(mode == .automatic ? .pushToTalk : .automatic)
+        XCTAssertTrue(client.audioBusy, "Changing transmit mode cannot cancel the user's pending audio switch")
+        release.signal()
+        try await work.value
+        await manual.value
+        XCTAssertTrue(client.microphoneMuted)
+        XCTAssertTrue(client.deafened)
+        client.state = previous
+        await client.setAudio(input: microphone, output: listening)
+    }
+
+    @MainActor func testPushToTalkFixedHomeDrawerAndChatLayouts() async throws {
+        #if targetEnvironment(simulator)
+        // Match the existing layout fixtures: unit-test hosts do not enable SwiftUI accessibility automation.
+        let library = try XCTUnwrap(dlopen("/usr/lib/libAccessibility.dylib", RTLD_NOW))
+        let automation = unsafeBitCast(try XCTUnwrap(dlsym(library, "_AXSSetAutomationEnabled")), to: (@convention(c) (Bool) -> Void).self)
+        let enabled = unsafeBitCast(try XCTUnwrap(dlsym(library, "_AXSAutomationEnabled")), to: (@convention(c) () -> Bool).self)()
+        automation(true)
+        defer { automation(enabled); dlclose(library) }
+        #endif
+        let client = Client.shared
+        guard !client.connected, !client.busy else { throw XCTSkip("Requires an offline test profile") }
+        let previousState = client.state, previousMode = client.speech.mode, previousFiles = client.channelFiles
+        let previousImporting = client.fileImporting
+        client.fileImporting = true
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let window = UIWindow(windowScene: scene)
+        let host = UIHostingController(rootView: AnyView(EmptyView()))
+        window.rootViewController = host; window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true; client.state = previousState; client.channelFiles = previousFiles
+            client.fileImporting = previousImporting; client.setSpeechMode(previousMode)
+        }
+        client.setSpeechMode(.pushToTalk)
+        try await Task.sleep(nanoseconds: 300_000_000)
+        client.receive()
+        let channel = Channel(id: 7, parent: 0, order: 0, name: "Lobby", password: false, permanent: true, key: "lobby", icon: nil, iconPath: nil)
+        let members = (1...8).map { Member(id: UInt64($0), channel: $0 == 2 ? 8 : 7, uid: "ptt-\($0)", name: "Member \($0)", avatarHash: "", avatarPath: nil, badges: [], serverGroupIcons: [], channelGroupIcon: nil, muted: false, deafened: false, speaking: false) }
+        let snapshot = Snapshot(status: "connected", server: "PTT layout fixture", ownClient: 1, channels: [channel], clients: members)
+        client.state = snapshot
+        func show<V: View>(_ view: V, id: String) async throws {
+            host.rootView = AnyView(view.id(id).environmentObject(LanguageSettings()).preferredColorScheme(.dark).tint(Palette.accent).dynamicTypeSize(.large))
+            try await Task.sleep(nanoseconds: 250_000_000)
+        }
+        func elements() -> [NSObject] {
+            var visited = Set<ObjectIdentifier>()
+            func collect(_ object: NSObject) -> [NSObject] {
+                guard visited.insert(ObjectIdentifier(object)).inserted, !object.accessibilityElementsHidden else { return [] }
+                if let view = object as? UIView, view.isHidden || view.alpha < 0.01 { return [] }
+                let explicit = object.accessibilityElements as? [NSObject]
+                let count = object.accessibilityElementCount()
+                let children = explicit ?? (count > 0 && count < 1_000 ? (0..<count).compactMap { object.accessibilityElement(at: $0) as? NSObject } : [])
+                if explicit == nil, count == NSNotFound, !object.isAccessibilityElement { return ((object as? UIView)?.subviews ?? []).flatMap(collect) }
+                return (object.isAccessibilityElement ? [object] : []) + children.flatMap(collect)
+            }
+            return collect(host.view)
+        }
+        func element(_ label: String) throws -> NSObject {
+            try XCTUnwrap(elements().first { $0.accessibilityLabel == label } ?? elements().first { $0.accessibilityLabel?.contains(label) == true }, label)
+        }
+        func activate(_ label: String) throws { XCTAssertTrue(try element(label).accessibilityActivate(), label) }
+        func pttFrame() throws -> CGRect { try element(L10n.string("voice_push_to_talk_hold")).accessibilityFrame }
+        func capture(_ name: String) throws {
+            let image = UIGraphicsImageRenderer(bounds: window.bounds).image { _ in window.drawHierarchy(in: window.bounds, afterScreenUpdates: true) }
+            try image.pngData()?.write(to: FileManager.default.temporaryDirectory.appendingPathComponent(name + ".png"))
+            let attachment = XCTAttachment(image: image); attachment.name = name; attachment.lifetime = .keepAlways; add(attachment)
+        }
+        var fixedFrame: CGRect?
+        for tab in 0..<3 {
+            try await show(NavigationView { HomeView(client: client, tab: tab) }.navigationViewStyle(.stack), id: "home-\(tab)")
+            let frame = try pttFrame()
+            XCTAssertGreaterThan(frame.height, 56)
+            XCTAssertEqual(frame.midX, window.bounds.midX, accuracy: 1)
+            if let fixedFrame { XCTAssertEqual(frame.minY, fixedFrame.minY, accuracy: 1) } else { fixedFrame = frame }
+            let navigation = try XCTUnwrap(elements().last { $0.accessibilityTraits.contains(.button) && $0.accessibilityLabel == L10n.string("tab_channels") })
+            XCTAssertLessThanOrEqual(frame.maxY, navigation.accessibilityFrame.minY)
+            try capture("ios-ptt-home-\(tab)")
+            if tab == 0 {
+                try activate(L10n.string("voice_drawer_expand"))
+                try await Task.sleep(nanoseconds: 500_000_000)
+                XCTAssertEqual(try pttFrame(), frame)
+                try capture("ios-ptt-drawer-expanded")
+                try activate(L10n.string("volume_title"))
+                try await Task.sleep(nanoseconds: 500_000_000)
+                XCTAssertEqual(try pttFrame(), frame)
+                try capture("ios-ptt-drawer-volumes")
+            }
+            if tab == 2 {
+                let agc = try element(L10n.string("settings_receive_agc")).accessibilityFrame
+                let mode = try element(L10n.string("settings_speech_mode")).accessibilityFrame
+                let noise = try element(L10n.string("settings_noise_suppression")).accessibilityFrame
+                XCTAssertLessThan(agc.minY, mode.minY)
+                XCTAssertLessThan(mode.minY, noise.minY)
+            }
+        }
+        for privateChat in [false, true] {
+            if privateChat { try await show(NavigationView { PrivateChatView(client: client, member: members[1]) }.navigationViewStyle(.stack), id: "private") }
+            else { try await show(NavigationView { ChannelChatView(client: client, channel: channel) }.navigationViewStyle(.stack), id: "channel") }
+            let target = try element(L10n.format("voice_push_to_talk_channel", "Lobby"))
+            let frame = try pttFrame()
+            XCTAssertLessThanOrEqual(target.accessibilityFrame.maxY, frame.minY)
+            func inputField(_ view: UIView) -> UITextField? {
+                if let input = view as? UITextField { return input }
+                return view.subviews.lazy.compactMap(inputField).first
+            }
+            let input = try XCTUnwrap(inputField(host.view))
+            XCTAssertLessThanOrEqual(frame.maxY, input.convert(input.bounds, to: window).minY)
+            try capture(privateChat ? "ios-ptt-private-chat" : "ios-ptt-channel-chat")
+        }
+        client.state = previousState
+        client.setSpeechMode(.automatic)
+        try await Task.sleep(nanoseconds: 250_000_000)
+        client.receive()
+        try await show(NavigationView { HomeView(client: client) }.navigationViewStyle(.stack), id: "automatic")
+        XCTAssertFalse(elements().contains { $0.accessibilityLabel == L10n.string("voice_push_to_talk_hold") })
+        try capture("ios-ptt-automatic-hidden")
+    }
+
+    @MainActor func testOptInPushToTalkNativeTouchInteraction() async throws {
+        let marker = FileManager.default.temporaryDirectory.appendingPathComponent("ptt-interaction-enabled")
+        guard FileManager.default.fileExists(atPath: marker.path) else { throw XCTSkip("Create tmp/ptt-interaction-enabled to run the 45-second manual gesture fixture") }
+        try FileManager.default.removeItem(at: marker)
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let model = PushToTalkInteractionFixtureModel()
+        let window = PushToTalkInteractionWindow(windowScene: scene)
+        window.onTouch = model.recordTouch
+        window.rootViewController = UIHostingController(rootView: PushToTalkInteractionFixture(model: model))
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+        print("PTT INTERACTION READY: 45 seconds; use native touch, slide outside/back, Invalidate/Disable in 2 s while holding")
+        for _ in 0..<450 { try await Task.sleep(nanoseconds: 100_000_000) }
+        window.isHidden = true
+        let data = try JSONEncoder().encode(model.events)
+        try data.write(to: FileManager.default.temporaryDirectory.appendingPathComponent("ptt-interaction-log.json"))
+        let attachment = XCTAttachment(data: data, uniformTypeIdentifier: "public.json")
+        attachment.name = "PTT native touch interaction events"; attachment.lifetime = .keepAlways; add(attachment)
+        print("PTT INTERACTION EVENTS: \(model.events)")
+        XCTAssertTrue(model.events.contains { $0.contains("begin:") }, "This opt-in run requires a real touch")
+        XCTAssertTrue(model.events.contains { $0.contains("end:") }, "Release/cancel must reach the native control")
+        XCTAssertLessThan(try XCTUnwrap(model.touchDelays.max()), 0.15, "Touch-down must not wait for drag/long-press recognition")
+        XCTAssertTrue(model.events.contains { $0.contains("touch:moved-inside") }, "Move within the button during this opt-in run")
+        XCTAssertFalse(model.endedDuringInsideMovement, "Moving inside must retain the press even when SwiftUI replaces its hit view")
+    }
+
+    func testPushToTalkTouchCancellationRequiresReleaseBeforeAnotherToken() {
+        var press = PushToTalkPress()
+        press.begin(token: "first")
+        XCTAssertTrue(press.tracking)
+        XCTAssertEqual(press.cancel(), "first", "Sliding out, interruption and context changes stop this press")
+        press.begin(token: "returned-inside")
+        XCTAssertNil(press.token, "Sliding back or recovering while still held cannot resume")
+        XCTAssertNil(press.cancel(), "Duplicate cancellation is harmless")
+        XCTAssertNil(press.release())
+        XCTAssertFalse(press.tracking)
+        press.begin(token: "fresh")
+        XCTAssertEqual(press.release(), "fresh")
+        press.begin(token: nil)
+        press.begin(token: "permission-granted-later")
+        XCTAssertNil(press.release(), "Permission or asynchronous readiness cannot reuse an earlier touch")
+    }
+
+    @MainActor func testPushToTalkRawTouchScopeHandlesHostingRespondersAndRejectsOverlays() throws {
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let window = UIWindow(windowScene: scene)
+        let host = UIViewController()
+        let root = PushToTalkTestHostingView(frame: window.bounds)
+        let intermediary = PushToTalkTestResponder()
+        intermediary.destination = host; root.intermediary = intermediary; host.view = root
+        window.rootViewController = host; window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+        let area = PushToTalkTouchView()
+        area.frame = CGRect(x: 20, y: 80, width: 300, height: 70)
+        root.addSubview(area)
+        let middle = CGPoint(x: area.bounds.midX, y: area.bounds.midY)
+        XCTAssertTrue(area.acceptsHit(root, location: middle), "Hosting responder intermediaries must not suppress touch-down")
+        XCTAssertFalse(area.acceptsHit(root, location: CGPoint(x: -1, y: middle.y)))
+        let overlay = UIViewController()
+        window.addSubview(overlay.view)
+        XCTAssertFalse(area.acceptsHit(overlay.view, location: middle), "A covering controller cannot activate the button underneath")
+        area.isHidden = true
+        XCTAssertFalse(area.acceptsHit(root, location: middle))
+    }
+
+    @MainActor func testPushToTalkTrackedMovementSurvivesReplacementOfNativeHitView() throws {
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let window = UIWindow(windowScene: scene)
+        let controller = UIViewController()
+        window.rootViewController = controller; window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+        let area = PushToTalkTouchView()
+        area.frame = CGRect(x: 20, y: 80, width: 300, height: 70)
+        controller.view.addSubview(area)
+        let hitView = UIView(frame: area.frame)
+        controller.view.addSubview(hitView)
+        XCTAssertTrue(area.acceptsHit(hitView, location: CGPoint(x: 150, y: 35)))
+        hitView.removeFromSuperview() // Native Button feedback can replace this view after touch-down.
+        XCTAssertFalse(area.acceptsHit(hitView, location: CGPoint(x: 150, y: 35)), "Detached views cannot start another press")
+        for point in [CGPoint(x: 1, y: 1), CGPoint(x: 299, y: 1), CGPoint(x: 299, y: 69), CGPoint(x: 1, y: 69)] {
+            XCTAssertTrue(area.containsLocation(point), "An already tracked touch remains valid anywhere inside")
+        }
+        for point in [CGPoint(x: -1, y: 35), CGPoint(x: 301, y: 35), CGPoint(x: 150, y: -1), CGPoint(x: 150, y: 71)] {
+            XCTAssertFalse(area.containsLocation(point), "Each edge must still cancel immediately")
+        }
+        controller.view.clipsToBounds = true
+        area.frame.origin.x = -100
+        XCTAssertFalse(area.containsLocation(CGPoint(x: 1, y: 35)), "Clipped portions cannot retain a press")
+        area.isHidden = true
+        XCTAssertFalse(area.containsLocation(CGPoint(x: 150, y: 35)))
+    }
+
+    @MainActor func testVoiceDrawerRevealsFixedContentWhileOpeningAndClosing() async throws {
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let window = UIWindow(windowScene: scene)
+        let drawer = VoiceDrawerController()
+        window.rootViewController = drawer; window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+        let travel: CGFloat = 300
+        let content = AnyView(VStack(spacing: 0) {
+            Color.clear.frame(height: 64)
+            NetworkQualityPanel(quality: NetworkQuality()).fixedSize(horizontal: false, vertical: true)
+            ScrollView { Text("Drawer tools").frame(maxWidth: .infinity, minHeight: 500, alignment: .topLeading) }
+        }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top).background(Palette.bottom))
+        func configure(_ expanded: Bool) {
+            drawer.configure(content: content, connected: true, expanded: expanded, travel: travel,
+                             reduceMotion: false, onExpanded: { _ in }, onTouch: { _ in })
+            drawer.view.layoutIfNeeded()
+        }
+        configure(false)
+        try await Task.sleep(nanoseconds: 100_000_000)
+        let hosted = try XCTUnwrap(drawer.children.first?.view)
+        let pane = try XCTUnwrap(hosted.superview)
+        XCTAssertEqual(pane.accessibilityIdentifier, "voice-drawer")
+        let contentSize = CGSize(width: drawer.view.bounds.width, height: travel + 64)
+        XCTAssertEqual(hosted.bounds.size, contentSize, "Collapsed content must already have its full layout")
+        XCTAssertEqual(pane.bounds.height, 64, accuracy: 0.5)
+        for expanded in [true, false] {
+            configure(expanded)
+            var tops: [CGFloat] = []
+            for _ in 0..<12 {
+                try await Task.sleep(nanoseconds: 40_000_000)
+                let layer = pane.layer.presentation() ?? pane.layer
+                tops.append(layer.frame.minY)
+                let contentLayer = hosted.layer.presentation() ?? hosted.layer
+                XCTAssertEqual(contentLayer.bounds.size, contentSize, "Animation must reveal content without resizing or squeezing it")
+                XCTAssertEqual(contentLayer.frame.origin, .zero)
+            }
+            if UIView.areAnimationsEnabled {
+                XCTAssertGreaterThan(abs(try XCTUnwrap(tops.first) - (try XCTUnwrap(tops.last))), 1, "The pane should travel vertically")
+            }
+            XCTAssertEqual(pane.frame.minY, drawer.view.bounds.height - 64 - (expanded ? travel : 0), accuracy: 0.5)
+        }
+    }
+
+    @MainActor func testPhoneAudioCaptureDeliversNextFramePromptlyAfterReset() async throws {
+        #if targetEnvironment(simulator)
+        throw XCTSkip("Requires a physical microphone to measure capture delivery")
+        #else
+        guard AVAudioSession.sharedInstance().recordPermission == .granted else {
+            throw XCTSkip("Requires existing microphone permission")
+        }
+        let client = Client.shared
+        guard !client.connected, !client.busy else { throw XCTSkip("Requires an offline test profile") }
+        let shield = try audioTestWindow()
+        defer { shield.isHidden = true }
+        client.audio.stop()
+        _ = await client.audio.isRunning
+        let audio = PhoneAudio(handle: client.handle)
+        defer { audio.stop() }
+        try await audio.start()
+        try await audio.startCapture()
+        let started = ProcessInfo.processInfo.systemUptime
+        while audio.frameCounts.captured == 0 && ProcessInfo.processInfo.systemUptime - started < 5 {
+            try await Task.sleep(nanoseconds: 1_000_000)
+        }
+        XCTAssertGreaterThan(audio.frameCounts.captured, 0)
+        try await Task.sleep(nanoseconds: 500_000_000)
+        var delays: [Double] = []
+        for _ in 0..<8 {
+            let count = audio.frameCounts.captured
+            audio.resetCaptureBuffer()
+            let began = ProcessInfo.processInfo.systemUptime
+            while audio.frameCounts.captured == count && ProcessInfo.processInfo.systemUptime - began < 2 {
+                try await Task.sleep(nanoseconds: 1_000_000)
+            }
+            let elapsed = ProcessInfo.processInfo.systemUptime - began
+            delays.append(elapsed)
+            print("PTT next capture after reset: \(Int(elapsed * 1000)) ms")
+            try await Task.sleep(nanoseconds: 37_000_000)
+        }
+        XCTAssertLessThan(try XCTUnwrap(delays.max()), 0.25, "Capture delivery must not add a perceptible PTT startup delay")
+        audio.stop()
+        let running = await audio.isRunning
+        XCTAssertFalse(running)
+        #endif
+    }
+
+    func testPushToTalkTapBoundaryRejectsSamplesCapturedBeforePress() {
+        let start = AVAudioTime.hostTime(forSeconds: 100)
+        let halfway = AVAudioTime.hostTime(forSeconds: 100.05)
+        XCTAssertEqual(PhoneAudio.captureSkip(frameCount: 4800, sampleRate: 48000, hostTime: start, boundary: halfway), 2400)
+        XCTAssertEqual(PhoneAudio.captureSkip(frameCount: 4800, sampleRate: 48000, hostTime: start, boundary: AVAudioTime.hostTime(forSeconds: 100.2)), 4800)
+        XCTAssertEqual(PhoneAudio.captureSkip(frameCount: 4800, sampleRate: 48000, hostTime: halfway, boundary: start), 0)
+        XCTAssertEqual(PhoneAudio.captureSkip(frameCount: 4800, sampleRate: 48000, hostTime: nil, boundary: start), 4800)
+    }
+
+    func testPushToTalkCaptureTailCopiesFreshSamplesInBothPCMLayouts() throws {
+        for interleaved in [false, true] {
+            let format = try XCTUnwrap(AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 48000, channels: 2, interleaved: interleaved))
+            let input = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 4800))
+            input.frameLength = 4800
+            let data = try XCTUnwrap(input.floatChannelData)
+            for frame in 0..<4800 { for channel in 0..<2 {
+                data[interleaved ? 0 : channel][interleaved ? frame * 2 + channel : frame] = Float(frame * 2 + channel)
+            } }
+            let tail = try XCTUnwrap(PhoneAudio.captureTail(input, skipping: 1920))
+            XCTAssertEqual(tail.frameLength, 2880)
+            let result = try XCTUnwrap(tail.floatChannelData)
+            for frame in 0..<2880 { for channel in 0..<2 {
+                XCTAssertEqual(result[interleaved ? 0 : channel][interleaved ? frame * 2 + channel : frame], Float((frame + 1920) * 2 + channel))
+            } }
+            XCTAssertEqual(input.frameLength, 4800)
+            XCTAssertNil(PhoneAudio.captureTail(input, skipping: 4800))
+        }
+    }
+
+    @MainActor func testOptInPushToTalkTransmissionLatency() async throws {
+        let marker = FileManager.default.temporaryDirectory.appendingPathComponent("ptt-network-latency-enabled")
+        guard FileManager.default.fileExists(atPath: marker.path) else { throw XCTSkip("Requires explicit Test Server voice-test opt-in marker") }
+        try FileManager.default.removeItem(at: marker)
+        let client = Client.shared
+        guard !client.connected, !client.busy else { throw XCTSkip("Requires an offline test profile") }
+        let shield = try audioTestWindow()
+        defer { shield.isHidden = true }
+        let bookmark = try XCTUnwrap(client.bookmarks.first { $0.title == "Test Server" })
+        let originalMode = client.speech.mode, originalNoise = client.noiseSuppression
+        let originalInput = client.microphoneMuted, originalOutput = client.deafened
+        func cleanup() async {
+            client.endPushToTalk(); client.disconnect()
+            _ = await client.audio.isRunning
+            client.setSpeechMode(originalMode); client.setNoiseSuppression(originalNoise)
+            await client.setAudio(input: originalInput, output: originalOutput)
+        }
+        func wait(_ condition: () -> Bool, timeout: Double = 15) async throws {
+            let began = ProcessInfo.processInfo.systemUptime
+            while !condition() && ProcessInfo.processInfo.systemUptime - began < timeout {
+                try await Task.sleep(nanoseconds: 5_000_000)
+            }
+            guard condition() else {
+                XCTFail("Timed out waiting for audio/connection state: \(client.state.status), \(client.error ?? "no error")")
+                throw NSError(domain: "PushToTalkLatencyTest", code: 1)
+            }
+        }
+        do {
+        client.setSpeechMode(.pushToTalk)
+        client.connectBookmark(bookmark)
+        try await wait({ client.connected })
+        await client.setAudio(input: false, output: false)
+        try await wait({ client.speech.available && !client.audioBusy && client.audio.frameCounts.captured > 5 })
+        for noise in [NoiseSuppressionMode.none, .rnnoise, .dpdfnet2] {
+            client.setNoiseSuppression(noise)
+            try await wait({ client.appliedNoise == noise && client.audioProcessingStatus == "ready" && client.speech.available && !client.audioBusy })
+            for _ in 0..<3 {
+                let began = ProcessInfo.processInfo.systemUptime
+                let token = try XCTUnwrap(client.beginPushToTalk())
+                try await wait({ client.speech.transmitting }, timeout: 3)
+                let elapsed = ProcessInfo.processInfo.systemUptime - began
+                print("PTT actual transmission \(noise.rawValue): \(Int(elapsed * 1000)) ms")
+                XCTAssertLessThan(elapsed, 0.25)
+                client.endPushToTalk(token: token)
+                try await wait({ client.speech.token != token && client.speech.available })
+                try await Task.sleep(nanoseconds: 100_000_000)
+            }
+        }
+        } catch { await cleanup(); throw error }
+        await cleanup()
+    }
+
+    @MainActor func testSpeechModeRoundTripsThroughCoreWithoutChangingManualMute() async throws {
+        let client = Client.shared
+        guard !client.connected, !client.busy else { throw XCTSkip("Requires an offline test profile") }
+        let originalMode = client.speech.mode, originalMicrophone = client.microphoneMuted, originalDeafened = client.deafened
+        defer { client.setSpeechMode(originalMode) }
+        await client.setAudio(input: true, output: true)
+        client.setSpeechMode(.pushToTalk)
+        try await Task.sleep(nanoseconds: 200_000_000)
+        client.receive()
+        XCTAssertEqual(client.speech.mode, .pushToTalk)
+        XCTAssertFalse(client.speech.available)
+        XCTAssertFalse(client.speech.transmitting)
+        XCTAssertNil(client.beginPushToTalk())
+        client.endPushToTalk()
+        XCTAssertTrue(client.microphoneMuted)
+        XCTAssertTrue(client.deafened)
+        client.setSpeechMode(.automatic)
+        try await Task.sleep(nanoseconds: 200_000_000)
+        client.receive()
+        XCTAssertEqual(client.speech.mode, .automatic)
+        XCTAssertTrue(client.microphoneMuted)
+        XCTAssertTrue(client.deafened)
+        await client.setAudio(input: originalMicrophone, output: originalDeafened)
+        let decoded = try JSONDecoder().decode(SpeechState.self, from: Data(#"{"mode":"push_to_talk","token":"opaque-context","available":true,"transmitting":false}"#.utf8))
+        XCTAssertEqual(decoded.mode, .pushToTalk)
+        XCTAssertEqual(decoded.token, "opaque-context")
+        XCTAssertFalse(decoded.transmitting, "A valid press is not evidence that PCM has been sent")
+    }
+
+    @MainActor func testPushToTalkUsesJoinChannelNativeButtonSizeAndRendersStates() async throws {
+        let previousLanguage = UserDefaults.standard.object(forKey: AppLanguage.preferenceKey)
+        UserDefaults.standard.set("en", forKey: AppLanguage.preferenceKey)
+        defer {
+            if let previousLanguage { UserDefaults.standard.set(previousLanguage, forKey: AppLanguage.preferenceKey) }
+            else { UserDefaults.standard.removeObject(forKey: AppLanguage.preferenceKey) }
+        }
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        var measured: [String: CGSize] = [:]
+        func measure<V: View>(_ view: V, _ name: String) -> some View {
+            view.background(GeometryReader { proxy in Color.clear.onAppear { measured[name] = proxy.size } })
+        }
+        let fixture = VStack(spacing: 20) {
+            measure(Button {} label: { Text(L10n.string("channel_join")).font(.headline).frame(maxWidth: .infinity, minHeight: 56) }
+                .buttonStyle(.borderedProminent).buttonBorderShape(.roundedRectangle(radius: 14)).frame(maxWidth: .infinity), "join")
+            measure(PushToTalkButton(available: true, transmitting: false, token: "idle", begin: { nil }, end: { _ in }), "idle")
+            measure(PushToTalkButton(available: true, transmitting: true, token: "active", begin: { nil }, end: { _ in }), "active")
+            measure(PushToTalkButton(available: false, transmitting: false, token: "disabled", begin: { nil }, end: { _ in }), "disabled")
+        }.padding(20).background(Palette.bottom).tint(Palette.accent).preferredColorScheme(.dark).dynamicTypeSize(.large)
+        let window = UIWindow(windowScene: scene)
+        window.rootViewController = UIHostingController(rootView: fixture)
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+        try await Task.sleep(nanoseconds: 250_000_000)
+        let join = try XCTUnwrap(measured["join"])
+        XCTAssertGreaterThan(join.height, 56, "The native prominent style adds to the label's minimum height")
+        for state in ["idle", "active", "disabled"] {
+            let button = try XCTUnwrap(measured[state])
+            XCTAssertEqual(button.height, join.height, accuracy: 0.5)
+            XCTAssertEqual(button.width, join.width, accuracy: 0.5)
+        }
+        print("PTT native Join/PTT button dimensions: \(join.width) × \(join.height) pt; window \(window.bounds.width) pt")
+        let format = UIGraphicsImageRendererFormat()
+        format.preferredRange = .standard
+        let shot = UIGraphicsImageRenderer(bounds: window.bounds, format: format).image { _ in window.drawHierarchy(in: window.bounds, afterScreenUpdates: true) }
+        try shot.pngData()?.write(to: FileManager.default.temporaryDirectory.appendingPathComponent("ptt-native-style.png"))
+        let attachment = XCTAttachment(image: shot); attachment.name = "Native Join and PTT idle active disabled"; attachment.lifetime = .keepAlways; add(attachment)
+    }
+
     @MainActor func testDrawerNavigationKeepsOutgoingFilesAndSerializesRapidTargets() async throws {
         let client = Client.shared
         guard !client.connected, !client.busy else { throw XCTSkip("Requires an offline test profile") }
@@ -523,6 +996,9 @@ final class ClientTests: XCTestCase {
         #endif
         let client = Client.shared
         guard !client.connected, !client.busy else { throw XCTSkip("Requires an offline test profile") }
+        let originalMode = client.speech.mode
+        client.setSpeechMode(.automatic) // This pre-PTT fixture exercises the original drawer viewport.
+        defer { client.setSpeechMode(originalMode) }
         // No serverId: chat navigation exercises the UI without sending core commands.
         let original = client.state
         // Keep this synthetic connection fixture isolated from local cache notifications.
@@ -2218,6 +2694,14 @@ final class BridgeContractTests: XCTestCase {
             let decoded = try JSONDecoder().decode(Snapshot.self, from: JSONSerialization.data(withJSONObject: snapshot))
             XCTAssertEqual(decoded.status, ["disconnected", "connecting", "connected", "reconnecting", "disconnected"][index])
             XCTAssertEqual(snapshot["connectionId"] as? String, index == 0 ? nil : "fixture-connection")
+            let speech: SpeechState
+            if let value = envelope["speech"], !(value is NSNull) {
+                speech = try JSONDecoder().decode(SpeechState.self, from: JSONSerialization.data(withJSONObject: value))
+            } else { speech = SpeechState() }
+            XCTAssertEqual(speech.mode, index == 0 ? .automatic : .pushToTalk)
+            XCTAssertEqual(speech.token, index == 0 ? "" : "fixture-speech")
+            XCTAssertEqual(speech.available, index == 2)
+            XCTAssertFalse(speech.transmitting)
             if index > 0 {
                 let profile = try XCTUnwrap(envelope["profile"])
                 let decoded = try JSONDecoder().decode(ProfileState.self, from: JSONSerialization.data(withJSONObject: profile))
@@ -2407,5 +2891,130 @@ final class ProfileTests: XCTestCase {
                 try capture("editor-\(language)-\(category)")
             }
         }
+    }
+}
+
+@MainActor private final class PushToTalkInteractionFixtureModel: ObservableObject {
+    @Published var available = true
+    @Published var transmitting = false
+    @Published var token = UUID().uuidString
+    @Published var events: [String] = []
+    private var held: String?
+    private var touchStarted: TimeInterval?
+    private(set) var touchDelays: [Double] = []
+    private(set) var endedDuringInsideMovement = false
+    private var lastTouchPhase = ""
+    private let started = ProcessInfo.processInfo.systemUptime
+    private func record(_ event: String) {
+        events.append("\(Int((ProcessInfo.processInfo.systemUptime - started) * 1000)) ms \(event)")
+    }
+    func recordTouch(_ phase: String) {
+        lastTouchPhase = phase
+        if phase.hasPrefix("began") { touchStarted = ProcessInfo.processInfo.systemUptime }
+        record("touch:\(phase)")
+    }
+    func begin() -> String? {
+        guard available else { return nil }
+        if let touchStarted { touchDelays.append(ProcessInfo.processInfo.systemUptime - touchStarted) }
+        let captured = token
+        held = captured; record("begin:\(captured.prefix(5))")
+        Task {
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            guard held == captured, token == captured, available else { return }
+            transmitting = true; record("effective:\(captured.prefix(5))")
+        }
+        return captured
+    }
+    func end(_ ended: String) {
+        if lastTouchPhase == "moved-inside", held == ended, token == ended, available { endedDuringInsideMovement = true }
+        record("end:\(ended.prefix(5))")
+        guard held == ended else { return }
+        held = nil; transmitting = false; token = UUID().uuidString
+    }
+    func invalidate(disable: Bool = false) {
+        held = nil; transmitting = false; token = UUID().uuidString
+        available = !disable; record(disable ? "disabled" : "context-invalidated")
+    }
+    func schedule(disable: Bool) {
+        record(disable ? "disable-scheduled" : "invalidate-scheduled")
+        Task {
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            invalidate(disable: disable)
+            if disable {
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                available = true; token = UUID().uuidString; record("enabled-requires-new-touch")
+            }
+        }
+    }
+}
+
+@MainActor private func audioTestWindow() throws -> UIWindow {
+    let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+    let window = UIWindow(windowScene: scene)
+    let controller = UIViewController()
+    controller.view.backgroundColor = .systemBackground
+    let label = UILabel(frame: window.bounds.insetBy(dx: 20, dy: 20))
+    label.text = "正在自动验证音频，请稍候…"
+    label.textAlignment = .center
+    label.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+    controller.view.addSubview(label)
+    window.rootViewController = controller; window.makeKeyAndVisible()
+    return window
+}
+
+private final class PushToTalkTestResponder: UIResponder {
+    weak var destination: UIResponder?
+    override var next: UIResponder? { destination }
+}
+
+private final class PushToTalkTestHostingView: UIView {
+    var intermediary: UIResponder?
+    override var next: UIResponder? { intermediary ?? super.next }
+}
+
+private final class PushToTalkInteractionWindow: UIWindow {
+    var onTouch: ((String) -> Void)?
+    override func sendEvent(_ event: UIEvent) {
+        for touch in event.allTouches ?? [] {
+            switch touch.phase {
+            case .began:
+                let point = touch.location(in: self)
+                onTouch?("began@\(Int(point.x)),\(Int(point.y))")
+            case .ended: onTouch?("ended")
+            case .cancelled: onTouch?("cancelled")
+            case .moved:
+                var remaining: [UIView] = []
+                if let root = rootViewController?.view { remaining.append(root) }
+                while let view = remaining.popLast() {
+                    if let area = view as? PushToTalkTouchView {
+                        onTouch?(area.containsLocation(touch.location(in: area)) ? "moved-inside" : "moved-outside")
+                        break
+                    }
+                    remaining.append(contentsOf: view.subviews)
+                }
+            default: break
+            }
+        }
+        super.sendEvent(event)
+    }
+}
+
+private struct PushToTalkInteractionFixture: View {
+    @ObservedObject var model: PushToTalkInteractionFixtureModel
+    var body: some View {
+        VStack(spacing: 16) {
+            Text("Native PTT gesture fixture").font(.headline)
+            Text("No audio/network. Effective state is delayed 400 ms. Slide out and back; release; hold through invalidation/disable.").font(.footnote)
+            HStack {
+                Button("Invalidate in 2 s") { model.schedule(disable: false) }
+                Button("Disable in 2 s") { model.schedule(disable: true) }
+            }.buttonStyle(.bordered)
+            ScrollView { Text(model.events.suffix(12).joined(separator: "\n")).font(.system(size: 13, design: .monospaced)).frame(maxWidth: .infinity, alignment: .leading) }
+            PushToTalkButton(available: model.available, transmitting: model.transmitting, token: model.token, begin: model.begin, end: model.end)
+            Text("Slide outside into this area").frame(minHeight: 64)
+        }
+        .padding(20).foregroundStyle(.white).background(Palette.background)
+        .preferredColorScheme(.dark).tint(Palette.accent)
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in model.invalidate() }
     }
 }

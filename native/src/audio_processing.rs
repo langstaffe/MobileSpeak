@@ -13,6 +13,16 @@ struct Input {
     start: u64,
     samples: [i16; 960],
     epoch: u64,
+    pressed: bool,
+}
+impl Input {
+    fn process(&self, chain: &mut Chain) -> crate::audio_models::Result<Vec<Frame>> {
+        if self.pressed {
+            chain.process_pressed(self.start, &self.samples)
+        } else {
+            chain.process(self.start, &self.samples)
+        }
+    }
 }
 enum Work {
     Audio(Input),
@@ -113,7 +123,7 @@ impl Processor {
                                             );
                                         } else {
                                             for i in pending {
-                                                match p.chain.process(i.start, &i.samples) {
+                                                match i.process(&mut p.chain) {
                                                     Ok(frames) => p.frames.extend(frames),
                                                     Err(error) => {
                                                         preparation_error = Some(error);
@@ -221,12 +231,14 @@ impl Processor {
                         cursor = Some(input.start + 960);
                         {
                             let mut s = state.lock().unwrap();
+                            // Invalidation may race the earlier epoch read; never warm a new mode with old PCM.
+                            if input.epoch != s.epoch { continue; }
                             if s.recent.len() == 16 {
                                 s.recent.pop_front();
                             }
                             s.recent.push_back(input.clone());
                         }
-                        let result = chain.process(input.start, &input.samples);
+                        let result = input.process(&mut chain);
                         match result {
                             Ok(frames) => {
                                 for frame in frames {
@@ -321,7 +333,7 @@ impl Processor {
                     let mut frames = VecDeque::new();
                     // Warm at most 40ms, then catch up bounded snapshots. No warmup is sent twice.
                     for input in recent {
-                        frames.extend(chain.process(input.start, &input.samples)?);
+                        frames.extend(input.process(&mut chain)?);
                         cursor = input.start + 960;
                         while frames.len() > 5 {
                             frames.pop_front();
@@ -349,7 +361,7 @@ impl Processor {
                             return Err("Model preparation could not keep up with capture".into());
                         }
                         for input in pending {
-                            frames.extend(chain.process(input.start, &input.samples)?);
+                            frames.extend(input.process(&mut chain)?);
                             cursor = input.start + 960;
                             while frames.len() > 5 {
                                 frames.pop_front();
@@ -406,6 +418,12 @@ impl Processor {
         let _ = self.tx.try_send(Work::Wake);
     }
     pub fn capture(&mut self, samples: &[i16]) {
+        self.capture_input(samples, false);
+    }
+    pub fn capture_pressed(&mut self, samples: &[i16]) {
+        self.capture_input(samples, true);
+    }
+    fn capture_input(&mut self, samples: &[i16], pressed: bool) {
         let Ok(samples) = samples.try_into() else {
             return;
         };
@@ -413,6 +431,7 @@ impl Processor {
             start: self.cursor,
             samples,
             epoch: self.epoch(),
+            pressed,
         };
         self.cursor += 960;
         let _ = self.tx.try_send(Work::Audio(input));
@@ -433,6 +452,110 @@ impl Drop for Processor {
 mod tests {
     use super::*;
     use crate::NoiseSuppressionMode as Noise;
+    #[tokio::test]
+    async fn pressed_silence_mode_switches_and_concurrent_loader_preserve_epoch_and_path() {
+        let mut p = Processor::new();
+        let storage = std::env::temp_dir().join(format!("mobilespeak-pressed-switch-test-{}", std::process::id()));
+        p.configure(storage.clone());
+        p.capture_pressed(&[0; 960]);
+        let Event::Audio { epoch, frame, .. } = tokio::time::timeout(Duration::from_secs(5), p.events.recv()).await.unwrap().unwrap() else {
+            panic!("first pressed silence did not produce audio");
+        };
+        assert_eq!(epoch, p.epoch());
+        assert_eq!(frame.start, 0);
+        assert_eq!(frame.attack_samples, 0);
+
+        // A live handoff must warm/catch up using PTT too, never the VAD path.
+        let wanted = p.request(Selection { noise: Noise::None });
+        let mut applied = false;
+        let mut new_audio = false;
+        let began = Instant::now();
+        while !applied || !new_audio {
+            assert!(began.elapsed() < Duration::from_secs(5));
+            p.capture_pressed(&[1234; 960]);
+            let wait = tokio::time::sleep(Duration::from_millis(20));
+            tokio::pin!(wait);
+            loop {
+                tokio::select! {
+                    _ = &mut wait => break,
+                    event = p.events.recv() => match event.unwrap() {
+                        Event::Applied { generation, .. } => { assert_eq!(generation, wanted); applied = true; },
+                        Event::Audio { generation, epoch, frame } => {
+                            assert_eq!(epoch, p.epoch());
+                            assert_eq!(frame.attack_samples, 0);
+                            assert_eq!(frame.probability, 0.0);
+                            if generation == wanted { assert_eq!(frame.samples, [1234; 960]); new_audio = true; }
+                        },
+                        Event::Gap { .. } => panic!("PTT handoff dropped audio"),
+                        Event::Failed { error, .. } => panic!("PTT handoff failed: {error}"),
+                    }
+                }
+            }
+        }
+
+        // Return to automatic: its original VAD metadata and output delay remain.
+        p.invalidate();
+        let automatic_epoch = p.epoch();
+        let automatic_start = p.cursor;
+        p.capture(&[2000; 960]);
+        p.capture(&[3000; 960]);
+        loop {
+            match tokio::time::timeout(Duration::from_secs(5), p.events.recv()).await.unwrap().unwrap() {
+                Event::Audio { epoch, frame, .. } if epoch == automatic_epoch => {
+                    assert_eq!(frame.start, automatic_start);
+                    assert_eq!(frame.samples, [2000; 960]);
+                    assert_eq!(frame.attack_samples, 768);
+                    break;
+                },
+                Event::Failed { error, .. } => panic!("automatic path failed: {error}"),
+                _ => {},
+            }
+        }
+
+        // Change mode while a real model loader can still own automatic history.
+        let wanted = p.request(Selection { noise: Noise::Dpdfnet2 });
+        p.invalidate();
+        let pressed_epoch = p.epoch();
+        let pressed_start = p.cursor;
+        let mut applied = false;
+        let mut new_audio = false;
+        let mut last = None;
+        let began = Instant::now();
+        while !applied || !new_audio {
+            assert!(began.elapsed() < Duration::from_secs(5));
+            p.capture_pressed(&[0; 960]);
+            let wait = tokio::time::sleep(Duration::from_millis(20));
+            tokio::pin!(wait);
+            loop {
+                tokio::select! {
+                    _ = &mut wait => break,
+                    event = p.events.recv() => match event.unwrap() {
+                        Event::Applied { generation, .. } => { assert_eq!(generation, wanted); applied = true; },
+                        Event::Audio { generation, epoch, frame } if epoch == pressed_epoch => {
+                            assert!(frame.start >= pressed_start, "loader replayed an older mode's audio");
+                            if let Some(last) = last { assert!(frame.start >= last, "loader duplicated audio"); }
+                            last = Some(frame.start + 960);
+                            assert_eq!(frame.attack_samples, 0);
+                            assert_eq!(frame.probability, 0.0);
+                            assert_eq!(frame.samples, [0; 960]);
+                            new_audio |= generation == wanted;
+                        },
+                        Event::Audio { .. } => {}, // a queued old-epoch result is rejected by the core
+                        Event::Gap { .. } => panic!("mode/loader handoff dropped audio"),
+                        Event::Failed { error, .. } => panic!("mode/loader handoff failed: {error}"),
+                    }
+                }
+            }
+        }
+        p.invalidate(); // release must not flush buffered old audio into this new epoch
+        let released_epoch = p.epoch();
+        while let Ok(Some(event)) = tokio::time::timeout(Duration::from_millis(30), p.events.recv()).await {
+            if let Event::Audio { epoch, .. } = event { assert_ne!(epoch, released_epoch); }
+        }
+        drop(p);
+        let _ = std::fs::remove_dir_all(storage);
+    }
+
     #[tokio::test]
     async fn live_switches_latest_selection_failure_and_epoch_cancellation() {
         let mut p = Processor::new();

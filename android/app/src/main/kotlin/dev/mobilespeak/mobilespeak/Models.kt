@@ -183,6 +183,20 @@ data class ProfileState(
 
 internal fun JSONObject.profile() = ProfileState(getString("nickname"), getLong("requestId"), stringOrNull("error"), stringOrNull("detail"))
 
+data class SpeechState(
+    val mode: String = "automatic",
+    val token: String = "",
+    val available: Boolean = false,
+    val transmitting: Boolean = false,
+)
+
+internal fun JSONObject.speech() = SpeechState(
+    mode = optString("mode", "automatic").takeIf { it == "push_to_talk" } ?: "automatic",
+    token = optString("token", ""),
+    available = optBoolean("available", false),
+    transmitting = optBoolean("transmitting", false),
+)
+
 data class SessionUiState(
     val snapshot: Snapshot = Snapshot(),
     val channelFiles: ChannelFilesState = ChannelFilesState(),
@@ -202,6 +216,8 @@ data class SessionUiState(
     val microphoneMuted: Boolean = true,
     val deafened: Boolean = false,
     val receiveAgc: Boolean = true,
+    val speech: SpeechState = SpeechState(),
+    val microphonePermission: Boolean = false,
     val userVolumesOpen: Boolean = false,
     val noiseSuppression: String = "rnnoise",
     val appliedNoise: String = "rnnoise",

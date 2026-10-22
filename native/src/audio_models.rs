@@ -318,8 +318,7 @@ impl Chain {
         self.clean_position = 0;
         self.vad_position = 0;
     }
-    pub fn process(&mut self, start: u64, samples: &[i16; 960]) -> Result<Vec<Frame>> {
-        self.origin.get_or_insert(start);
+    fn denoise(&mut self, samples: &[i16; 960]) -> Result<Vec<f32>> {
         let clean = match &mut self.denoiser {
             Denoiser::None => samples.iter().map(|v| *v as f32 / 32768.0).collect(),
             Denoiser::Rnnoise(s) => denoise_packet(samples, s)
@@ -338,6 +337,37 @@ impl Chain {
         if clean.iter().any(|v| !v.is_finite()) {
             return Err("Non-finite denoiser output".into());
         }
+        Ok(clean)
+    }
+    fn take_samples(&mut self) -> [i16; 960] {
+        let mut samples = [0; 960];
+        for (i, v) in self.clean.drain(..960).enumerate() {
+            samples[i] = (v * 32768.0).round().clamp(-32768.0, 32767.0) as i16;
+        }
+        samples
+    }
+    pub fn process_pressed(&mut self, start: u64, samples: &[i16; 960]) -> Result<Vec<Frame>> {
+        self.origin.get_or_insert(start);
+        let clean = self.denoise(samples)?;
+        self.clean.extend(clean);
+        let mut frames = Vec::new();
+        // PTT needs denoising, but must never wait for a VAD score window.
+        while self.clean.len() >= 960 {
+            frames.push(Frame {
+                start: self.origin.unwrap() + self.clean_position,
+                samples: self.take_samples(),
+                onset_samples: 0,
+                sustain: false,
+                attack_samples: 0,
+                probability: 0.0,
+            });
+            self.clean_position += 960;
+        }
+        Ok(frames)
+    }
+    pub fn process(&mut self, start: u64, samples: &[i16; 960]) -> Result<Vec<Frame>> {
+        self.origin.get_or_insert(start);
+        let clean = self.denoise(samples)?;
         self.clean.extend(&clean);
         self.resample_input.extend(clean);
         while self.resample_input.len() >= 480 {
@@ -384,13 +414,9 @@ impl Chain {
                 }
                 sustain |= s.probability >= calibration.sustain;
             }
-            let mut samples = [0; 960];
-            for (i, v) in self.clean.drain(..960).enumerate() {
-                samples[i] = (v * 32768.0).round().clamp(-32768.0, 32767.0) as i16;
-            }
             frames.push(Frame {
                 start: self.origin.unwrap() + self.clean_position,
-                samples,
+                samples: self.take_samples(),
                 onset_samples: onset,
                 sustain,
                 attack_samples: calibration.attack_samples,
@@ -415,6 +441,62 @@ impl Chain {
 mod tests {
     use super::*;
     use std::time::Instant;
+    #[test]
+    fn pressed_frames_bypass_score_windows_and_preserve_all_three_denoisers() {
+        let speech: Vec<i16> = include_bytes!("../tests/fixtures/speech.pcm")
+            .chunks_exact(2).map(|s| i16::from_le_bytes([s[0], s[1]])).collect();
+        let storage = std::env::temp_dir().join(format!("mobilespeak-pressed-model-test-{}", std::process::id()));
+        for noise in [NoiseSuppressionMode::None, NoiseSuppressionMode::Rnnoise, NoiseSuppressionMode::Dpdfnet2] {
+            let mut pressed = Chain::new(Selection { noise }, &storage).unwrap();
+            let mut automatic = Chain::new(Selection { noise }, &storage).unwrap();
+            let mut sent = Vec::new();
+            let mut detected = Vec::new();
+            let mut first = None;
+            for index in 0..100u64 {
+                let input = if !(25..75).contains(&index) { [0; 960] } else {
+                    std::array::from_fn(|j| speech[((index - 25) as usize * 960 + j) % speech.len()])
+                };
+                let frames = pressed.process_pressed(index * 960, &input).unwrap();
+                if index == 0 && noise != NoiseSuppressionMode::Dpdfnet2 {
+                    assert_eq!(frames.len(), 1, "{noise:?} waited for a second input frame");
+                }
+                if !frames.is_empty() { first.get_or_insert(index); }
+                for frame in frames {
+                    assert_eq!(frame.start, sent.len() as u64 * 960);
+                    assert_eq!(frame.probability, 0.0);
+                    assert_eq!(frame.onset_samples, 0);
+                    assert!(!frame.sustain);
+                    sent.push(frame);
+                }
+                detected.extend(automatic.process(index * 960, &input).unwrap());
+                if index == 24 { assert!(sent.len() > 20, "{noise:?} waited for speech"); }
+            }
+            assert!(sent.len() >= detected.len());
+            for (sent, detected) in sent.iter().zip(&detected) {
+                assert_eq!(sent.start, detected.start);
+                assert!(sent.samples.iter().zip(detected.samples).all(|(a, b)| (i32::from(*a) - i32::from(b)).abs() <= 1), "{noise:?} changed denoising output");
+            }
+            eprintln!("PTT {noise:?}: first frame after {} input packets, output={}/100; automatic={}/100", first.unwrap() + 1, sent.len(), detected.len());
+        }
+        let _ = std::fs::remove_dir_all(storage);
+    }
+
+    #[test]
+    fn mode_reset_drops_pending_audio_in_both_directions() {
+        let mut chain = Chain::new(Selection { noise: NoiseSuppressionMode::None }, Path::new("/unused")).unwrap();
+        assert!(chain.process(0, &[4000; 960]).unwrap().is_empty());
+        chain.reset();
+        let frames = chain.process_pressed(960, &[1000; 960]).unwrap();
+        assert_eq!(frames.len(), 1);
+        assert_eq!(frames[0].start, 960);
+        assert_eq!(frames[0].samples, [1000; 960]);
+        chain.reset();
+        assert!(chain.process(1920, &[2000; 960]).unwrap().is_empty());
+        let frames = chain.process(2880, &[3000; 960]).unwrap();
+        assert_eq!(frames.len(), 1);
+        assert_eq!(frames[0].start, 1920);
+        assert_eq!(frames[0].samples, [2000; 960]);
+    }
     #[test]
     fn retired_cache_cleanup_preserves_current_model_and_core_data() {
         let storage =

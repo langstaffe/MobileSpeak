@@ -281,4 +281,13 @@
     <string name="error_profile_read_failed">无法读取个人资料，已保留原有数据。</string>
     <string name="error_profile_rename_failed">服务器未能修改你的昵称。</string>
     <string name="error_server_invalid">请输入有效的服务器地址和端口。</string>
+    <string name="settings_speech_mode">发言方式</string>
+    <string name="settings_speech_automatic">自动发言</string>
+    <string name="settings_speech_push_to_talk">按键说话</string>
+    <string name="voice_hold_to_talk">按住说话</string>
+    <string name="voice_transmitting">正在发言</string>
+    <string name="voice_target_channel">语音发言频道：%1$s</string>
+    <string name="voice_target_unavailable">语音发言频道：未连接</string>
+    <string name="voice_grant_microphone">授权麦克风</string>
+    <string name="voice_hold_help">按住时发言，松开或滑出按钮后停止。</string>
 </resources>

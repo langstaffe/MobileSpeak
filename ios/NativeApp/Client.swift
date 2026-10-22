@@ -2,6 +2,7 @@ import Foundation
 import Combine
 import Security
 import UIKit
+import AVFoundation
 import OSLog
 #if DEBUG
 import Network
@@ -180,6 +181,18 @@ enum NoiseSuppressionMode: String, CaseIterable {
     var title: String { switch self { case .dpdfnet2: return "DPDFNet2"; case .rnnoise: return "RNNoise"; case .none: return L10n.string("settings_noise_none") } }
 }
 
+enum SpeechMode: String, CaseIterable, Decodable {
+    case automatic, pushToTalk = "push_to_talk"
+    var title: String { L10n.string(self == .automatic ? "settings_speech_automatic" : "settings_speech_push_to_talk") }
+}
+
+struct SpeechState: Decodable, Equatable {
+    var mode = SpeechMode.automatic
+    var token = ""
+    var available = false
+    var transmitting = false
+}
+
 struct ProfileState: Decodable, Equatable {
     var nickname = "MobileSpeakUser"
     var requestId: UInt64 = 0
@@ -266,6 +279,9 @@ private func coreChanged(_ context: Int) {
     @Published private(set) var appliedNoise = NoiseSuppressionMode.rnnoise
     @Published private(set) var audioProcessingStatus = "switching"
     @Published private(set) var audioProcessingError: String?
+    @Published private(set) var speech = SpeechState()
+    @Published private(set) var microphonePermission = AVAudioSession.sharedInstance().recordPermission
+    private var pushToTalkToken: String?
     private var audioRequest = 1
     @Published var audioBusy = false
     @Published var messages: [ChatMessage] = []
@@ -604,6 +620,11 @@ private func coreChanged(_ context: Int) {
                 fileCache = try JSONDecoder().decode(FileCacheState.self, from: JSONSerialization.data(withJSONObject: cache))
             }
             if let receive = envelope["receiveAudio"] as? [String: Any], let agc = receive["agc"] as? Bool { receiveAgc = agc }
+            if let value = envelope["speech"], !(value is NSNull) {
+                let updated = try JSONDecoder().decode(SpeechState.self, from: JSONSerialization.data(withJSONObject: value))
+                if let pushToTalkToken, pushToTalkToken != updated.token { self.pushToTalkToken = nil; audio.resetCaptureBuffer() }
+                if speech != updated { speech = updated }
+            }
             let next = try JSONDecoder().decode(Snapshot.self, from: JSONSerialization.data(withJSONObject: envelope["snapshot"]!))
             guard next.connectionId == connectionId, acceptingConnection || next.status == "disconnected" else { return }
             if let chats = envelope["chats"], !(chats is NSNull) {
@@ -625,6 +646,7 @@ private func coreChanged(_ context: Int) {
                 networkLogger.info("NetworkDiag phase=ui wall_ms=\(wallMs) status=\(next.status, privacy: .public) rtt_ms=\(next.networkQuality?.latencyText ?? "—", privacy: .public) deviation_ms=\(next.networkQuality?.deviationText ?? "—", privacy: .public)")
             }
             #endif
+            if next.status != state.status || next.clients.first(where: { $0.id == next.ownClient })?.channel != currentChannel { endPushToTalk() }
             if next != state { state = next }
             if connected && !wasConnected, let started = connectionStarted {
                 connectionLogger.info("Connection startup phase=connected_snapshot total_ms=\(Int((ProcessInfo.processInfo.systemUptime - started) * 1000))")
@@ -692,6 +714,7 @@ private func coreChanged(_ context: Int) {
         } catch { self.error = error.localizedDescription; return false }
     }
     func disconnect() {
+        endPushToTalk()
         do { try send(["type": "disconnect"]) } catch { self.error = error.localizedDescription; return }
         connectionStarted = nil
         activeBookmark = nil
@@ -722,6 +745,7 @@ private func coreChanged(_ context: Int) {
         catch { fileCachePending = false; fileCacheClearing = false; fileCacheClearRequest = nil; fileCacheMessage = L10n.withDetail("files_cache_clear_failed", error.localizedDescription) }
     }
     func join(_ channel: Channel, password: String = "") {
+        endPushToTalk()
         do { try send(["type": "join", "channel": channel.id, "password": password]) }
         catch { self.error = error.localizedDescription }
     }
@@ -734,6 +758,7 @@ private func coreChanged(_ context: Int) {
         catch { self.error = error.localizedDescription }
     }
     func setAppActive(_ active: Bool) {
+        if !active { endPushToTalk() }
         do { try send(["type": "set_app_active", "active": active]) }
         catch { self.error = error.localizedDescription }
     }
@@ -748,6 +773,7 @@ private func coreChanged(_ context: Int) {
         catch { self.error = L10n.withDetail("error_generic", error.localizedDescription) }
     }
     func setNoiseSuppression(_ mode: NoiseSuppressionMode) {
+        endPushToTalk()
         audioRequest += 1
         do {
             try send(["type": "set_noise_suppression", "mode": mode.rawValue, "request_id": audioRequest])
@@ -772,6 +798,7 @@ private func coreChanged(_ context: Int) {
     func setAudio(input: Bool? = nil, output: Bool? = nil) async {
         guard !audioBusy else { return }
         let next = Self.resolveAudioState(microphoneMuted: microphoneMuted, deafened: deafened, input: input, output: output)
+        if next.inputMuted { endPushToTalk(); try? send(["type": "set_capture_ready", "ready": false]) }
         guard connected else {
             microphoneMuted = next.microphoneMuted; deafened = next.deafened
             return
@@ -790,8 +817,9 @@ private func coreChanged(_ context: Int) {
             try await audio.ensureRunning()
             guard connected && currentIntent == intent && !audioInterrupted else { return }
             if next.inputMuted { audio.stopCapture() }
-            else {
-                let allowed = await audio.permission()
+            else if speech.mode == .automatic || microphonePermission == .granted {
+                let allowed = speech.mode == .automatic ? await audio.permission() : microphonePermission == .granted
+                microphonePermission = AVAudioSession.sharedInstance().recordPermission
                 guard connected && currentIntent == intent else { return }
                 if audioInterrupted {
                     do {
@@ -812,7 +840,7 @@ private func coreChanged(_ context: Int) {
                   !(error is CancellationError) else { return }
             let failure = error
             do {
-                if muted { audio.stopCapture() } else { try await audio.startCapture() }
+                if muted || speech.mode == .pushToTalk { audio.stopCapture() } else { try await audio.startCapture() }
             } catch {
                 guard connected && currentIntent == intent && !audioInterrupted,
                       !(error is CancellationError) else { return }
@@ -828,7 +856,50 @@ private func coreChanged(_ context: Int) {
         let deafened = output ?? deafened
         return (microphoneMuted, deafened, microphoneMuted || deafened)
     }
+    func setSpeechMode(_ mode: SpeechMode) {
+        guard mode != speech.mode else { return }
+        endPushToTalk()
+        do {
+            try send(["type": "set_speech_mode", "mode": mode.rawValue])
+            speech.mode = mode; speech.available = false; speech.transmitting = false
+            // A mode change gates transmission in Rust; an in-flight manual audio intent still owns its work.
+            if connected { Task { await setAudio() } }
+        } catch { self.error = error.localizedDescription }
+    }
+    @discardableResult func beginPushToTalk() -> String? {
+        guard speech.mode == .pushToTalk, speech.available, !muted, !audioBusy, !audioInterrupted,
+              audioProcessingStatus != "switching", microphonePermission == .granted, connected else { return nil }
+        let token = speech.token
+        do {
+            audio.resetCaptureBuffer()
+            try send(["type": "push_to_talk", "pressed": true, "token": token])
+            pushToTalkToken = token
+            return token
+        } catch { self.error = error.localizedDescription; return nil }
+    }
+    func endPushToTalk(token: String? = nil) {
+        guard let held = pushToTalkToken, token == nil || token == held else { return }
+        pushToTalkToken = nil
+        audio.resetCaptureBuffer()
+        try? send(["type": "push_to_talk", "pressed": false, "token": held])
+        speech.transmitting = false
+    }
+    var needsMicrophonePermission: Bool { microphonePermission != .granted }
+    func requestPushToTalkPermission() async {
+        guard connected, !muted, !audioBusy, speech.mode == .pushToTalk else { return }
+        endPushToTalk()
+        if microphonePermission == .denied {
+            if let url = URL(string: UIApplication.openSettingsURLString) { await UIApplication.shared.open(url) }
+            return
+        }
+        let currentIntent = intent
+        _ = await audio.permission()
+        microphonePermission = AVAudioSession.sharedInstance().recordPermission
+        guard currentIntent == intent, connected, speech.mode == .pushToTalk else { return }
+        if microphonePermission == .granted { await setAudio() }
+    }
     func audioInterruptionBegan() {
+        endPushToTalk()
         guard connected || reconnecting else { return }
         audioInterrupted = true
         audio.pauseForInterruption()
@@ -841,6 +912,7 @@ private func coreChanged(_ context: Int) {
         recoverAudio()
     }
     func audioDidBecomeActive() {
+        microphonePermission = AVAudioSession.sharedInstance().recordPermission
         guard connected || reconnecting else { return }
         audioInterrupted = false
         if connected { recoverAudio() }
@@ -855,6 +927,7 @@ private func coreChanged(_ context: Int) {
     }
     private func recoverAudio() {
         guard connected && !audioInterrupted else { return }
+        endPushToTalk()
         let currentIntent = intent
         audio.stopCapture()
         Task {
@@ -863,8 +936,9 @@ private func coreChanged(_ context: Int) {
                 try await audio.ensureRunning()
                 guard connected && currentIntent == intent && !audioInterrupted else { return }
                 audio.setListening(!deafened)
-                if !muted {
-                    let allowed = await audio.permission()
+                if !muted && (speech.mode == .automatic || microphonePermission == .granted) {
+                    let allowed = speech.mode == .automatic ? await audio.permission() : microphonePermission == .granted
+                    microphonePermission = AVAudioSession.sharedInstance().recordPermission
                     guard connected && currentIntent == intent && !audioInterrupted else { return }
                     guard allowed else { throw NSError(domain: "MobileSpeak", code: 1, userInfo: [NSLocalizedDescriptionKey: L10n.string("error_microphone_permission")]) }
                     if !muted { try await audio.startCapture() }

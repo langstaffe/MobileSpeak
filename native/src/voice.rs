@@ -44,6 +44,24 @@ impl VoiceSender {
         self.codec.is_some()
     }
 
+    pub fn process_pressed(
+        &mut self,
+        frame: Frame,
+        codec: CodecType,
+        mut send: impl FnMut(CodecType, &[u8]) -> Result<()>,
+    ) -> Result<()> {
+        // PTT sends only frames captured during this press, with no VAD or pre-roll.
+        self.pending.clear();
+        self.last_voice = None;
+        self.last_voice_sample = None;
+        if !self.speaking() { self.encoder.reset_state()?; }
+        let mut encoded = [0u8; 1275];
+        let len = self.encoder.encode(&frame.samples, &mut encoded)?;
+        send(codec, &encoded[..len])?;
+        self.codec = Some(codec);
+        Ok(())
+    }
+
     pub fn process(
         &mut self,
         detected: Frame,
@@ -189,6 +207,44 @@ mod tests {
             attack_samples: 768,
             probability: 0.9,
         }
+    }
+    fn silence(start: u64) -> Frame {
+        Frame { samples: [0; 960], probability: 0.0, ..frame(start, 0, false) }
+    }
+    #[test]
+    fn push_to_talk_bypasses_vad_and_hold_and_never_replays_old_audio() {
+        let mut sender = VoiceSender::new().unwrap();
+        let mut old = frame(0, 0, false);
+        old.samples = [7000; 960];
+        sender.process(old, CodecType::OpusVoice, Instant::now(), |_, _| panic!("automatic silence sent")).unwrap();
+        sender.interrupt(|_, _| panic!("inactive stream ended")).unwrap();
+        let mut packets = Vec::new();
+        for i in 0..30 {
+            sender.process_pressed(silence(i * 960), CodecType::OpusVoice, |_, packet| {
+                packets.push(packet.to_vec()); Ok(())
+            }).unwrap();
+            assert!(sender.speaking());
+            assert_eq!(sender.deadline(), None);
+        }
+        assert_eq!(packets.len(), 30); // first low-probability frame is sent, no old pre-roll
+        let mut fresh = VoiceSender::new().unwrap();
+        fresh.process_pressed(silence(0), CodecType::OpusVoice, |_, packet| {
+            assert_eq!(packet, packets[0]); Ok(())
+        }).unwrap();
+        sender.interrupt(|_, packet| { assert!(packet.is_empty()); Ok(()) }).unwrap();
+        assert!(!sender.speaking());
+        sender.interrupt(|_, _| panic!("release repeated end marker")).unwrap();
+        sender.process_pressed(silence(0), CodecType::OpusVoice, |_, packet| {
+            assert_eq!(packet, packets[0]); Ok(())
+        }).unwrap(); // new press resets Opus history too
+    }
+
+    #[test]
+    fn push_to_talk_failed_first_packet_does_not_claim_transmission() {
+        let mut sender = VoiceSender::new().unwrap();
+        assert!(sender.process_pressed(silence(0), CodecType::OpusVoice, |_, _| Err("transport unavailable".into())).is_err());
+        assert!(!sender.speaking());
+        sender.interrupt(|_, _| panic!("failed packet opened stream")).unwrap();
     }
     #[test]
     fn resettable_deadline_silence_stop_and_stale_timer() {

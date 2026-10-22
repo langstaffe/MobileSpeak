@@ -766,8 +766,9 @@ private final class DrawerPanRecognizer: UIPanGestureRecognizer {
     }
 }
 
-private final class VoiceDrawerController: UIViewController, UIGestureRecognizerDelegate {
+final class VoiceDrawerController: UIViewController, UIGestureRecognizerDelegate {
     private let host = UIHostingController(rootView: AnyView(EmptyView()))
+    private let pane = UIView()
     private var animator: UIViewPropertyAnimator?
     private var springOrigin = CGRect.zero
     private var connected = false
@@ -795,13 +796,16 @@ private final class VoiceDrawerController: UIViewController, UIGestureRecognizer
     override func viewDidLoad() {
         super.viewDidLoad()
         view.clipsToBounds = true
-        addChild(host); view.addSubview(host.view); host.didMove(toParent: self)
+        view.addSubview(pane)
+        pane.backgroundColor = UIColor(Palette.bottom)
+        pane.accessibilityIdentifier = "voice-drawer"
+        pane.clipsToBounds = true
+        addChild(host); pane.addSubview(host.view); host.didMove(toParent: self)
         host.view.autoresizingMask = []
         host.view.backgroundColor = UIColor(Palette.bottom)
-        host.view.accessibilityIdentifier = "voice-drawer"
         host.view.clipsToBounds = true
         let hitView = view as! DrawerHitView
-        hitView.pane = host.view
+        hitView.pane = pane
         hitView.currentFrame = { [weak self] in self?.presentationFrame ?? .zero }
         hitView.onPress = { [weak self] in
             guard let self, self.connected, !self.automaticallyClosing,
@@ -867,7 +871,7 @@ private final class VoiceDrawerController: UIViewController, UIGestureRecognizer
         releaseClickBlock()
     }
     private var presentationFrame: CGRect {
-        animator == nil ? host.view.frame : (host.view.layer.presentation()?.frame ?? springOrigin)
+        animator == nil ? pane.frame : (pane.layer.presentation()?.frame ?? springOrigin)
     }
     private var offset: CGFloat {
         let frame = presentationFrame
@@ -885,7 +889,9 @@ private final class VoiceDrawerController: UIViewController, UIGestureRecognizer
     private func render(_ offset: CGFloat) {
         let collapsed = min(64, view.bounds.height)
         let height = min(view.bounds.height, collapsed + max(0, offset))
-        host.view.frame = CGRect(x: 0, y: view.bounds.height - height - min(0, offset), width: view.bounds.width, height: height)
+        // Keep SwiftUI's content laid out at its expanded size; only reveal it as the pane rises.
+        host.view.frame = CGRect(x: 0, y: 0, width: view.bounds.width, height: min(view.bounds.height, collapsed + travel))
+        pane.frame = CGRect(x: 0, y: view.bounds.height - height - min(0, offset), width: view.bounds.width, height: height)
     }
     private func stopSpring() {
         guard let animator else { return }
@@ -914,7 +920,7 @@ private final class VoiceDrawerController: UIViewController, UIGestureRecognizer
             self.automaticallyClosing = false
             self.render(self.connected && self.expanded ? self.travel : 0)
         }
-        springOrigin = host.view.frame
+        springOrigin = pane.frame
         animator = animation
         animation.startAnimation()
     }
@@ -961,6 +967,200 @@ private final class VoiceDrawerController: UIViewController, UIGestureRecognizer
 }
 
 enum DrawerToolPage { case home, volumes, files }
+
+// Once a touch leaves or its context changes, only a new touch may acquire a token.
+struct PushToTalkPress {
+    private(set) var tracking = false
+    private(set) var token: String?
+    mutating func begin(token: String?) {
+        guard !tracking else { return }
+        tracking = true; self.token = token
+    }
+    mutating func cancel() -> String? {
+        defer { token = nil }
+        return token
+    }
+    mutating func release() -> String? {
+        tracking = false
+        return cancel()
+    }
+}
+
+struct PushToTalkButton: View {
+    let available: Bool
+    let transmitting: Bool
+    let token: String
+    let begin: () -> String?
+    let end: (String) -> Void
+    var body: some View {
+        Button {} label: {
+            HStack(spacing: 10) {
+                AppIcon(name: "mic-on", scaledSize: 20).accessibilityHidden(true)
+                Text(L10n.string(transmitting ? "voice_push_to_talk_active" : "voice_push_to_talk_hold"))
+            }
+            .font(.headline).foregroundStyle(.white)
+            .frame(maxWidth: .infinity, minHeight: 56)
+        }
+        // Match Join Channel's complete native style, including its added label insets.
+        .buttonStyle(.borderedProminent)
+        .buttonBorderShape(.roundedRectangle(radius: 14))
+        .tint(available ? (transmitting ? Palette.green : Palette.accent) : Palette.muted)
+        .frame(maxWidth: .infinity)
+        .disabled(!available)
+        .background(PushToTalkTouchObserver(available: available, token: token, begin: begin, end: end))
+        .accessibilityIdentifier("push-to-talk")
+        .accessibilityHint(L10n.string("voice_push_to_talk_hint"))
+    }
+}
+
+private struct PushToTalkTouchObserver: UIViewRepresentable {
+    let available: Bool
+    let token: String
+    let begin: () -> String?
+    let end: (String) -> Void
+    func makeUIView(context: Context) -> PushToTalkTouchView { PushToTalkTouchView() }
+    func updateUIView(_ view: PushToTalkTouchView, context: Context) {
+        view.configure(available: available, token: token, begin: begin, end: end)
+    }
+    static func dismantleUIView(_ view: PushToTalkTouchView, coordinator: ()) { view.detach() }
+}
+
+// Observe the native button's touches without taking its hit test or changing its press feedback.
+final class PushToTalkTouchView: UIView {
+    fileprivate var available = false
+    private var token = ""
+    fileprivate var begin: () -> String? = { nil }
+    fileprivate var end: (String) -> Void = { _ in }
+    private weak var observedWindow: UIWindow?
+    private(set) lazy var observer = PushToTalkTouchRecognizer(anchor: self)
+    init() {
+        super.init(frame: .zero)
+        isUserInteractionEnabled = false
+        accessibilityElementsHidden = true
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    func configure(available: Bool, token: String, begin: @escaping () -> String?, end: @escaping (String) -> Void) {
+        if token != self.token || !available { observer.cancelPress(deferCallback: true) }
+        self.available = available; self.token = token; self.begin = begin; self.end = end
+    }
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        guard window !== observedWindow else { return }
+        detach()
+        if let window { observedWindow = window; window.addGestureRecognizer(observer) }
+    }
+    func detach() {
+        observer.releasePress()
+        observedWindow?.removeGestureRecognizer(observer)
+        observedWindow = nil
+    }
+    fileprivate func accepts(_ touch: UITouch) -> Bool {
+        guard let touched = touch.view else { return false }
+        return acceptsHit(touched, location: touch.location(in: self))
+    }
+    func containsLocation(_ location: CGPoint) -> Bool {
+        guard let window, bounds.contains(location) else { return false }
+        var ancestor: UIView? = self
+        while let view = ancestor, view !== window {
+            guard !view.isHidden, view.alpha > 0.01,
+                  !view.clipsToBounds || view.bounds.contains(convert(location, to: view)) else { return false }
+            ancestor = view.superview
+        }
+        return true
+    }
+    func acceptsHit(_ touched: UIView, location: CGPoint) -> Bool {
+        guard let window, touched.window === window, containsLocation(location) else { return false }
+        // SwiftUI can insert a non-view responder between its hosting view and controller.
+        var responder: UIResponder? = self
+        while let current = responder {
+            if let controller = current as? UIViewController {
+                // Presented sheets and other hosting controllers must never activate the button underneath.
+                return touched === controller.view || touched.isDescendant(of: controller.view)
+            }
+            responder = current.next
+        }
+        return false
+    }
+}
+
+final class PushToTalkTouchRecognizer: UIGestureRecognizer, UIGestureRecognizerDelegate {
+    private weak var anchor: PushToTalkTouchView?
+    private weak var trackedTouch: UITouch?
+    private(set) var press = PushToTalkPress()
+    init(anchor: PushToTalkTouchView) {
+        self.anchor = anchor
+        super.init(target: nil, action: nil)
+        name = "Push to talk raw touch observer"
+        delegate = self
+        cancelsTouchesInView = false
+        delaysTouchesBegan = false
+        delaysTouchesEnded = false
+    }
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        trackedTouch == nil && anchor?.accepts(touch) == true
+    }
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool { true }
+    override func canPrevent(_ preventedGestureRecognizer: UIGestureRecognizer) -> Bool { false }
+    override func canBePrevented(by preventingGestureRecognizer: UIGestureRecognizer) -> Bool { false }
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+        guard trackedTouch == nil, let touch = touches.first, let anchor, anchor.accepts(touch) else { return }
+        trackedTouch = touch
+        press.begin(token: anchor.available ? anchor.begin() : nil)
+        state = .began
+    }
+    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent) {
+        guard let touch = trackedTouch, let anchor else { return }
+        // SwiftUI may detach the original hit view while updating native press feedback.
+        if !anchor.containsLocation(touch.location(in: anchor)) { cancelPress() }
+        state = .changed
+    }
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
+        guard let trackedTouch, touches.contains(trackedTouch) else { return }
+        releasePress(); state = .ended
+    }
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) {
+        guard let trackedTouch, touches.contains(trackedTouch) else { return }
+        releasePress(); state = .cancelled
+    }
+    func cancelPress(deferCallback: Bool = false) {
+        guard let token = press.cancel(), let end = anchor?.end else { return }
+        // SwiftUI updates the bridge view during rendering; its callbacks may publish view state.
+        if deferCallback { DispatchQueue.main.async { end(token) } } else { end(token) }
+    }
+    func releasePress() {
+        trackedTouch = nil
+        if let token = press.release() { anchor?.end(token) }
+    }
+    override func reset() { releasePress(); super.reset() }
+}
+
+struct PushToTalkBar: View {
+    @ObservedObject var client: Client
+    var showsTarget = false
+    var body: some View {
+        if client.speech.mode == .pushToTalk {
+            VStack(spacing: 8) {
+                if showsTarget {
+                    Text(L10n.format("voice_push_to_talk_channel", client.state.channels.first { $0.id == client.currentChannel }?.name ?? L10n.string("status_disconnected")))
+                        .font(.caption).foregroundStyle(Palette.muted).frame(maxWidth: .infinity, alignment: .leading)
+                        .accessibilityIdentifier("push-to-talk-channel")
+                }
+                PushToTalkButton(available: client.speech.available && client.audioProcessingStatus != "switching" && !client.muted && !client.audioBusy && !client.needsMicrophonePermission,
+                    transmitting: client.speech.transmitting, token: client.speech.token,
+                    begin: client.beginPushToTalk, end: { client.endPushToTalk(token: $0) })
+                if client.connected && !client.muted && client.needsMicrophonePermission {
+                    Button(L10n.string(client.microphonePermission == .denied ? "voice_microphone_settings" : "voice_microphone_allow")) {
+                        Task { await client.requestPushToTalkPermission() }
+                    }
+                    .font(.footnote).frame(minHeight: 44).disabled(client.audioBusy)
+                    .accessibilityIdentifier("push-to-talk-permission")
+                }
+            }
+            .padding(.horizontal, 20).padding(.top, 12).padding(.bottom, 8)
+            .background(Palette.bottom)
+        }
+    }
+}
 
 // A local system navigation stack keeps the drawer's fixed chrome and vertical pan outside the push.
 private struct DrawerNavigationHost: UIViewControllerRepresentable {
@@ -1121,6 +1321,7 @@ struct HomeView: View {
                     voiceDrawer(availableHeight: proxy.size.height)
                 }.frame(maxWidth: .infinity, maxHeight: .infinity).contentShape(Rectangle()).clipped()
             }
+            PushToTalkBar(client: client)
             HStack {
                 navigation(L10n.string("tab_channels"), "channels", 0)
                 navigation(L10n.string("tab_members"), "members", 1)
@@ -1138,6 +1339,13 @@ struct HomeView: View {
             if !connected { drawerExpanded = false; drawerBlocksClick = false; userVolumesOpen = false }
         }
         .navigationTitle(tab == 2 ? L10n.string("tab_settings") : "")
+        .onChange(of: tab) { _ in client.endPushToTalk() }
+        .onChange(of: showConnect) { _ in client.endPushToTalk() }
+        .onChange(of: editingBookmark?.id) { _ in client.endPushToTalk() }
+        .onChange(of: channelSheet.selected?.id) { _ in client.endPushToTalk() }
+        .onChange(of: nicknamePresented) { _ in client.endPushToTalk() }
+        .onChange(of: avatarSelection?.id) { _ in client.endPushToTalk() }
+        .onChange(of: avatarClearPresented) { _ in client.endPushToTalk() }
         .navigationBarHidden(true)
         .sheet(isPresented: $showConnect) { ConnectView(client: client) }
         .sheet(item: $editingBookmark) { bookmark in ConnectView(client: client, bookmark: bookmark) }
@@ -1385,6 +1593,35 @@ struct HomeView: View {
                         Text(L10n.string("settings_receive_agc_help")).font(.footnote).foregroundStyle(Palette.muted)
                     }
                     VStack(alignment: .leading, spacing: 12) {
+                        Text(L10n.string("settings_speech_mode"))
+                        VStack(spacing: 0) {
+                            ForEach(SpeechMode.allCases, id: \.self) { mode in
+                                if mode != SpeechMode.allCases.first {
+                                    Rectangle().fill(Palette.border).frame(height: 1).padding(.leading, 16)
+                                }
+                                Button {
+                                    guard mode != client.speech.mode else { return }
+                                    UISelectionFeedbackGenerator().selectionChanged()
+                                    client.setSpeechMode(mode)
+                                } label: {
+                                    HStack {
+                                        Text(mode.title)
+                                        Spacer()
+                                        Image(systemName: client.speech.mode == mode ? "largecircle.fill.circle" : "circle")
+                                            .font(.system(size: 22))
+                                            .foregroundStyle(client.speech.mode == mode ? Palette.accent : Palette.muted)
+                                            .accessibilityHidden(true)
+                                    }
+                                    .frame(maxWidth: .infinity, minHeight: 56).padding(.horizontal, 16).contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityValue(L10n.string(client.speech.mode == mode ? "selection_selected" : "selection_not_selected"))
+                                .accessibilityIdentifier("speech-mode-\(mode.rawValue)")
+                            }
+                        }
+                        .background(Palette.card).clipShape(RoundedRectangle(cornerRadius: 14))
+                    }
+                    VStack(alignment: .leading, spacing: 12) {
                         Text(L10n.string("settings_noise_suppression"))
                         VStack(spacing: 0) {
                             ForEach(NoiseSuppressionMode.allCases, id: \.self) { mode in
@@ -1630,6 +1867,7 @@ struct ChatView: View {
                 .onAppear { if let id = messages.last?.id { proxy.scrollTo(id, anchor: .bottom) } }
             }
             Divider()
+            PushToTalkBar(client: client, showsTarget: true)
             HStack(alignment: .bottom, spacing: 10) {
                 TextField(L10n.string("chat_input_placeholder"), text: $text)
                     .textFieldStyle(.roundedBorder)

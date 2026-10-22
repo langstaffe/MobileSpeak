@@ -67,7 +67,7 @@ internal object ClientSession {
             mutableState.value = mutableState.value.copy(
                 bookmarks = runCatching { store.bookmarks() }.getOrDefault(emptyList()),
                 noiseSuppression = noise, audioProcessingStatus = "switching",
-                microphoneMuted = !microphonePermission,
+                microphoneMuted = !microphonePermission, microphonePermission = microphonePermission,
                 error = store.readError,
                 avatarPreviewPath = if (currentPreview?.isFile == true) currentPreview.absolutePath
                 else if (!File(root, AvatarImages.currentName).exists() && preview.isFile && upload.isFile) {
@@ -207,15 +207,17 @@ internal object ClientSession {
         if (initialized) send(JSONObject().put("type", "set_app_active").put("active", active))
     }
 
-    fun setMicrophonePermission(granted: Boolean) {
+    fun setMicrophonePermission(granted: Boolean, enableMicrophone: Boolean = true) {
         val wasGranted = microphonePermission
         microphonePermission = granted
+        mutableState.update { it.copy(microphonePermission = granted) }
         if (!granted) setAudio(inputMuted = true)
-        else if (!wasGranted) setAudio(inputMuted = false)
+        else if (!wasGranted && enableMicrophone) setAudio(inputMuted = false)
     }
 
-    fun setAudio(inputMuted: Boolean? = null, deafened: Boolean? = null) = coreExecutor.execute {
-        setAudioCore(inputMuted, deafened)
+    fun setAudio(inputMuted: Boolean? = null, deafened: Boolean? = null) {
+        if (inputMuted == true || deafened == true) cancelPushToTalk()
+        coreExecutor.execute { setAudioCore(inputMuted, deafened) }
     }
 
     private fun setAudioCore(inputMuted: Boolean? = null, deafened: Boolean? = null) {
@@ -230,6 +232,27 @@ internal object ClientSession {
         if (old.snapshot.canApplyAudioState()) {
             send(JSONObject().put("type", "mute").put("input", nextInput || nextOutput).put("output", nextOutput))
         }
+    }
+
+    fun setSpeechMode(mode: String) {
+        if (mode != "automatic" && mode != "push_to_talk") return
+        send(JSONObject().put("type", "set_speech_mode").put("mode", mode))
+    }
+    private val pushToTalkLock = Any()
+    private var heldSpeechToken: String? = null
+    private var captureSegment = 0L
+    fun pushToTalk(pressed: Boolean, token: String) = synchronized(pushToTalkLock) {
+        captureSegment++
+        if (pressed) heldSpeechToken = token
+        else if (heldSpeechToken == token) heldSpeechToken = null
+        send(JSONObject().put("type", "push_to_talk").put("pressed", pressed).put("token", token))
+        Unit
+    }
+    fun cancelPushToTalk() = synchronized(pushToTalkLock) {
+        heldSpeechToken?.let { pushToTalk(false, it) }
+    }
+    fun setCaptureReady(ready: Boolean) {
+        if (initialized) send(JSONObject().put("type", "set_capture_ready").put("ready", ready))
     }
 
     fun setReceiveAgc(enabled: Boolean) { send(JSONObject().put("type", "set_receive_agc").put("enabled", enabled)) }
@@ -448,6 +471,7 @@ internal object ClientSession {
         if (eventError != null || audioMuted) mutableState.update { it.copy(error = eventError ?: it.error, microphoneMuted = audioMuted || it.microphoneMuted) }
         envelope.optJSONObject("fileCache")?.let { cache -> mutableState.update { it.copy(fileCache = cache.fileCache()) } }
         envelope.optJSONObject("receiveAudio")?.let { audio -> mutableState.update { it.copy(receiveAgc = audio.optBoolean("agc", true)) } }
+        envelope.optJSONObject("speech")?.let { speech -> mutableState.update { it.copy(speech = speech.speech()) } }
         // Global events above remain valid even while Rust has not consumed Connect yet.
         val snapshotJson = envelope.getJSONObject("snapshot")
         val nextSnapshot = snapshotJson.snapshot()
@@ -550,7 +574,11 @@ internal object ClientSession {
 
     fun captureStopped() { if (initialized) send(JSONObject().put("type", "capture_stopped")) }
 
-    fun capture(samples: ShortArray): Int = NativeCore.capture(handle, samples)
+    fun captureSegment(): Long = synchronized(pushToTalkLock) { captureSegment }
+    fun capture(samples: ShortArray, segment: Long = captureSegment()): Int = synchronized(pushToTalkLock) {
+        // A read started before this press must never enter the core under its new capture epoch.
+        if (segment != captureSegment) 0 else NativeCore.capture(handle, samples)
+    }
     fun openOutput(channels: Int, communication: Boolean, notification: Runnable): Long =
         NativeOutput.open(handle, channels, communication, notification)
     fun shouldRunService() = state.value.snapshot.status in setOf("connected", "connecting", "reconnecting")

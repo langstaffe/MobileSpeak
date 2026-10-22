@@ -282,4 +282,13 @@
     <string name="error_profile_read_failed">Unable to read profile. Existing data was preserved.</string>
     <string name="error_profile_rename_failed">The server could not change your nickname.</string>
     <string name="error_server_invalid">Enter a valid server address and port.</string>
+    <string name="settings_speech_mode">Speaking mode</string>
+    <string name="settings_speech_automatic">Automatic</string>
+    <string name="settings_speech_push_to_talk">Push to talk</string>
+    <string name="voice_hold_to_talk">Hold to talk</string>
+    <string name="voice_transmitting">Speaking</string>
+    <string name="voice_target_channel">Voice channel: %1$s</string>
+    <string name="voice_target_unavailable">Voice channel: Not connected</string>
+    <string name="voice_grant_microphone">Allow microphone access</string>
+    <string name="voice_hold_help">Press and hold to speak. Release or slide outside to stop.</string>
 </resources>

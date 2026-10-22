@@ -30,6 +30,7 @@ fn enabled() -> bool {
 #[serde(default, rename_all = "camelCase")]
 pub struct Preferences {
     pub agc: bool,
+    pub speech_mode: crate::speech::Mode,
     users: HashMap<String, HashMap<String, u16>>,
     #[serde(skip, default = "enabled")]
     writable: bool,
@@ -42,6 +43,7 @@ impl Default for Preferences {
     fn default() -> Self {
         Self {
             agc: enabled(),
+            speech_mode: crate::speech::Mode::default(),
             users: HashMap::new(),
             writable: true,
             dirty: None,
@@ -100,6 +102,14 @@ impl Preferences {
         self.agc = value;
         self.changed();
         self.publish(out);
+    }
+    pub fn set_speech_mode(&mut self, mode: crate::speech::Mode, out: &Arc<Mutex<Output>>) -> bool {
+        if !self.writable {
+            report_code(out, "receive_audio_read_failed", None);
+            return false;
+        }
+        if self.speech_mode != mode { self.speech_mode = mode; self.changed(); }
+        true
     }
     fn volume(&self, server: &str, uid: Option<&str>) -> u16 {
         uid.and_then(|uid| self.users.get(server)?.get(uid))

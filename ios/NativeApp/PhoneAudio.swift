@@ -12,6 +12,8 @@ final class PhoneAudio: @unchecked Sendable {
     private var capturing = false
     private let lock = NSLock()
     private var generation = 0
+    private var captureSegment = 0
+    private var captureBoundary: UInt64 = 0
     private var enabled = true
     private let playback: UnsafeRawPointer
     private var capturedFrames = 0
@@ -52,6 +54,36 @@ final class PhoneAudio: @unchecked Sendable {
     private var currentGeneration: Int {
         lock.lock(); defer { lock.unlock() }
         return generation
+    }
+    private var currentCaptureContext: (segment: Int, boundary: UInt64) {
+        lock.lock(); defer { lock.unlock() }
+        return (captureSegment, captureBoundary)
+    }
+    func resetCaptureBuffer() {
+        lock.lock(); captureSegment += 1; captureBoundary = mach_absolute_time(); lock.unlock()
+    }
+    static func captureSkip(frameCount: AVAudioFrameCount, sampleRate: Double, hostTime: UInt64?, boundary: UInt64) -> AVAudioFrameCount {
+        guard let hostTime else { return frameCount }
+        guard boundary > hostTime else { return 0 }
+        let samples = ceil(AVAudioTime.seconds(forHostTime: boundary - hostTime) * sampleRate)
+        return AVAudioFrameCount(min(Double(frameCount), max(0, samples)))
+    }
+    static func captureTail(_ buffer: AVAudioPCMBuffer, skipping count: AVAudioFrameCount) -> AVAudioPCMBuffer? {
+        guard count < buffer.frameLength else { return nil }
+        guard count > 0 else { return buffer }
+        let remaining = buffer.frameLength - count
+        guard let tail = AVAudioPCMBuffer(pcmFormat: buffer.format, frameCapacity: remaining) else { return nil }
+        tail.frameLength = remaining
+        let stride = Int(buffer.format.streamDescription.pointee.mBytesPerFrame)
+        let sources = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: buffer.audioBufferList))
+        for (source, destination) in zip(sources, UnsafeMutableAudioBufferListPointer(tail.mutableAudioBufferList)) {
+            guard let source = source.mData, let destination = destination.mData else { return nil }
+            memcpy(destination, source.advanced(by: Int(count) * stride), Int(remaining) * stride)
+        }
+        return tail
+    }
+    private func setCaptureReady(_ ready: Bool) {
+        _ = "{\"type\":\"set_capture_ready\",\"ready\":\(ready)}".withCString { ts_command(handle, $0) }
     }
     // MainActor submits each operation before suspending, preserving the order
     // of start/stop requests. Cancellation cannot interrupt a blocking system API.
@@ -152,7 +184,18 @@ final class PhoneAudio: @unchecked Sendable {
         }
         var pending = [Int16]()
         pending.reserveCapacity(1920)
-        input.installTap(onBus: 0, bufferSize: 1024, format: inputFormat) { [self] buffer, _ in
+        var segment = currentCaptureContext.segment
+        input.installTap(onBus: 0, bufferSize: 1024, format: inputFormat) { [self] inputBuffer, time in
+            let context = currentCaptureContext
+            let current = context.segment
+            let skip = context.boundary > 0
+                ? Self.captureSkip(frameCount: inputBuffer.frameLength, sampleRate: inputFormat.sampleRate,
+                                   hostTime: time.isHostTimeValid ? time.hostTime : nil, boundary: context.boundary) : 0
+            if segment != current {
+                pending.removeAll(keepingCapacity: true); converter.reset(); segment = current
+                // A tap may deliver 100 ms at once; never send samples captured before this press.
+            }
+            guard let buffer = Self.captureTail(inputBuffer, skipping: skip) else { return }
             let capacity = AVAudioFrameCount(ceil(Double(buffer.frameLength) * 48_000 / inputFormat.sampleRate) + 32)
             guard let converted = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: capacity) else { return }
             var supplied = false
@@ -166,13 +209,16 @@ final class PhoneAudio: @unchecked Sendable {
                 let value = samples[i].isFinite ? max(-1, min(1, samples[i])) : 0
                 pending.append(Int16(value * 32767))
                 if pending.count == 960 {
+                    lock.lock()
+                    guard current == captureSegment else { lock.unlock(); pending.removeAll(keepingCapacity: true); return }
                     _ = pending.withUnsafeBufferPointer { ts_capture(handle, $0.baseAddress, $0.count) }
-                    lock.lock(); capturedFrames += 1; lock.unlock()
+                    capturedFrames += 1; lock.unlock()
                     pending.removeAll(keepingCapacity: true)
                 }
             }
         }
         capturing = true
+        setCaptureReady(true)
     }
     private func ensureEngineRunning() throws {
         guard let engine else { try startEngine(); return }
@@ -192,6 +238,8 @@ final class PhoneAudio: @unchecked Sendable {
         NSError(domain: "MobileSpeak", code: 2, userInfo: [NSLocalizedDescriptionKey: message])
     }
     func stopCapture() {
+        setCaptureReady(false)
+        resetCaptureBuffer()
         queue.async { self.removeCaptureTap() }
     }
     private func removeCaptureTap() {
@@ -201,6 +249,8 @@ final class PhoneAudio: @unchecked Sendable {
         }
     }
     func pauseForInterruption() {
+        setCaptureReady(false)
+        resetCaptureBuffer()
         lock.lock(); generation += 1; lock.unlock()
         ts_playback_active(playback, false)
         queue.async {
@@ -210,6 +260,8 @@ final class PhoneAudio: @unchecked Sendable {
         }
     }
     func stop() {
+        setCaptureReady(false)
+        resetCaptureBuffer()
         lock.lock(); generation += 1; lock.unlock()
         ts_playback_active(playback, false)
         queue.async { self.stopEngine() }

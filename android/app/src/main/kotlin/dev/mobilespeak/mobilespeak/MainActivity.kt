@@ -121,6 +121,8 @@ import kotlin.math.roundToInt
 
 class MainActivity : AppCompatActivity() {
     private var openAbout by mutableStateOf(false)
+    private var permissionEnablesMicrophone = true
+    private var permissionSettingsPending = false
 
     override fun onNewIntent(intent: android.content.Intent) {
         super.onNewIntent(intent)
@@ -131,7 +133,9 @@ class MainActivity : AppCompatActivity() {
     private val permissionRequest = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
     ) { result ->
-        ClientSession.setMicrophonePermission(result[Manifest.permission.RECORD_AUDIO] == true)
+        val granted = result[Manifest.permission.RECORD_AUDIO] == true
+        ClientSession.setMicrophonePermission(granted, enableMicrophone = false)
+        if (granted && permissionEnablesMicrophone) ClientSession.setAudio(inputMuted = false)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -158,7 +162,7 @@ class MainActivity : AppCompatActivity() {
             ) {
                 Surface(Modifier.fillMaxSize(), color = Palette.background) {
                     ProvideTextStyle(androidx.compose.ui.text.TextStyle(fontSize = 17.sp, lineHeight = 20.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.SansSerif)) {
-                        MobileSpeakApp(::requestVoicePermissions, openAbout) { openAbout = false; intent.removeExtra("show_about") }
+                        MobileSpeakApp({ requestVoicePermissions() }, openAbout, requestPushToTalkPermission = { requestVoicePermissions(false) }) { openAbout = false; intent.removeExtra("show_about") }
                     }
                 }
             }
@@ -178,14 +182,31 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         AppUpdates.onForeground()
+        val granted = checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+        ClientSession.setMicrophonePermission(granted, enableMicrophone = false)
+        if (permissionSettingsPending) {
+            permissionSettingsPending = false
+            if (granted && permissionEnablesMicrophone) ClientSession.setAudio(inputMuted = false)
+        }
     }
 
     override fun onPause() {
         AppUpdates.onBackground()
+        ClientSession.cancelPushToTalk()
         super.onPause()
     }
 
-    private fun requestVoicePermissions() {
+    private fun requestVoicePermissions(enableMicrophone: Boolean = true) {
+        permissionEnablesMicrophone = enableMicrophone
+        val preferences = getSharedPreferences("mobilespeak.permissions", MODE_PRIVATE)
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED &&
+            preferences.getBoolean("microphone_requested", false) && !shouldShowRequestPermissionRationale(Manifest.permission.RECORD_AUDIO)) {
+            permissionSettingsPending = true
+            startActivity(android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                android.net.Uri.fromParts("package", packageName, null)))
+            return
+        }
+        preferences.edit().putBoolean("microphone_requested", true).apply()
         val permissions = buildList {
             add(Manifest.permission.RECORD_AUDIO)
             if (Build.VERSION.SDK_INT >= 33) add(Manifest.permission.POST_NOTIFICATIONS)
@@ -214,7 +235,7 @@ private data class PageTarget(val chat: ChatTarget? = null, val settings: String
 internal data class ChatTarget(val conversation: String, val title: String, val channel: Channel? = null, val member: Member? = null)
 
 @Composable
-internal fun MobileSpeakApp(requestPermissions: () -> Unit, openAbout: Boolean = false, consumedAbout: () -> Unit = {}) {
+internal fun MobileSpeakApp(requestPermissions: () -> Unit, openAbout: Boolean = false, requestPushToTalkPermission: () -> Unit = requestPermissions, consumedAbout: () -> Unit = {}) {
     val ui by ClientSession.state.collectAsStateWithLifecycle()
     var tab by androidx.compose.runtime.saveable.rememberSaveable { mutableIntStateOf(0) }
     var drawerExpanded by rememberSaveable { mutableStateOf(false) }
@@ -262,6 +283,8 @@ internal fun MobileSpeakApp(requestPermissions: () -> Unit, openAbout: Boolean =
         if (openAbout) { closeChat(); tab = 2; settingsPage = "about"; consumedAbout() }
     }
 
+    LaunchedEffect(tab) { ClientSession.cancelPushToTalk() }
+
     BackHandler(enabled = navigation.isRunning || settingsPage != null || chat != null || selectedChannel != null || editingBookmark != null || showNewBookmark || drawerExpanded) {
         when {
             settingsPage != null -> settingsPage = null
@@ -302,7 +325,7 @@ internal fun MobileSpeakApp(requestPermissions: () -> Unit, openAbout: Boolean =
             if (target.settings != null) {
                 SettingsDetailPage(target.settings, onBack = { settingsPage = null }, onModal = { settingsModal = it })
             } else if (target.chat != null) {
-                ChatScreen(target.chat, ui, active = chat?.conversation == target.chat.conversation, onBack = closeChat)
+                ChatScreen(target.chat, ui, active = chat?.conversation == target.chat.conversation && !navigation.isRunning, onBack = closeChat, requestPermissions = requestPushToTalkPermission)
             } else homeState.SaveableStateProvider("home") {
                 val tabState = rememberSaveableStateHolder()
                 var savedConnectionKey by rememberSaveable { mutableStateOf(connectionKey) }
@@ -325,6 +348,9 @@ internal fun MobileSpeakApp(requestPermissions: () -> Unit, openAbout: Boolean =
                     topBar = { Header(ui) },
                     bottomBar = {
                         Column(Modifier.background(Palette.bottom).navigationBarsPadding()) {
+                            PushToTalkBar(ui, requestPushToTalkPermission,
+                                active = page.key == "home" && !navigation.isRunning && !settingsModal &&
+                                    editingBookmark == null && !showNewBookmark && deletingBookmark == null && selectedChannel == null)
                             Row(Modifier.padding(top = 10.dp, bottom = 8.dp)) {
                                 NavigationItem(stringResource(R.string.tab_channels), UiIcons.Number, tab == 0, ui.unread.channelCount) { tab = 0 }
                                 NavigationItem(stringResource(R.string.tab_members), UiIcons.People, tab == 1, ui.unread.privateCounts.values.sum()) { tab = 1 }
@@ -349,7 +375,7 @@ internal fun MobileSpeakApp(requestPermissions: () -> Unit, openAbout: Boolean =
                             // Only the collapsed header takes layout space; expansion overlays the same list viewport.
                             Box(Modifier.fillMaxSize().padding(bottom = 64.dp)) {
                                 tabState.SaveableStateProvider(tabPageKey) { when {
-                                    tab == 2 -> SettingsScreen(ui, requestPermissions, onPage = { settingsPage = it })
+                                    tab == 2 -> SettingsScreen(ui, requestPermissions, onPage = { settingsPage = it }, onModal = { settingsModal = it })
                                     ui.snapshot.status in setOf("connecting", "reconnecting") -> BusyScreen(ui.snapshot.status)
                                     ui.snapshot.status != "connected" -> BookmarkScreen(
                                         ui,
@@ -791,7 +817,7 @@ internal fun NicknameDialog(ui: SessionUiState, onDismiss: () -> Unit) {
 
 @Composable
 @OptIn(ExperimentalMaterial3Api::class)
-internal fun SettingsScreen(ui: SessionUiState, requestPermissions: () -> Unit, onPage: (String) -> Unit) {
+internal fun SettingsScreen(ui: SessionUiState, requestPermissions: () -> Unit, onPage: (String) -> Unit, onModal: (Boolean) -> Unit = {}) {
     val haptic = LocalHapticFeedback.current
     var nicknamePresented by rememberSaveable { mutableStateOf(false) }
     if (nicknamePresented) NicknameDialog(ui) { nicknamePresented = false }
@@ -816,6 +842,10 @@ internal fun SettingsScreen(ui: SessionUiState, requestPermissions: () -> Unit, 
         dismissButton = { TextButton(onClick = { avatarClearPresented = false }) { Text(stringResource(R.string.action_cancel)) } },
         containerColor = Palette.card, titleContentColor = Palette.text, textContentColor = Palette.text,
     )
+    DisposableEffect(nicknamePresented, avatarClearPresented, avatarUri) {
+        onModal(nicknamePresented || avatarClearPresented || avatarUri != null)
+        onDispose { onModal(false) }
+    }
     val selectedLanguage = AppLanguage.selected()
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(top = pageTitleInset, bottom = 20.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
         PageTitle(stringResource(R.string.tab_settings), Modifier.padding(horizontal = pageTitleInset))
@@ -872,6 +902,23 @@ internal fun SettingsScreen(ui: SessionUiState, requestPermissions: () -> Unit, 
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 SettingSwitch(stringResource(R.string.settings_receive_agc), ui.receiveAgc, onChange = ClientSession::setReceiveAgc)
                 Text(stringResource(R.string.settings_receive_agc_help), fontSize = 13.sp, lineHeight = 16.sp, color = Palette.muted)
+            }
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(stringResource(R.string.settings_speech_mode), fontSize = 17.sp, lineHeight = 20.sp)
+                Column(Modifier.clip(RoundedCornerShape(14.dp)).background(Palette.card)) {
+                    listOf("automatic" to R.string.settings_speech_automatic, "push_to_talk" to R.string.settings_speech_push_to_talk).forEachIndexed { index, (mode, label) ->
+                        if (index > 0) HorizontalDivider(Modifier.padding(start = 16.dp), color = Palette.border)
+                        val selected = ui.speech.mode == mode
+                        val selectionState = stringResource(if (selected) R.string.selection_selected else R.string.selection_not_selected)
+                        Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).semantics { stateDescription = selectionState }
+                            .selectable(selected, interactionSource = null, indication = RowPressFeedback, role = Role.RadioButton) {
+                                if (!selected) { haptic.performHapticFeedback(HapticFeedbackType.SegmentTick); ClientSession.setSpeechMode(mode) }
+                            }.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text(stringResource(label), Modifier.weight(1f), fontSize = 17.sp, lineHeight = 20.sp)
+                            SelectionCircle(selected)
+                        }
+                    }
+                }
             }
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(stringResource(R.string.settings_noise_suppression), fontSize = 17.sp, lineHeight = 20.sp)
@@ -1147,7 +1194,7 @@ private fun VoiceBar(ui: SessionUiState, requestPermissions: () -> Unit) {
 }
 
 @Composable
-internal fun ChatScreen(target: ChatTarget, ui: SessionUiState, active: Boolean, onBack: () -> Unit) {
+internal fun ChatScreen(target: ChatTarget, ui: SessionUiState, active: Boolean, requestPermissions: () -> Unit = {}, onBack: () -> Unit) {
     val context = LocalContext.current
     val messages = ui.messages.filter { it.conversation == target.conversation }
     val token = remember(target.conversation) { UUID.randomUUID().toString() }
@@ -1213,6 +1260,7 @@ internal fun ChatScreen(target: ChatTarget, ui: SessionUiState, active: Boolean,
             }
         }
         HorizontalDivider(color = Palette.border, thickness = .5.dp)
+        PushToTalkBar(ui, requestPermissions, active = active, showTarget = true)
         Row(Modifier.fillMaxWidth().background(Palette.bottom).padding(10.dp), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             BasicTextField(input, { input = it }, Modifier.weight(1f).heightIn(min = 34.dp).clip(RoundedCornerShape(5.dp)).background(Color.Black)
                 .then(if (input.toByteArray().size > 8192) Modifier.border(1.dp, Palette.disconnect, RoundedCornerShape(5.dp)) else Modifier).padding(horizontal = 7.dp, vertical = 6.dp),

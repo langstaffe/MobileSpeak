@@ -15,6 +15,7 @@ import android.media.AudioDeviceInfo
 import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioRecord
+import android.media.AudioRecordingConfiguration
 import android.media.AudioRouting
 import android.media.MediaRecorder
 import android.media.audiofx.AcousticEchoCanceler
@@ -50,6 +51,7 @@ internal class AudioEngine(private val context: Context) {
     @Volatile private var outputChannels = 0
     @Volatile private var outputRevision = 0L
     @Volatile private var record: AudioRecord? = null
+    @Volatile private var recordVersion = -1L
     private var playbackThread: Thread? = null
     private var captureThread: Thread? = null
     @Volatile private var communicationMode = false
@@ -71,9 +73,21 @@ internal class AudioEngine(private val context: Context) {
     private var captureOffset = 0
     private var echoCanceler: AcousticEchoCanceler? = null
     private var noiseSuppressor: NoiseSuppressor? = null
+    private val recordingCallback = object : AudioManager.AudioRecordingCallback() {
+        override fun onRecordingConfigChanged(configs: MutableList<AudioRecordingConfiguration>) {
+            val input = record ?: return
+            val config = configs.firstOrNull { it.clientAudioSessionId == input.audioSessionId }
+            val unsilenced = config != null && (Build.VERSION.SDK_INT < 29 || !config.isClientSilenced)
+            ClientSession.setCaptureReady(unsilenced && running.get() && shouldCapture() && recordVersion == captureVersion)
+        }
+    }
     private val routingListener = AudioRouting.OnRoutingChangedListener { routing ->
         if (running.get() && connected && routing === record) {
+            ClientSession.setCaptureReady(false)
             logActualRoute(routing, "device callback")
+            val input = routing as AudioRecord
+            val unsilenced = Build.VERSION.SDK_INT < 29 || input.activeRecordingConfiguration?.isClientSilenced != true
+            if (recordVersion == captureVersion && shouldCapture()) ClientSession.setCaptureReady(unsilenced)
             wakeWorkers()
         }
     }
@@ -86,6 +100,7 @@ internal class AudioEngine(private val context: Context) {
     fun start() {
         if (!running.compareAndSet(false, true)) return
         manager.registerAudioDeviceCallback(deviceCallback, routeHandler)
+        manager.registerAudioRecordingCallback(recordingCallback, routeHandler)
         if (Build.VERSION.SDK_INT >= 31) {
             communicationDeviceListener = AudioManager.OnCommunicationDeviceChangedListener(::communicationDeviceChanged)
                 .also { manager.addOnCommunicationDeviceChangedListener(context.mainExecutor, it) }
@@ -107,7 +122,10 @@ internal class AudioEngine(private val context: Context) {
             Log.i(TAG, "Audio policy connected=$nextConnected listening=${!nextDeafened} capture=$nextCaptureRequested")
         }
         val captureStopped = captureRequested && !nextCaptureRequested
-        if (connectionChanged || captureRequested != nextCaptureRequested) captureVersion++
+        if (connectionChanged || captureRequested != nextCaptureRequested) {
+            ClientSession.setCaptureReady(false)
+            captureVersion++
+        }
         connected = nextConnected
         deafened = nextDeafened
         captureRequested = nextCaptureRequested
@@ -142,6 +160,7 @@ internal class AudioEngine(private val context: Context) {
         releaseCapture()
         restoreNormalMode()
         manager.unregisterAudioDeviceCallback(deviceCallback)
+        manager.unregisterAudioRecordingCallback(recordingCallback)
     }
 
     private fun playbackLoop() {
@@ -204,6 +223,8 @@ internal class AudioEngine(private val context: Context) {
     private fun captureLoop() {
         var seenCapture = captureVersion
         var submittedCaptureFrames = 0L
+        var frameSpeechToken = ""
+        var frameSegment = -1L
         while (running.get()) {
             try {
                 if (seenCapture != captureVersion) {
@@ -220,12 +241,18 @@ internal class AudioEngine(private val context: Context) {
                     awaitRetry()
                     continue
                 }
+                val speechToken = ClientSession.state.value.speech.token
+                val segment = ClientSession.captureSegment()
+                if (frameSpeechToken != speechToken || frameSegment != segment) {
+                    captureOffset = 0; frameSpeechToken = speechToken; frameSegment = segment
+                }
                 val read = input.read(capture, captureOffset, capture.size - captureOffset, AudioRecord.READ_BLOCKING)
+                if (speechToken != ClientSession.state.value.speech.token || segment != ClientSession.captureSegment()) { captureOffset = 0; continue }
                 when {
                     read > 0 && running.get() && shouldCapture() && seenCapture == captureVersion -> {
                         captureOffset += read
                         if (captureOffset == capture.size) {
-                            val result = ClientSession.capture(capture)
+                            val result = ClientSession.capture(capture, segment)
                             submittedCaptureFrames++
                             if (submittedCaptureFrames % CAPTURE_LOG_INTERVAL_FRAMES == 0L) {
                                 Log.i(TAG, "Microphone submitted frames=$submittedCaptureFrames samples=${capture.size} sampleRate=$SAMPLE_RATE result=$result")
@@ -263,6 +290,7 @@ internal class AudioEngine(private val context: Context) {
         manager.mode = AudioManager.MODE_IN_COMMUNICATION
         communicationMode = true
         outputRevision++
+        ClientSession.setCaptureReady(false)
         captureVersion++
         Log.i(TAG, "Audio mode entered MODE_IN_COMMUNICATION sdk=${Build.VERSION.SDK_INT}")
     }
@@ -290,6 +318,7 @@ internal class AudioEngine(private val context: Context) {
             manager.mode = AudioManager.MODE_NORMAL
             Log.i(TAG, "Communication mode request released actualMode=${manager.mode}")
             outputRevision++
+            ClientSession.setCaptureReady(false)
             captureVersion++
         }
         communicationMode = false
@@ -303,6 +332,7 @@ internal class AudioEngine(private val context: Context) {
         if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) return@synchronized null
         val min = AudioRecord.getMinBufferSize(SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
         check(min > 0) { "AudioRecord minimum buffer unavailable: $min" }
+        val version = captureVersion
         val input = AudioRecord.Builder()
             .setAudioSource(MediaRecorder.AudioSource.VOICE_COMMUNICATION)
             .setAudioFormat(
@@ -318,12 +348,15 @@ internal class AudioEngine(private val context: Context) {
             input.release()
             throw IllegalStateException("AudioRecord failed to initialize")
         }
+        recordVersion = version
         record = input // Any subsequent initialization failure is cleaned up by the capture loop.
         echoCanceler = runCatching { if (AcousticEchoCanceler.isAvailable()) AcousticEchoCanceler.create(input.audioSessionId) else null }.getOrNull()
         noiseSuppressor = runCatching { if (NoiseSuppressor.isAvailable()) NoiseSuppressor.create(input.audioSessionId) else null }.getOrNull()
         echoCanceler?.runCatching { enabled = true }
         noiseSuppressor?.runCatching { enabled = true }
         input.startRecording()
+        val unsilenced = Build.VERSION.SDK_INT < 29 || input.activeRecordingConfiguration?.isClientSilenced != true
+        if (version == captureVersion && running.get() && shouldCapture()) ClientSession.setCaptureReady(unsilenced)
         captureOffset = 0
         input.addOnRoutingChangedListener(routingListener, routeHandler)
         Log.i(
@@ -347,11 +380,13 @@ internal class AudioEngine(private val context: Context) {
                     "aecEnabled=${echoCanceler?.enabled == true} nsEnabled=${noiseSuppressor?.enabled == true}",
             )
         }
+        if (record != null) ClientSession.setCaptureReady(false)
         record?.runCatching { stop() }
         if (record != null) ClientSession.captureStopped()
         record?.removeOnRoutingChangedListener(routingListener)
         record?.runCatching { release() }
         record = null
+        recordVersion = -1L
         echoCanceler?.release()
         echoCanceler = null
         noiseSuppressor?.release()

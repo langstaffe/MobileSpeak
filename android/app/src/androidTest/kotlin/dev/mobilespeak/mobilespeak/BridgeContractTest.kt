@@ -15,6 +15,13 @@ class BridgeContractTest {
         for (i in 0 until samples.length()) {
             val envelope = samples.getJSONObject(i)
             val snapshot = envelope.getJSONObject("snapshot")
+            envelope.optJSONObject("speech")?.let {
+                val speech = it.speech()
+                assertEquals(it.getString("mode"), speech.mode)
+                assertEquals(it.getString("token"), speech.token)
+                assertEquals(it.getBoolean("available"), speech.available)
+                assertEquals(it.getBoolean("transmitting"), speech.transmitting)
+            }
             assertEquals(listOf("disconnected", "connecting", "connected", "reconnecting", "disconnected")[i], snapshot.snapshot().status)
             assertEquals(if (i == 0) null else "fixture-connection", snapshot.stringOrNull("connectionId"))
             if (i > 0) assertEquals(ProfileState(), envelope.getJSONObject("profile").profile())
@@ -55,7 +62,7 @@ class ConnectionEnvelopeOrderingTest {
         fun envelope(id: String?, status: String, events: String = "[]") = JSONObject("""{
             "snapshot":{"connectionId":${id?.let { "\"$it\"" } ?: "null"},"status":"$status","channels":[],"clients":[]},
             "chats":[],"events":$events,"unread":{"serverId":null,"channel":null,"channelCount":0,"privateCounts":{}},
-            "receiveAudio":{"agc":false}
+            "receiveAudio":{"agc":false},"speech":{"mode":"push_to_talk","token":"global","available":false,"transmitting":false}
         }""")
         try {
             executor.submit {
@@ -66,6 +73,8 @@ class ConnectionEnvelopeOrderingTest {
                 apply.invoke(ClientSession, envelope(null, "disconnected", """[{"type":"error","scope":"global","code":"chat_history_save_failed","detail":"disk"}]"""))
                 org.junit.Assert.assertEquals("connecting", ClientSession.state.value.snapshot.status)
                 org.junit.Assert.assertFalse(ClientSession.state.value.receiveAgc)
+                assertEquals("push_to_talk", ClientSession.state.value.speech.mode)
+                assertEquals("global", ClientSession.state.value.speech.token)
                 org.junit.Assert.assertNotNull(ClientSession.state.value.error)
                 val error = ClientSession.state.value.error
                 apply.invoke(ClientSession, envelope("old", "disconnected", """[{"type":"audio_muted","connectionId":"old","code":"legacy_codec"}]"""))
