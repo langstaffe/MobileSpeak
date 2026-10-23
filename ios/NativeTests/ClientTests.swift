@@ -1500,6 +1500,17 @@ final class ClientTests: XCTestCase {
         }
     }
 
+    @MainActor func testChannelFileSortMenuUpdatesForVisibleInputs() {
+        let client = Client.shared
+        let target = ChannelFileTarget(server: "fixture", channel: 7, path: "/")
+        let menu = ChannelFileSortMenu(client: client, target: target, sort: "name", chromeSize: 12, language: .english)
+        XCTAssertEqual(menu, ChannelFileSortMenu(client: client, target: target, sort: "name", chromeSize: 12, language: .english))
+        XCTAssertNotEqual(menu, ChannelFileSortMenu(client: client, target: target, sort: "newest", chromeSize: 12, language: .english))
+        XCTAssertNotEqual(menu, ChannelFileSortMenu(client: client, target: ChannelFileTarget(server: "fixture", channel: 7, path: "/folder"), sort: "name", chromeSize: 12, language: .english))
+        XCTAssertNotEqual(menu, ChannelFileSortMenu(client: client, target: target, sort: "name", chromeSize: 14, language: .english))
+        XCTAssertNotEqual(menu, ChannelFileSortMenu(client: client, target: target, sort: "name", chromeSize: 12, language: .simplifiedChinese))
+    }
+
     @MainActor func testIconAssetsKeepTemplateTintAndOffOriginalColors() throws {
         let names = "afk avatar-placeholder channel-chat channels checkmark chevron-right error headphones lock members mic-off mic-on more off pencil plus trash send settings speaker-off speaker-on waveform folder file file-text file-image file-audio file-archive upload download sort refresh info share".split(separator: " ")
         for name in names {

@@ -46,11 +46,34 @@ struct ChannelFilesState: Decodable, Equatable {
     var transfers: [ChannelFileTransfer] = []
     func transfer(_ name: String) -> ChannelFileTransfer? { transfers.last { $0.path == path && $0.name == name } }
 }
-struct ChannelFileTarget {
+struct ChannelFileTarget: Equatable {
     let server: String
     let channel: UInt64
     let path: String
     var command: [String: Any] { ["server": server, "channel": channel, "path": path, "directory": path] }
+}
+// Live voice and network snapshots must not rebuild an open system menu.
+struct ChannelFileSortMenu: View, Equatable {
+    let client: Client
+    let target: ChannelFileTarget?
+    let sort: String
+    let chromeSize: CGFloat
+    let language: AppLanguage
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.client === rhs.client && lhs.target == rhs.target && lhs.sort == rhs.sort &&
+            lhs.chromeSize == rhs.chromeSize && lhs.language == rhs.language
+    }
+
+    var body: some View {
+        Menu {
+            Button(L10n.string("files_sort_name")) { client.fileCommand("files_sort", fields: (target?.command ?? [:]).merging(["newest": false]) { _, new in new }) }
+            Button(L10n.string("files_sort_newest")) { client.fileCommand("files_sort", fields: (target?.command ?? [:]).merging(["newest": true]) { _, new in new }) }
+        } label: {
+            HStack(spacing: 5) { AppIcon(name: "sort", size: 18); Text(L10n.string(sort == "newest" ? "files_sort_newest" : "files_sort_name")).font(.system(size: min(chromeSize, 18))) }.frame(minHeight: 44).foregroundStyle(Palette.accent)
+        }.fixedSize(horizontal: true, vertical: false)
+        .accessibilityIdentifier("files-sort")
+    }
 }
 extension Client {
     var channelFileTarget: ChannelFileTarget? {
@@ -220,13 +243,8 @@ struct ChannelFilesDrawer: View {
                         .frame(minWidth: 44, minHeight: 44).padding(.horizontal, 4).foregroundStyle(Palette.accent)
                 }.fixedSize(horizontal: true, vertical: false).disabled(!canRefresh)
                 .accessibilityIdentifier("files-refresh")
-                Menu {
-                    Button(L10n.string("files_sort_name")) { client.fileCommand("files_sort", fields: (target?.command ?? [:]).merging(["newest": false]) { _, new in new }) }
-                    Button(L10n.string("files_sort_newest")) { client.fileCommand("files_sort", fields: (target?.command ?? [:]).merging(["newest": true]) { _, new in new }) }
-                } label: {
-                    HStack(spacing: 5) { AppIcon(name: "sort", size: 18); Text(L10n.string(files.sort == "newest" ? "files_sort_newest" : "files_sort_name")).font(.system(size: min(chromeSize, 18))) }.frame(minHeight: 44).foregroundStyle(Palette.accent)
-                }.fixedSize(horizontal: true, vertical: false)
-                .accessibilityIdentifier("files-sort")
+                ChannelFileSortMenu(client: client, target: target, sort: files.sort, chromeSize: chromeSize, language: L10n.language)
+                    .equatable()
             }.padding(.horizontal, 14)
             Divider().overlay(Palette.border)
             ScrollView {
