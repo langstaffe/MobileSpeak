@@ -2,6 +2,7 @@ package dev.mobilespeak.mobilespeak
 
 import android.annotation.SuppressLint
 import android.app.DownloadManager
+import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -341,13 +342,28 @@ internal object AppUpdates {
 
     private fun notifyReady(value: DownloadRecord) {
         val manager = context.getSystemService(NotificationManager::class.java)
-        if (preferences.getLong("notified_download", -1) == value.id || !manager.areNotificationsEnabled()) return
+        if (preferences.getLong("notified_download", -1) == value.id) { refreshLanguage(); return }
+        if (!manager.areNotificationsEnabled()) return
         if (Build.VERSION.SDK_INT >= 33 && context.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return
+        if (!preferences.edit().putLong("notified_download", value.id).commit()) return
+        postReady(value, manager)
+    }
+
+    fun refreshLanguage() {
+        val value = record ?: return
+        if (mutable.value.download != DownloadStatus.READY || preferences.getLong("notified_download", -1) != value.id) return
+        val manager = context.getSystemService(NotificationManager::class.java)
+        val current = manager.activeNotifications.firstOrNull { it.id == 300 }?.notification ?: return
+        if (current.extras.getCharSequence(Notification.EXTRA_TITLE)?.toString() == context.localized(R.string.update_downloaded, value.tag.removePrefix("v")) &&
+            current.extras.getCharSequence(Notification.EXTRA_TEXT)?.toString() == context.localized(R.string.update_download_notice)) return
+        postReady(value, manager)
+    }
+
+    private fun postReady(value: DownloadRecord, manager: NotificationManager) {
         if (Build.VERSION.SDK_INT >= 26) manager.createNotificationChannel(NotificationChannel("updates", context.localized(R.string.update_notifications), NotificationManager.IMPORTANCE_DEFAULT))
         val intent = Intent(context, MainActivity::class.java).putExtra("show_about", true).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
         val pending = PendingIntent.getActivity(context, 300, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-        if (!preferences.edit().putLong("notified_download", value.id).commit()) return
-        manager.notify(300, NotificationCompat.Builder(context, "updates").setSmallIcon(android.R.drawable.stat_sys_download_done)
+        manager.notify(300, NotificationCompat.Builder(context, "updates").setSmallIcon(android.R.drawable.stat_sys_download_done).setOnlyAlertOnce(true)
             .setContentTitle(context.localized(R.string.update_downloaded, value.tag.removePrefix("v")))
             .setContentText(context.localized(R.string.update_download_notice)).setContentIntent(pending).setAutoCancel(true).build())
     }

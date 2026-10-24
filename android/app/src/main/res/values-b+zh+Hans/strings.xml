@@ -16,7 +16,7 @@
     <string name="disconnect_badge">OFF</string>
     <string name="action_connect_server">连接服务器</string>
     <string name="bookmark_delete_title">删除书签</string>
-    <string name="bookmark_delete_message">确定删除“%1$s”吗？</string>
+    <string name="bookmark_delete_message">确定删除“%1$s”及其保存的密码吗？</string>
     <string name="bookmark_manage">管理%1$s</string>
     <string name="bookmarks_title">服务器书签</string>
     <string name="bookmark_add_server">添加服务器</string>
@@ -70,7 +70,8 @@
     <string name="settings_language">语言</string>
     <string name="accessibility_choose_language">选择语言</string>
     <string name="language_system">跟随系统</string>
-    <string name="language_simplified_chinese">简体中文</string>
+    <string name="language_simplified_chinese">中文（简体）</string>
+    <string name="language_traditional_chinese">中文（繁體）</string>
     <string name="language_english">English</string>
     <string name="selection_selected">已选择</string>
     <string name="selection_not_selected">未选择</string>

@@ -212,7 +212,7 @@ internal class AudioEngine(private val context: Context) {
                 } catch (error: Throwable) {
                     closeOutput()
                     if (running.get() && connected) {
-                        ClientSession.reportError(context.localized(R.string.error_with_detail, context.localized(R.string.error_audio_playback), error.message.orEmpty()))
+                        ClientSession.reportError(localizedFailureSource(R.string.error_audio_playback, error))
                         awaitRetry()
                     }
                 }
@@ -271,7 +271,7 @@ internal class AudioEngine(private val context: Context) {
                 // stop() interrupts blocking waits after flipping running to false.
             } catch (error: Throwable) {
                 if (running.get() && shouldCapture()) {
-                    ClientSession.reportError(context.localized(R.string.error_with_detail, context.localized(R.string.error_audio_recording), error.message.orEmpty()))
+                    ClientSession.reportError(localizedFailureSource(R.string.error_audio_recording, error))
                     releaseCapture()
                     awaitRetry()
                 }

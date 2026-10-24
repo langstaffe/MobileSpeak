@@ -114,7 +114,7 @@ internal class VoiceService : Service() {
         ) {
             runCatching { showForeground(true) }.onFailure {
                 microphoneUpgradeFailed = true
-                ClientSession.reportError(localized(R.string.error_with_detail, localized(R.string.error_background_microphone_enable), it.message.orEmpty()))
+                ClientSession.reportError(localizedFailureSource(R.string.error_background_microphone_enable, it))
             }
         }
         val allowCapture = allowsMicrophoneCapture(
@@ -132,7 +132,7 @@ internal class VoiceService : Service() {
             !foregroundHasMicrophone && !appActive && !microphoneRecoveryReported
         ) {
             microphoneRecoveryReported = true
-            ClientSession.reportError(localized(R.string.error_background_microphone_recovery))
+            ClientSession.reportError(LocalizedMessage(R.string.error_background_microphone_recovery))
         }
         val reapplyAudio = returnedToForeground || userInitiated
         audio.update(ui, allowCapture, reapplyRoute = reapplyAudio)

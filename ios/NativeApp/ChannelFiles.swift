@@ -81,12 +81,12 @@ extension Client {
         return ChannelFileTarget(server: server, channel: channel, path: channelFiles.path)
     }
     @discardableResult func fileCommand(_ type: String, fields: [String: Any] = [:]) -> Bool {
-        guard connected else { channelFilesLocalError = L10n.string("files_disconnected"); return false }
+        guard connected else { showFileError(.key("files_disconnected")); return false }
         channelFilesLocalError = nil
         var context = channelFileTarget?.command ?? [:]
         context["directory"] = channelFiles.path
         do { try send(context.merging(fields) { _, new in new }.merging(["type": type]) { _, new in new }); return true }
-        catch { channelFilesLocalError = error.localizedDescription; return false }
+        catch { showFileError(error); return false }
     }
     func openChannelFiles() {
         guard connected, let server = state.serverId, let own = state.clients.first(where: { $0.id == state.ownClient }) else { return }
@@ -98,14 +98,14 @@ extension Client {
     }
     func uploadChannelFile(_ url: URL, to target: ChannelFileTarget) async {
         guard !fileImporting && !fileCacheClearing && fileCache.status != "clearing" else {
-            channelFilesLocalError = L10n.string("files_cache_busy"); return
+            showFileError(.key("files_cache_busy")); return
         }
         fileImporting = true
         defer { fileImporting = false }
         let name = url.lastPathComponent
         guard !name.isEmpty, name != ".", name != "..", name.utf8.count <= 255,
               !name.contains(where: { $0 == "/" || $0 == "\\" || $0.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains) }) else {
-            channelFilesLocalError = L10n.string("files_invalid_path"); return
+            showFileError(.key("files_invalid_path")); return
         }
         do {
             let source = try await Task.detached(priority: .utility) {
@@ -122,7 +122,7 @@ extension Client {
             if !fileCommand("files_upload", fields: target.command.merging(["name": name, "source": source.path]) { _, new in new }) {
                 try? FileManager.default.removeItem(at: source)
             }
-        } catch { channelFilesLocalError = L10n.withDetail("files_choose_failed", error.localizedDescription) }
+        } catch { showFileError("files_choose_failed", error: error) }
     }
 }
 
@@ -177,8 +177,8 @@ struct FileCacheSettings: View {
 private func fileError(_ value: String) -> String {
     value.hasPrefix("files_") ? L10n.string(value) : value
 }
-private func fileSize(_ size: UInt64) -> String { ByteCountFormatter.string(fromByteCount: Int64(clamping: size), countStyle: .file) }
-private func fileDate(_ timestamp: Int64) -> String { Date(timeIntervalSince1970: Double(timestamp)).formatted(Date.FormatStyle(date: .numeric, time: .shortened).locale(L10n.locale)) }
+private func fileSize(_ size: UInt64) -> String { L10n.fileSize(size) }
+private func fileDate(_ timestamp: Int64) -> String { L10n.fileDate(timestamp) }
 private struct ChannelFileName: View {
     let name: String
     var body: some View {
@@ -243,15 +243,15 @@ struct ChannelFilesDrawer: View {
                         .frame(minWidth: 44, minHeight: 44).padding(.horizontal, 4).foregroundStyle(Palette.accent)
                 }.fixedSize(horizontal: true, vertical: false).disabled(!canRefresh)
                 .accessibilityIdentifier("files-refresh")
-                ChannelFileSortMenu(client: client, target: target, sort: files.sort, chromeSize: chromeSize, language: L10n.language)
+                ChannelFileSortMenu(client: client, target: target, sort: files.sort, chromeSize: chromeSize, language: AppLanguage.resolve(L10n.language))
                     .equatable()
             }.padding(.horizontal, 14)
             Divider().overlay(Palette.border)
             ScrollView {
                 LazyVStack(spacing: 0) {
                     if preparing { ProgressView(L10n.string("files_staging")).padding() }
-                    if let error = (presentation == nil ? client.channelFilesLocalError : presentationError) ?? files.error {
-                        Text(fileError(error)).font(.callout).foregroundStyle(Palette.disconnect).frame(maxWidth: .infinity, alignment: .leading).padding()
+                    if let error = (presentation == nil ? client.channelFilesLocalError : presentationError) ?? files.error.map(fileError) {
+                        Text(error).font(.callout).foregroundStyle(Palette.disconnect).frame(maxWidth: .infinity, alignment: .leading).padding()
                     }
                     if let info { information(info, target: target) }
                     else {
@@ -284,12 +284,12 @@ struct ChannelFilesDrawer: View {
             guard let target = uploadTarget else { return }
             switch result {
             case .success(let urls): if let url = urls.first { preparing = true; Task { await client.uploadChannelFile(url, to: target); preparing = false } }
-            case .failure(let error): client.channelFilesLocalError = L10n.withDetail("files_choose_failed", error.localizedDescription)
+            case .failure(let error): client.showFileError("files_choose_failed", error: error)
             }
         }
         .sheet(item: $fileAction) { action in
             if action.share { ChannelFileShare(url: action.url, onClose: { fileAction = nil }) }
-            else { ChannelFileOpen(url: action.url, onFailure: { client.channelFilesLocalError = L10n.string("files_choose_failed") }, onClose: { fileAction = nil }) }
+            else { ChannelFileOpen(url: action.url, onFailure: { client.showFileError(.key("files_choose_failed")) }, onClose: { fileAction = nil }) }
         }
     }
     @ViewBuilder private func row(_ entry: ChannelFileEntry, target: ChannelFileTarget?) -> some View {

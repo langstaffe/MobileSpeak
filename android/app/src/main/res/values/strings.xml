@@ -16,7 +16,7 @@
     <string name="disconnect_badge">OFF</string>
     <string name="action_connect_server">Connect to Server</string>
     <string name="bookmark_delete_title">Delete Bookmark</string>
-    <string name="bookmark_delete_message">Delete “%1$s”?</string>
+    <string name="bookmark_delete_message">Delete “%1$s” and its saved password?</string>
     <string name="bookmark_manage">Manage %1$s</string>
     <string name="bookmarks_title">Server Bookmarks</string>
     <string name="bookmark_add_server">Add Server</string>
@@ -71,7 +71,8 @@
     <string name="settings_language">Language</string>
     <string name="accessibility_choose_language">Choose language</string>
     <string name="language_system">System Default</string>
-    <string name="language_simplified_chinese">简体中文</string>
+    <string name="language_simplified_chinese">中文（简体）</string>
+    <string name="language_traditional_chinese">中文（繁體）</string>
     <string name="language_english">English</string>
     <string name="selection_selected">Selected</string>
     <string name="selection_not_selected">Not selected</string>

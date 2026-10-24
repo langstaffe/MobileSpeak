@@ -4,7 +4,6 @@ import android.content.Context
 import androidx.annotation.PluralsRes
 import androidx.annotation.StringRes
 import androidx.appcompat.app.AppCompatDelegate
-import androidx.core.content.ContextCompat
 import androidx.core.os.ConfigurationCompat
 import androidx.core.os.LocaleListCompat
 import java.util.Locale
@@ -12,6 +11,7 @@ import java.util.Locale
 internal enum class AppLanguage(val code: String, val tag: String?, @param:StringRes val title: Int) {
     SYSTEM("system", null, R.string.language_system),
     SIMPLIFIED_CHINESE("zh-Hans", "zh-Hans", R.string.language_simplified_chinese),
+    TRADITIONAL_CHINESE("zh-Hant", "zh-Hant", R.string.language_traditional_chinese),
     ENGLISH("en", "en", R.string.language_english);
 
     companion object {
@@ -19,11 +19,7 @@ internal enum class AppLanguage(val code: String, val tag: String?, @param:Strin
 
         fun selected(): AppLanguage {
             val locale = AppCompatDelegate.getApplicationLocales()[0] ?: return SYSTEM
-            return when {
-                locale.language == "zh" && (locale.script == "Hans" || locale.country in setOf("CN", "SG")) -> SIMPLIFIED_CHINESE
-                locale.language == "en" -> ENGLISH
-                else -> SYSTEM
-            }
+            return supported(locale) ?: SYSTEM
         }
 
         fun select(language: AppLanguage): Boolean {
@@ -31,28 +27,49 @@ internal enum class AppLanguage(val code: String, val tag: String?, @param:Strin
             AppCompatDelegate.setApplicationLocales(
                 language.tag?.let(LocaleListCompat::forLanguageTags) ?: LocaleListCompat.getEmptyLocaleList(),
             )
-            ClientSession.refreshLanguage()
+            ClientSession.refreshLanguage(resolve(language, systemLanguageTags()))
+            AppUpdates.refreshLanguage()
             return true
         }
 
-        fun resolve(selection: AppLanguage, systemLanguageTags: List<String>): AppLanguage {
-            if (selection != SYSTEM) return selection
-            val locale = systemLanguageTags.firstOrNull()?.let(Locale::forLanguageTag)
-            return if (locale?.language == "zh" &&
-                (locale.script == "Hans" || locale.country in setOf("CN", "SG"))
-            ) SIMPLIFIED_CHINESE else ENGLISH
+        fun resolve(selection: AppLanguage, systemLanguageTags: List<String>): AppLanguage =
+            if (selection != SYSTEM) selection else systemLanguageTags.firstNotNullOfOrNull {
+                supported(Locale.forLanguageTag(it))
+            } ?: ENGLISH
+
+        private fun supported(locale: Locale): AppLanguage? = when {
+            locale.language == "en" -> ENGLISH
+            locale.language != "zh" -> null
+            locale.script.equals("Hans", ignoreCase = true) -> SIMPLIFIED_CHINESE
+            locale.script.equals("Hant", ignoreCase = true) -> TRADITIONAL_CHINESE
+            locale.country in setOf("CN", "SG") -> SIMPLIFIED_CHINESE
+            locale.country in setOf("TW", "HK", "MO") -> TRADITIONAL_CHINESE
+            locale.country.isEmpty() -> SIMPLIFIED_CHINESE
+            else -> null
         }
 
         fun shouldApply(current: AppLanguage, requested: AppLanguage) = current != requested
     }
 }
 
-private fun Context.languageContext(): Context {
-    val locales = AppCompatDelegate.getApplicationLocales()
-    if (locales.isEmpty) return ContextCompat.getContextForLanguage(this)
+internal fun Context.languageContext(): Context {
+    val language = AppLanguage.resolve(AppLanguage.selected(), systemLanguageTags())
+    return contextForLanguage(language)
+}
+
+internal fun Context.contextForLanguage(language: AppLanguage): Context {
     val configuration = android.content.res.Configuration(resources.configuration)
-    ConfigurationCompat.setLocales(configuration, locales)
+    ConfigurationCompat.setLocales(configuration, LocaleListCompat.forLanguageTags(language.tag!!))
     return createConfigurationContext(configuration)
+}
+
+internal fun Context.resolvedSystemLanguageContext(): Context {
+    val language = AppLanguage.resolve(AppLanguage.SYSTEM, systemLanguageTags())
+    return contextForLanguage(language)
+}
+
+internal fun systemLanguageTags(): List<String> = android.content.res.Resources.getSystem().configuration.locales.let { locales ->
+    (0 until locales.size()).map { locales[it].toLanguageTag() }
 }
 
 internal fun Context.localized(@StringRes id: Int, vararg arguments: Any): String =
@@ -61,12 +78,36 @@ internal fun Context.localized(@StringRes id: Int, vararg arguments: Any): Strin
 internal fun Context.localizedQuantity(@PluralsRes id: Int, quantity: Int, vararg arguments: Any): String =
     languageContext().resources.getQuantityString(id, quantity, *arguments)
 
+internal fun Context.localizedFileSize(bytes: Long): String =
+    android.text.format.Formatter.formatFileSize(languageContext(), bytes)
+
+data class LocalizedMessage(
+    @param:StringRes val id: Int,
+    val detail: String? = null,
+    val detailSource: LocalizedMessage? = null,
+    val sizeBytes: Long? = null,
+) {
+    fun render(context: Context): String {
+        if (sizeBytes != null) return context.getString(id, android.text.format.Formatter.formatFileSize(context, sizeBytes))
+        val base = context.getString(id)
+        val suffix = detailSource?.render(context) ?: detail
+        return if (suffix.isNullOrBlank()) base else context.getString(R.string.error_with_detail, base, suffix)
+    }
+}
+
+internal class LocalizedFailure(val source: LocalizedMessage, context: Context) :
+    IllegalStateException(source.render(context.languageContext()))
+
+internal fun localizedFailureSource(@StringRes id: Int, error: Throwable): LocalizedMessage =
+    LocalizedMessage(id, detail = if (error is LocalizedFailure) null else error.message.orEmpty(),
+        detailSource = (error as? LocalizedFailure)?.source)
+
 internal fun Member.accessibilityLabel(context: Context): String =
     (listOf(name) + listOf(away to R.string.member_away, deafened to R.string.member_listening_off,
         muted to R.string.member_muted, speaking to R.string.member_speaking)
         .filter { it.first }.map { context.localized(it.second) }).joinToString(", ")
 
-internal fun Context.localizedCoreError(code: String?, detail: String? = null): String {
+internal fun coreErrorSource(code: String?, detail: String? = null): LocalizedMessage {
     val resource = when (code) {
             "nickname_invalid" -> R.string.error_nickname_invalid
             "profile_save_failed" -> R.string.error_profile_save_failed
@@ -96,7 +137,9 @@ internal fun Context.localizedCoreError(code: String?, detail: String? = null): 
             "unsupported_message_target" -> R.string.error_unsupported_message_target
             else -> R.string.error_generic
         }
-    val message = localized(resource)
     val safeDetail = detail ?: code?.takeIf { resource == R.string.error_generic && it != "core_error" }
-    return if (safeDetail.isNullOrBlank()) message else localized(R.string.error_with_detail, message, safeDetail)
+    return LocalizedMessage(resource, safeDetail)
 }
+
+internal fun Context.localizedCoreError(code: String?, detail: String? = null): String =
+    coreErrorSource(code, detail).render(languageContext())

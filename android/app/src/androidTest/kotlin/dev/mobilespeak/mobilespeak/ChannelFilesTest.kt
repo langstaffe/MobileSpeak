@@ -2,6 +2,7 @@ package dev.mobilespeak.mobilespeak
 
 import androidx.activity.compose.setContent
 import androidx.activity.compose.LocalActivityResultRegistryOwner
+import androidx.appcompat.app.AppCompatDelegate
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.width
@@ -56,95 +57,111 @@ class ChannelFilesTest {
         val context = instrumentation.targetContext
         org.junit.Assume.assumeFalse(context.getSystemService(android.app.KeyguardManager::class.java).isKeyguardLocked)
         val files = ChannelFilesState(open = true, server = "fixture", channel = 7, channelName = "当前实际加入的频道", path = "/文档/a very long folder path/子目录", status = "ready",
-            entries = (0..40).map { ChannelFileEntry("很长的中文文件名称用于保留扩展名-$it.pdf", 0, 1700000000, false, "file-text", null) })
-        for (language in listOf("en", "zh-Hans")) for (font in listOf(1f, 2f)) ActivityScenario.launch(MainActivity::class.java).use { scenario ->
-            lateinit var activity: MainActivity
-            val configuration = android.content.res.Configuration(context.resources.configuration).apply { setLocale(java.util.Locale.forLanguageTag(language)) }
-            val localized = context.createConfigurationContext(configuration)
-            val density = context.resources.displayMetrics.density
-            scenario.onActivity { current ->
-                activity = current
-                activity.setContent { CompositionLocalProvider(LocalDensity provides Density(density, font), LocalContext provides localized, LocalConfiguration provides configuration, LocalResources provides localized.resources, LocalActivityResultRegistryOwner provides activity) {
-                    MaterialTheme(colorScheme = darkColorScheme(primary = Palette.accent, surface = Palette.card, onSurface = Palette.text)) { Box(Modifier.width(320.dp).background(Palette.bottom)) {
-                        ChannelFilesDrawer(SessionUiState(snapshot = Snapshot(status = "connected"), channelFiles = files))
-                    } }
-                } }
-            }
-            android.os.SystemClock.sleep(300); instrumentation.runOnMainSync { }
-            fun semantics(): List<SemanticsNode> {
-                var result = emptyList<SemanticsNode>()
-                instrumentation.runOnMainSync {
-                    fun root(view: android.view.View): ViewRootForTest? = (view as? ViewRootForTest) ?: (view as? android.view.ViewGroup)?.let { group ->
-                        (0 until group.childCount).firstNotNullOfOrNull { root(group.getChildAt(it)) }
-                    }
-                    fun descendants(node: SemanticsNode): List<SemanticsNode> = listOf(node) + node.children.flatMap(::descendants)
-                    result = descendants(requireNotNull(root(activity.window.decorView)).semanticsOwner.rootSemanticsNode)
-                }
-                return result
-            }
-            fun texts(node: SemanticsNode) = node.config.getOrNull(SemanticsProperties.Text)?.map { it.text }.orEmpty() +
-                node.config.getOrNull(SemanticsProperties.ContentDescription).orEmpty()
-            fun buttons(label: String) = semantics().filter { it.config.getOrNull(SemanticsActions.OnClick)?.action != null && label in texts(it) }
-            fun enabled(node: SemanticsNode) = !node.config.contains(SemanticsProperties.Disabled)
-            fun button(label: String) = requireNotNull(buttons(label).firstOrNull()) { "Missing $label" }
-            val refresh = button(localized.getString(R.string.files_reload))
-            val sorting = button(localized.getString(R.string.files_sort_name))
-            val refreshBounds = refresh.boundsInRoot
-            val sortBounds = sorting.boundsInRoot
-            assertTrue(enabled(refresh))
-            assertTrue(refreshBounds.right <= sortBounds.left)
-            assertTrue(sortBounds.right <= 320 * density)
-            assertTrue(refreshBounds.height >= 48 * density - 1)
-            assertTrue(sortBounds.height >= 48 * density - 1)
-            val headerBounds = semantics().first { files.channelName in texts(it) }.boundsInRoot
-            fun tagged(value: String) = semantics().single { it.config.getOrNull(SemanticsProperties.TestTag) == value }.boundsInRoot
-            val heading = tagged("drawer-page-title")
-            val subtitle = tagged("drawer-page-subtitle")
-            assertEquals(160 * density, heading.center.x, density)
-            assertEquals(heading.center.x, subtitle.center.x, density)
-            assertEquals(2 * density, subtitle.top - heading.bottom, density / 2)
-            assertTrue(tagged("drawer-page-back").right <= heading.left)
-            assertTrue(heading.right <= tagged("files-upload").left)
-            assertTrue(semantics().any { texts(it).any { text -> text.contains(".pdf") } })
-            val scroll = semantics().first { it.config.contains(SemanticsProperties.VerticalScrollAxisRange) }
-            scenario.onActivity { assertTrue(scroll.config[SemanticsActions.ScrollBy].action!!(0f, 200 * density)) }
-            android.os.SystemClock.sleep(300)
-            assertEquals(headerBounds, semantics().first { files.channelName in texts(it) }.boundsInRoot)
-            val shot = requireNotNull(instrumentation.uiAutomation.takeScreenshot())
-            assertTrue(shot.width > 0 && shot.height > 0)
-            java.io.File(context.getExternalFilesDir(null), "channel-files-$language-$font.png").outputStream().use { shot.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
-            shot.recycle()
-            for ((status, connected) in listOf("ready" to true, "loading" to true, "failed" to true, "failed" to false)) {
-                instrumentation.runOnMainSync {
+            entries = (0..40).map { ChannelFileEntry("很长的中文文件名称用于保留扩展名-$it.pdf", 1_234_567, 1700000000, false, "file-text", null) })
+        for (language in listOf("en", "zh-Hans", "zh-Hant")) for (font in listOf(1f, 2f)) ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            val original = AppCompatDelegate.getApplicationLocales()
+            try {
+                instrumentation.runOnMainSync { AppLanguage.select(AppLanguage.fromCode(language)) }
+                instrumentation.waitForIdleSync()
+                assertEquals(AppLanguage.fromCode(language), AppLanguage.selected())
+                lateinit var activity: MainActivity
+                val configuration = android.content.res.Configuration(context.resources.configuration).apply { setLocale(java.util.Locale.forLanguageTag(language)) }
+                val localized = context.createConfigurationContext(configuration)
+                val density = context.resources.displayMetrics.density
+                scenario.onActivity { current ->
+                    activity = current
                     activity.setContent { CompositionLocalProvider(LocalDensity provides Density(density, font), LocalContext provides localized, LocalConfiguration provides configuration, LocalResources provides localized.resources, LocalActivityResultRegistryOwner provides activity) {
                         MaterialTheme(colorScheme = darkColorScheme(primary = Palette.accent, surface = Palette.card, onSurface = Palette.text)) { Box(Modifier.width(320.dp).background(Palette.bottom)) {
-                            ChannelFilesDrawer(SessionUiState(snapshot = Snapshot(status = if (connected) "connected" else "disconnected"),
-                                channelFiles = files.copy(path = if (status == "ready") "/" else files.path, sort = "newest", status = status, entries = emptyList())))
+                            ChannelFilesDrawer(SessionUiState(snapshot = Snapshot(status = "connected"), channelFiles = files))
                         } }
                     } }
                 }
                 android.os.SystemClock.sleep(300); instrumentation.runOnMainSync { }
-                val refreshes = buttons(localized.getString(R.string.files_reload))
-                assertEquals(if (status == "failed") 2 else 1, refreshes.size)
-                assertTrue(refreshes.all { enabled(it) == (connected && status != "loading") })
-                assertTrue(enabled(button(localized.getString(R.string.files_sort_newest))))
-                val uploads = buttons(localized.getString(R.string.files_upload))
-                assertEquals("Only the header offers upload, including an empty directory", 1, uploads.size)
-                assertEquals(connected && status == "ready", enabled(uploads.single()))
-                if (status == "ready") assertTrue(semantics().any { localized.getString(R.string.files_empty) in texts(it) })
-                if (status == "loading") {
-                    val all = semantics()
-                    val list = all.single { it.config.getOrNull(SemanticsProperties.TestTag) == "channel-files-list" }.boundsInRoot
-                    val text = all.first { localized.getString(R.string.files_loading) in texts(it) }.boundsInRoot
-                    val spinner = all.first { it.config.contains(SemanticsProperties.ProgressBarRangeInfo) }.boundsInRoot
-                    assertEquals("Loading indicator centers at $language/$font", list.center.x, spinner.center.x, density)
-                    assertEquals("Loading label centers at $language/$font", list.center.x, text.center.x, density)
-                    assertEquals("Loading stays at the top of the list", list.top + 24 * density, minOf(spinner.top, text.top), density)
-                    assertTrue("Loading label follows the native indicator", text.top >= spinner.bottom)
-                    val shot = requireNotNull(instrumentation.uiAutomation.takeScreenshot())
-                    java.io.File(context.getExternalFilesDir(null), "channel-files-loading-$language-$font.png").outputStream().use { shot.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
-                    shot.recycle()
+                fun semantics(): List<SemanticsNode> {
+                    var result = emptyList<SemanticsNode>()
+                    instrumentation.runOnMainSync {
+                        fun root(view: android.view.View): ViewRootForTest? = (view as? ViewRootForTest) ?: (view as? android.view.ViewGroup)?.let { group ->
+                            (0 until group.childCount).firstNotNullOfOrNull { root(group.getChildAt(it)) }
+                        }
+                        fun descendants(node: SemanticsNode): List<SemanticsNode> = listOf(node) + node.children.flatMap(::descendants)
+                        result = descendants(requireNotNull(root(activity.window.decorView)).semanticsOwner.rootSemanticsNode)
+                    }
+                    return result
                 }
+                fun texts(node: SemanticsNode) = node.config.getOrNull(SemanticsProperties.Text)?.map { it.text }.orEmpty() +
+                    node.config.getOrNull(SemanticsProperties.ContentDescription).orEmpty()
+                fun buttons(label: String) = semantics().filter { it.config.getOrNull(SemanticsActions.OnClick)?.action != null && label in texts(it) }
+                fun enabled(node: SemanticsNode) = !node.config.contains(SemanticsProperties.Disabled)
+                fun button(label: String) = requireNotNull(buttons(label).firstOrNull()) { "Missing $label" }
+                val refresh = button(localized.getString(R.string.files_reload))
+                val sorting = button(localized.getString(R.string.files_sort_name))
+                val refreshBounds = refresh.boundsInRoot
+                val sortBounds = sorting.boundsInRoot
+                assertTrue(enabled(refresh))
+                assertTrue(refreshBounds.right <= sortBounds.left)
+                assertTrue(sortBounds.right <= 320 * density)
+                assertTrue(refreshBounds.height >= 48 * density - 1)
+                assertTrue(sortBounds.height >= 48 * density - 1)
+                val headerBounds = semantics().first { files.channelName in texts(it) }.boundsInRoot
+                fun tagged(value: String) = semantics().single { it.config.getOrNull(SemanticsProperties.TestTag) == value }.boundsInRoot
+                val heading = tagged("drawer-page-title")
+                val subtitle = tagged("drawer-page-subtitle")
+                assertEquals(160 * density, heading.center.x, density)
+                assertEquals(heading.center.x, subtitle.center.x, density)
+                assertEquals(2 * density, subtitle.top - heading.bottom, density / 2)
+                assertTrue(tagged("drawer-page-back").right <= heading.left)
+                assertTrue(heading.right <= tagged("files-upload").left)
+                assertTrue(semantics().any { texts(it).any { text -> text.contains(".pdf") } })
+                val locale = java.util.Locale.forLanguageTag(language)
+                val expectedDate = java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.SHORT, java.text.DateFormat.SHORT, locale)
+                    .format(java.util.Date(files.entries.first().timestamp * 1000))
+                val expectedSize = android.text.format.Formatter.formatFileSize(localized, files.entries.first().size)
+                assertTrue("$language date and size follow the selected locale", semantics().any { node ->
+                    texts(node).any { text -> "$expectedSize · $expectedDate" in text }
+                })
+                if (language == "en") assertFalse("English date must not keep Chinese day-period text", expectedDate.contains("上午"))
+                val scroll = semantics().first { it.config.contains(SemanticsProperties.VerticalScrollAxisRange) }
+                scenario.onActivity { assertTrue(scroll.config[SemanticsActions.ScrollBy].action!!(0f, 200 * density)) }
+                android.os.SystemClock.sleep(300)
+                assertEquals(headerBounds, semantics().first { files.channelName in texts(it) }.boundsInRoot)
+                val shot = requireNotNull(instrumentation.uiAutomation.takeScreenshot())
+                assertTrue(shot.width > 0 && shot.height > 0)
+                java.io.File(context.getExternalFilesDir(null), "channel-files-$language-$font.png").outputStream().use { shot.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
+                shot.recycle()
+                for ((status, connected) in listOf("ready" to true, "loading" to true, "failed" to true, "failed" to false)) {
+                    instrumentation.runOnMainSync {
+                        activity.setContent { CompositionLocalProvider(LocalDensity provides Density(density, font), LocalContext provides localized, LocalConfiguration provides configuration, LocalResources provides localized.resources, LocalActivityResultRegistryOwner provides activity) {
+                            MaterialTheme(colorScheme = darkColorScheme(primary = Palette.accent, surface = Palette.card, onSurface = Palette.text)) { Box(Modifier.width(320.dp).background(Palette.bottom)) {
+                                ChannelFilesDrawer(SessionUiState(snapshot = Snapshot(status = if (connected) "connected" else "disconnected"),
+                                    channelFiles = files.copy(path = if (status == "ready") "/" else files.path, sort = "newest", status = status, entries = emptyList())))
+                            } }
+                        } }
+                    }
+                    android.os.SystemClock.sleep(300); instrumentation.runOnMainSync { }
+                    val refreshes = buttons(localized.getString(R.string.files_reload))
+                    assertEquals(if (status == "failed") 2 else 1, refreshes.size)
+                    assertTrue(refreshes.all { enabled(it) == (connected && status != "loading") })
+                    assertTrue(enabled(button(localized.getString(R.string.files_sort_newest))))
+                    val uploads = buttons(localized.getString(R.string.files_upload))
+                    assertEquals("Only the header offers upload, including an empty directory", 1, uploads.size)
+                    assertEquals(connected && status == "ready", enabled(uploads.single()))
+                    if (status == "ready") assertTrue(semantics().any { localized.getString(R.string.files_empty) in texts(it) })
+                    if (status == "loading") {
+                        val all = semantics()
+                        val list = all.single { it.config.getOrNull(SemanticsProperties.TestTag) == "channel-files-list" }.boundsInRoot
+                        val text = all.first { localized.getString(R.string.files_loading) in texts(it) }.boundsInRoot
+                        val spinner = all.first { it.config.contains(SemanticsProperties.ProgressBarRangeInfo) }.boundsInRoot
+                        assertEquals("Loading indicator centers at $language/$font", list.center.x, spinner.center.x, density)
+                        assertEquals("Loading label centers at $language/$font", list.center.x, text.center.x, density)
+                        assertEquals("Loading stays at the top of the list", list.top + 24 * density, minOf(spinner.top, text.top), density)
+                        assertTrue("Loading label follows the native indicator", text.top >= spinner.bottom)
+                        val shot = requireNotNull(instrumentation.uiAutomation.takeScreenshot())
+                        java.io.File(context.getExternalFilesDir(null), "channel-files-loading-$language-$font.png").outputStream().use { shot.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
+                        shot.recycle()
+                    }
+                }
+            } finally {
+                instrumentation.runOnMainSync { AppCompatDelegate.setApplicationLocales(original) }
             }
         }
     }

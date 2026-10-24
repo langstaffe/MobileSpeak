@@ -4,6 +4,7 @@ import Foundation
 enum AppLanguage: String, CaseIterable, Identifiable {
     case system
     case simplifiedChinese = "zh-Hans"
+    case traditionalChinese = "zh-Hant"
     case english = "en"
 
     static let preferenceKey = "mobilespeak.language"
@@ -15,10 +16,20 @@ enum AppLanguage: String, CaseIterable, Identifiable {
 
     static func resolve(_ selection: Self, systemLanguageTags: [String] = Locale.preferredLanguages) -> Self {
         guard selection == .system else { return selection }
-        guard let tag = systemLanguageTags.first else { return .english }
-        let locale = Locale(identifier: tag)
-        return locale.languageCode == "zh" && (locale.scriptCode == "Hans" || ["CN", "SG"].contains(locale.regionCode ?? ""))
-            ? .simplifiedChinese : .english
+        for tag in systemLanguageTags {
+            let locale = Locale(identifier: tag)
+            if locale.languageCode == "en" { return .english }
+            guard locale.languageCode == "zh" else { continue }
+            if locale.scriptCode == "Hans" { return .simplifiedChinese }
+            if locale.scriptCode == "Hant" { return .traditionalChinese }
+            switch locale.regionCode {
+            case "CN", "SG": return .simplifiedChinese
+            case "TW", "HK", "MO": return .traditionalChinese
+            case nil: return .simplifiedChinese
+            default: continue
+            }
+        }
+        return .english
     }
 
     var resolvedIdentifier: String { Self.resolve(self).rawValue }
@@ -27,6 +38,7 @@ enum AppLanguage: String, CaseIterable, Identifiable {
         switch self {
         case .system: "language_system"
         case .simplifiedChinese: "language_simplified_chinese"
+        case .traditionalChinese: "language_traditional_chinese"
         case .english: "language_english"
         }
     }
@@ -34,21 +46,29 @@ enum AppLanguage: String, CaseIterable, Identifiable {
 
 @MainActor final class LanguageSettings: ObservableObject {
     @Published private(set) var selection: AppLanguage
+    @Published private(set) var systemLanguage: AppLanguage
     private let defaults: UserDefaults
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         selection = AppLanguage.stored(in: defaults)
+        systemLanguage = AppLanguage.resolve(.system)
     }
 
     @discardableResult func select(_ language: AppLanguage) -> Bool {
         guard selection != language else { return false }
+        if language == .system { refreshSystemLanguage() }
         defaults.set(language.rawValue, forKey: AppLanguage.preferenceKey)
         selection = language
         return true
     }
 
-    var locale: Locale { selection.locale }
+    func refreshSystemLanguage(systemLanguageTags: [String] = Locale.preferredLanguages) {
+        let current = AppLanguage.resolve(.system, systemLanguageTags: systemLanguageTags)
+        if systemLanguage != current { systemLanguage = current }
+    }
+
+    var locale: Locale { Locale(identifier: (selection == .system ? systemLanguage : selection).rawValue) }
 }
 
 enum L10n {
@@ -73,6 +93,14 @@ enum L10n {
         format("channel_members_summary", count)
     }
 
+    static func fileSize(_ bytes: UInt64) -> String {
+        Int64(clamping: bytes).formatted(.byteCount(style: .file).locale(locale))
+    }
+
+    static func fileDate(_ timestamp: Int64) -> String {
+        Date(timeIntervalSince1970: Double(timestamp)).formatted(Date.FormatStyle(date: .numeric, time: .shortened).locale(locale))
+    }
+
     static func withDetail(_ key: String, _ detail: String?) -> String {
         let message = string(key)
         return detail.flatMap { $0.isEmpty ? nil : format("error_with_detail", message, $0) } ?? message
@@ -93,5 +121,36 @@ enum L10n {
         let message = string(known ?? "error_generic")
         let safeDetail = detail ?? (known == nil && code != "core_error" ? code : nil)
         return safeDetail.flatMap { $0.isEmpty ? nil : format("error_with_detail", message, $0) } ?? message
+    }
+}
+
+enum LocalizedNotice {
+    case key(String)
+    case detail(String, String?)
+    indirect case nested(String, LocalizedNotice)
+    case core(String?, String?)
+    case fileCacheError(String, String)
+    case fileCacheCleared(UInt64)
+    case audioFormat(Double, Int64)
+
+    private static let sourceKey = "MobileSpeak.localizedNotice"
+
+    func error(domain: String, code: Int) -> NSError {
+        NSError(domain: domain, code: code, userInfo: [NSLocalizedDescriptionKey: text, Self.sourceKey: self])
+    }
+    static func source(of error: Error) -> Self? {
+        (error as NSError).userInfo[sourceKey] as? Self
+    }
+
+    var text: String {
+        switch self {
+        case .key(let key): L10n.string(key)
+        case .detail(let key, let detail): L10n.withDetail(key, detail)
+        case .nested(let key, let detail): L10n.withDetail(key, detail.text)
+        case .core(let code, let detail): L10n.coreError(code, detail: detail)
+        case .fileCacheError(let key, let error): L10n.withDetail(key, error.hasPrefix("files_") ? L10n.string(error) : error)
+        case .fileCacheCleared(let bytes): L10n.format("files_cache_cleared", L10n.fileSize(bytes))
+        case .audioFormat(let rate, let channels): L10n.format("error_audio_format", rate, channels)
+        }
     }
 }

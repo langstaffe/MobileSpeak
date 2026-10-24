@@ -34,13 +34,13 @@ internal class SecureStore(private val context: Context) {
 
     @Synchronized
     fun bookmarks(): List<Bookmark> {
-        check(!blocked) { context.localized(R.string.error_secure_data_read) }
+        if (blocked) throw LocalizedFailure(LocalizedMessage(R.string.error_secure_data_read), context)
         return data.optJSONArray("bookmarks").objects().map(Bookmark::from)
     }
 
     @Synchronized
     fun identity(): JSONObject? {
-        check(!blocked) { context.localized(R.string.error_secure_data_read) }
+        if (blocked) throw LocalizedFailure(LocalizedMessage(R.string.error_secure_data_read), context)
         return data.optJSONObject("identity")
     }
 
@@ -54,13 +54,13 @@ internal class SecureStore(private val context: Context) {
 
     @SuppressLint("UseKtx") // The platform commit() result is required to avoid reporting a failed write as saved.
     private fun save(next: JSONObject) {
-        check(!blocked) { context.localized(R.string.error_secure_data_overwrite) }
+        if (blocked) throw LocalizedFailure(LocalizedMessage(R.string.error_secure_data_overwrite), context)
         val encoded = Base64.encodeToString(encrypt(next.toString().toByteArray()), Base64.NO_WRAP)
         val previous = preferences.getString("data", null)
         if (!preferences.edit().putString("data", encoded).commit()) {
             // SharedPreferences updates its memory cache even when disk commit fails.
             preferences.edit().putString("data", previous).commit()
-            error(context.localized(R.string.error_secure_store_write))
+            throw LocalizedFailure(LocalizedMessage(R.string.error_secure_store_write), context)
         }
         data = next
     }

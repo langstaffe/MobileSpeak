@@ -36,6 +36,7 @@ internal object ClientSession {
     private lateinit var context: Context
     private lateinit var store: SecureStore
     private var initialized = false
+    private var displayedLanguage = AppLanguage.ENGLISH
     private val nicknameRequest = AtomicLong()
     private val audioRequest = AtomicLong()
     private val audioLock = Any()
@@ -57,6 +58,7 @@ internal object ClientSession {
         synchronized(this) {
             if (initialized) return
             context = applicationContext.applicationContext
+            displayedLanguage = AppLanguage.resolve(AppLanguage.selected(), systemLanguageTags())
             store = SecureStore(context)
             val noise = restoreNoiseSuppression(context.getSharedPreferences("mobilespeak.settings", Context.MODE_PRIVATE))
             val root = File(context.filesDir, "core")
@@ -69,6 +71,7 @@ internal object ClientSession {
                 noiseSuppression = noise, audioProcessingStatus = "switching",
                 microphoneMuted = !microphonePermission, microphonePermission = microphonePermission,
                 error = store.readError,
+                errorSource = if (store.readError != null) LocalizedMessage(R.string.error_secure_store_read) else null,
                 avatarPreviewPath = if (currentPreview?.isFile == true) currentPreview.absolutePath
                 else if (!File(root, AvatarImages.currentName).exists() && preview.isFile && upload.isFile) {
                     (if (preview.lastModified() > upload.lastModified()) upload else preview).absolutePath
@@ -144,7 +147,7 @@ internal object ClientSession {
                 mutableState.update { it.copy(avatarClearingLocally = false) }
                 if (selection == avatarSelection.get()) {
                     if (saved) mutableState.update { it.copy(avatarPreviewPath = null, avatarRevision = it.avatarRevision + 1, avatarIntent = "clear") }
-                    else mutableState.update { it.copy(avatarStatus = "clear_save_failed", avatarDetail = null) }
+                    else mutableState.update { it.copy(avatarStatus = "clear_save_failed", avatarDetail = null, avatarDetailSource = null) }
                 }
             }
         }
@@ -164,13 +167,14 @@ internal object ClientSession {
     }
 
     private fun avatarFailure() {
-        mutableState.update { it.copy(avatarStatus = "failed", avatarDetail = context.localized(R.string.avatar_image_error)) }
+        val source = LocalizedMessage(R.string.avatar_image_error)
+        mutableState.update { it.copy(avatarStatus = "failed", avatarDetail = source.render(context.languageContext()), avatarDetailSource = source) }
     }
 
     fun connect(bookmark: Bookmark) = coreExecutor.execute {
         if (state.value.snapshot.status != "disconnected") return@execute
         val identity = runCatching { store.identity() }.getOrElse {
-            fail(context.localized(R.string.error_with_detail, context.localized(R.string.error_identity_read), it.message.orEmpty()))
+            fail(localizedFailureSource(R.string.error_identity_read, it))
             return@execute
         }
         val connectionId = UUID.randomUUID().toString()
@@ -186,7 +190,7 @@ internal object ClientSession {
             it.copy(
                 snapshot = Snapshot(status = "connecting", connectionId = connectionId),
                 microphoneMuted = it.microphoneMuted || !microphonePermission,
-                error = null,
+                error = null, errorSource = null,
             )
         }
         updateService()
@@ -225,7 +229,7 @@ internal object ClientSession {
         val nextInput = inputMuted ?: old.microphoneMuted
         val nextOutput = deafened ?: old.deafened
         if (!nextInput && !microphonePermission) {
-            fail(context.localized(R.string.error_microphone_permission))
+            fail(LocalizedMessage(R.string.error_microphone_permission))
             return
         }
         mutableState.update { it.copy(microphoneMuted = nextInput, deafened = nextOutput) }
@@ -268,7 +272,8 @@ internal object ClientSession {
         // Core notifications arrive on another executor, including very fast RNNoise/None loads.
         synchronized(audioLock) {
             if (!send(JSONObject().put("type", "set_noise_suppression").put("mode", mode).put("request_id", audioRequest.incrementAndGet()))) return
-            mutableState.update { it.copy(noiseSuppression = mode, audioProcessingStatus = "switching", audioProcessingError = null) }
+            mutableState.update { it.copy(noiseSuppression = mode, audioProcessingStatus = "switching",
+                audioProcessingError = null, audioProcessingErrorSource = null) }
         }
     }
 
@@ -276,9 +281,10 @@ internal object ClientSession {
         val request = nicknameRequest.incrementAndGet()
         coreExecutor.execute {
             if (request != nicknameRequest.get()) return@execute
-            mutableState.update { it.copy(nicknameSaving = true, nicknameSaveError = null) }
+            mutableState.update { it.copy(nicknameSaving = true, nicknameSaveError = null, nicknameSaveErrorSource = null) }
             if (!send(JSONObject().put("type", "set_nickname").put("nickname", nickname).put("request_id", request))) {
-                mutableState.update { it.copy(nicknameSaving = false, nicknameSaveError = it.error) }
+                mutableState.update { it.copy(nicknameSaving = false, nicknameSaveError = it.error,
+                    nicknameSaveErrorSource = it.errorSource) }
             }
         }
         return request
@@ -286,7 +292,7 @@ internal object ClientSession {
 
     fun saveBookmark(id: String?, title: String, host: String, port: String, password: String): Bookmark? {
         val bookmark = runCatching { Bookmark.create(id, title, host, port, password) }.getOrElse {
-            fail(context.localized(R.string.error_bookmark_invalid))
+            fail(LocalizedMessage(R.string.error_bookmark_invalid))
             return null
         }
         return runCatching {
@@ -299,23 +305,24 @@ internal object ClientSession {
                     it.id != id && Bookmark.normalizedHost(it.host) == normalized.host && it.port == normalized.port
                 }
                 val endpointChanged = original == null || Bookmark.normalizedHost(original.host) != normalized.host || original.port != normalized.port
-                check(id == null || !endpointChanged || duplicate == null) { context.localized(R.string.error_bookmark_duplicate) }
+                if (id != null && endpointChanged && duplicate != null)
+                    throw LocalizedFailure(LocalizedMessage(R.string.error_bookmark_duplicate), context)
                 val resolved = if (id == null && duplicate != null) normalized.copy(id = duplicate.id) else normalized
                 val next = existing.toMutableList().apply {
                     val index = indexOfFirst { it.id == resolved.id }
                     if (index >= 0) set(index, resolved) else add(resolved)
                 }
                 next to resolved
-            }.also { mutableState.update { it.copy(error = null) } }
+            }.also { mutableState.update { it.copy(error = null, errorSource = null) } }
         }.getOrElse {
-            fail(context.localized(R.string.error_with_detail, context.localized(R.string.error_bookmark_save), it.message.orEmpty()))
+            fail(localizedFailureSource(R.string.error_bookmark_save, it))
             null
         }
     }
 
     fun deleteBookmark(bookmark: Bookmark) {
         runCatching { bookmarks.change { latest -> latest.filterNot { it.id == bookmark.id } to Unit } }
-            .onFailure { fail(context.localized(R.string.error_with_detail, context.localized(R.string.error_bookmark_delete), it.message.orEmpty())) }
+            .onFailure { fail(localizedFailureSource(R.string.error_bookmark_delete, it)) }
     }
 
     fun join(channel: Channel, password: String) =
@@ -326,7 +333,7 @@ internal object ClientSession {
             .put("channel", channel.id).put("message", text))
 
     fun sendPrivateMessage(member: Member, text: String): Boolean {
-        val uid = member.uid ?: return false.also { fail(context.localized(R.string.error_user_identity_unavailable)) }
+        val uid = member.uid ?: return false.also { fail(LocalizedMessage(R.string.error_user_identity_unavailable)) }
         return send(JSONObject().put("type", "send_private_message").put("request_id", UUID.randomUUID().toString())
             .put("client", member.id).put("uid", uid).put("message", text))
     }
@@ -338,10 +345,10 @@ internal object ClientSession {
     }
 
     fun clearError() {
-        mutableState.update { it.copy(error = null) }
+        mutableState.update { it.copy(error = null, errorSource = null) }
     }
 
-    fun reportError(message: String) = fail(message)
+    fun reportError(source: LocalizedMessage) = fail(source)
 
     private fun scheduleCorePoll() {
         coreDirty.set(true)
@@ -361,17 +368,17 @@ internal object ClientSession {
             val bytes = NativeCore.poll(handle)
             JSONObject(String(bytes, Charsets.UTF_8))
         }.getOrElse {
-            fail(context.localized(R.string.error_with_detail, context.localized(R.string.error_core_read), it.message.orEmpty()))
+            fail(LocalizedMessage(R.string.error_core_read, it.message.orEmpty()))
             return
         }
         runCatching { applyEnvelope(envelope) }.onFailure {
-            fail(context.localized(R.string.error_with_detail, context.localized(R.string.error_core_parse), it.message.orEmpty()))
+            fail(LocalizedMessage(R.string.error_core_parse, it.message.orEmpty()))
         }
     }
 
-    private fun avatarSyncDetail(event: JSONObject): String? {
+    private fun avatarSyncDetail(event: JSONObject): Pair<String?, LocalizedMessage?> {
         val detail = event.stringOrNull("detail")
-        if (event.optString("status") !in listOf("failed", "clear_failed")) return detail
+        if (event.optString("status") !in listOf("failed", "clear_failed")) return detail to null
         val phase = when (event.stringOrNull("phase")) {
             "local_read" -> R.string.avatar_stage_local_read
             "server_self" -> R.string.avatar_stage_server_self
@@ -387,21 +394,24 @@ internal object ClientSession {
             "cleared" -> R.string.avatar_stage_cleared
             "previous_transfer_query" -> R.string.avatar_stage_previous_transfer_query
             "previous_transfer_stop" -> R.string.avatar_stage_previous_transfer_stop
-            else -> return detail
+            else -> return detail to null
         }
-        return context.localized(R.string.error_with_detail, context.localized(phase), detail.orEmpty())
+        val source = LocalizedMessage(phase, detail)
+        return source.render(context.languageContext()) to source
     }
 
     private fun applyEnvelope(envelope: JSONObject) {
         envelope.optJSONObject("profile")?.let { value ->
             val profile = value.profile()
             val completed = profile.requestId == nicknameRequest.get()
+            val source = if (completed) profile.error?.let { code -> coreErrorSource(code, profile.detail) } else null
             mutableState.update { it.copy(profile = profile,
                 nicknameSaving = if (completed) false else it.nicknameSaving,
-                nicknameSaveError = if (completed) profile.error?.let { code -> context.localizedCoreError(code, profile.detail) } else it.nicknameSaveError) }
+                nicknameSaveError = if (completed) source?.render(context.languageContext()) else it.nicknameSaveError,
+                nicknameSaveErrorSource = if (completed) source else it.nicknameSaveErrorSource) }
         }
         val wasAudioReady = state.value.snapshot.canApplyAudioState()
-        var eventError: String? = null
+        var eventError: LocalizedMessage? = null
         var audioMuted = false
         val events = envelope.getJSONArray("events")
         for (index in 0 until events.length()) {
@@ -413,22 +423,25 @@ internal object ClientSession {
                         val clearing = fileCacheClearRequest == fileCacheRequest
                         if (clearing) fileCacheClearRequest = null
                         val error = event.stringOrNull("error")
-                        val message = if (error != null) context.localized(R.string.error_with_detail,
-                            context.localized(if (clearing) R.string.files_cache_clear_failed else R.string.files_cache_read_failed), context.fileError(error))
-                        else if (clearing) context.localized(R.string.files_cache_cleared, android.text.format.Formatter.formatFileSize(context, event.optLong("removedBytes")))
-                        else state.value.fileCacheMessage
-                        mutableState.update { it.copy(fileCachePending = false, fileCacheClearing = if (clearing) false else it.fileCacheClearing, fileCacheMessage = message) }
+                        val fileSource = error?.let(::fileErrorSource)
+                        val source = if (error != null) LocalizedMessage(
+                            if (clearing) R.string.files_cache_clear_failed else R.string.files_cache_read_failed,
+                            detail = if (fileSource == null) error else null, detailSource = fileSource,
+                        ) else if (clearing) LocalizedMessage(R.string.files_cache_cleared, sizeBytes = event.optLong("removedBytes")) else null
+                        mutableState.update { it.copy(fileCachePending = false, fileCacheClearing = if (clearing) false else it.fileCacheClearing,
+                            fileCacheMessage = source?.render(context.languageContext()) ?: it.fileCacheMessage,
+                            fileCacheMessageSource = source ?: it.fileCacheMessageSource) }
                     }
                 }
                 "identity" -> {
                     val identity = event.getJSONObject("value")
                     runCatching { store.saveIdentity(identity) }.onFailure {
-                        fail(context.localized(R.string.error_with_detail, context.localized(R.string.error_identity_save), it.message.orEmpty()))
+                        fail(localizedFailureSource(R.string.error_identity_save, it))
                         disconnect()
                         return
                     }
                 }
-                "error" -> eventError = context.localizedCoreError(
+                "error" -> eventError = coreErrorSource(
                     event.stringOrNull("code"),
                     event.stringOrNull("detail") ?: event.stringOrNull("message"),
                 )
@@ -437,12 +450,12 @@ internal object ClientSession {
                     val applied = event.getJSONObject("applied")
                     val requested = event.getJSONObject("requested")
                     val status = event.getString("status")
+                    val source = if (status == "failed") LocalizedMessage(R.string.error_noise_suppression, event.optString("detail")) else null
                     mutableState.update { it.copy(
                         noiseSuppression = requested.getString("noise"),
                         appliedNoise = applied.getString("noise"),
                         audioProcessingStatus = status,
-                        audioProcessingError = if (status == "failed") context.localized(R.string.error_with_detail,
-                            context.localized(R.string.error_noise_suppression), event.optString("detail")) else null,
+                        audioProcessingError = source?.render(context.languageContext()), audioProcessingErrorSource = source,
                     ) }
                     if (status != "switching") {
                         context.getSharedPreferences("mobilespeak.settings", Context.MODE_PRIVATE).edit {
@@ -452,23 +465,29 @@ internal object ClientSession {
                 }
                 "audio_muted" -> {
                     audioMuted = true
-                    eventError = context.localizedCoreError(
+                    eventError = coreErrorSource(
                         event.stringOrNull("code"),
                         event.stringOrNull("detail") ?: event.stringOrNull("message"),
                     )
                 }
                 "avatar_local" -> mutableState.update { it.copy(
-                    avatarIntent = event.getString("intent"), avatarCleanupDetail = null,
+                    avatarIntent = event.getString("intent"), avatarCleanupDetail = null, avatarCleanupDetailSource = null,
                     avatarPreviewPath = if (event.getString("intent") == "clear") null else event.stringOrNull("preview") ?: it.avatarPreviewPath,
                     avatarRevision = it.avatarRevision + 1,
                 ) }
-                "avatar_cleanup_failed" -> mutableState.update { it.copy(avatarCleanupDetail = context.localized(R.string.error_with_detail, context.localized(R.string.avatar_cleanup_error), event.optString("detail"))) }
-                "avatar_sync" -> mutableState.update { it.copy(
-                    avatarStatus = event.getString("status"), avatarDetail = avatarSyncDetail(event),
-                ) }
+                "avatar_cleanup_failed" -> {
+                    val source = LocalizedMessage(R.string.avatar_cleanup_error, event.optString("detail"))
+                    mutableState.update { it.copy(avatarCleanupDetail = source.render(context.languageContext()), avatarCleanupDetailSource = source) }
+                }
+                "avatar_sync" -> {
+                    val (detail, source) = avatarSyncDetail(event)
+                    mutableState.update { it.copy(avatarStatus = event.getString("status"), avatarDetail = detail, avatarDetailSource = source) }
+                }
             }
         }
-        if (eventError != null || audioMuted) mutableState.update { it.copy(error = eventError ?: it.error, microphoneMuted = audioMuted || it.microphoneMuted) }
+        if (eventError != null || audioMuted) mutableState.update { it.copy(
+            error = eventError?.render(context.languageContext()) ?: it.error,
+            errorSource = eventError ?: it.errorSource, microphoneMuted = audioMuted || it.microphoneMuted) }
         envelope.optJSONObject("fileCache")?.let { cache -> mutableState.update { it.copy(fileCache = cache.fileCache()) } }
         envelope.optJSONObject("receiveAudio")?.let { audio -> mutableState.update { it.copy(receiveAgc = audio.optBoolean("agc", true)) } }
         envelope.optJSONObject("speech")?.let { speech -> mutableState.update { it.copy(speech = speech.speech()) } }
@@ -490,7 +509,8 @@ internal object ClientSession {
                 channelFiles = envelope.optJSONObject("channelFiles")?.channelFiles() ?: latest.channelFiles,
                 messages = chats ?: latest.messages,
                 unread = unread,
-                error = eventError ?: latest.error,
+                error = eventError?.render(context.languageContext()) ?: latest.error,
+                errorSource = eventError ?: latest.errorSource,
                 microphoneMuted = if (audioMuted) true else latest.microphoneMuted,
             )
         }
@@ -503,14 +523,17 @@ internal object ClientSession {
         updateService()
     }
 
-    fun fileLocalError(message: String?) { mutableState.update { it.copy(channelFilesLocalError = message) } }
+    fun fileLocalError(message: String?) { mutableState.update { it.copy(channelFilesLocalError = message, channelFilesLocalErrorSource = null) } }
+    fun fileLocalError(source: LocalizedMessage) { mutableState.update { it.copy(
+        channelFilesLocalError = source.render(context.languageContext()), channelFilesLocalErrorSource = source) } }
     fun refreshFileCache() = synchronized(fileCacheLock) {
         val ui = state.value
         if (ui.fileCachePending || ui.fileCache.working || ui.fileImporting || ui.fileCache.busy) return@synchronized
         fileCacheRequest += 1
-        mutableState.update { it.copy(fileCachePending = true, fileCacheMessage = null) }
+        mutableState.update { it.copy(fileCachePending = true, fileCacheMessage = null, fileCacheMessageSource = null) }
         if (!send(JSONObject().put("type", "file_cache_inspect").put("request_id", fileCacheRequest))) {
-            mutableState.update { it.copy(fileCachePending = false, fileCacheMessage = context.localized(R.string.files_cache_read_failed)) }
+            val source = LocalizedMessage(R.string.files_cache_read_failed)
+            mutableState.update { it.copy(fileCachePending = false, fileCacheMessage = source.render(context.languageContext()), fileCacheMessageSource = source) }
         }
     }
     fun clearFileCache() = synchronized(fileCacheLock) {
@@ -518,21 +541,23 @@ internal object ClientSession {
         if (!ui.fileCache.canClear || ui.fileImporting || ui.fileCachePending) return@synchronized
         fileCacheRequest += 1
         fileCacheClearRequest = fileCacheRequest
-        mutableState.update { it.copy(fileCachePending = true, fileCacheClearing = true, fileCacheMessage = null) }
+        mutableState.update { it.copy(fileCachePending = true, fileCacheClearing = true, fileCacheMessage = null, fileCacheMessageSource = null) }
         if (!send(JSONObject().put("type", "file_cache_clear").put("request_id", fileCacheRequest))) {
             fileCacheClearRequest = null
-            mutableState.update { it.copy(fileCachePending = false, fileCacheClearing = false, fileCacheMessage = context.localized(R.string.files_cache_clear_failed)) }
+            val source = LocalizedMessage(R.string.files_cache_clear_failed)
+            mutableState.update { it.copy(fileCachePending = false, fileCacheClearing = false,
+                fileCacheMessage = source.render(context.languageContext()), fileCacheMessageSource = source) }
         }
     }
     fun fileCommand(type: String, fields: JSONObject = JSONObject()): Boolean {
-        if (state.value.snapshot.status != "connected") { fileLocalError(context.localized(R.string.files_disconnected)); return false }
+        if (state.value.snapshot.status != "connected") { fileLocalError(LocalizedMessage(R.string.files_disconnected)); return false }
         fileLocalError(null)
         val files = state.value.channelFiles
         if (!fields.has("server")) fields.put("server", files.server)
         if (!fields.has("channel")) fields.put("channel", files.channel)
         if (!fields.has("directory")) fields.put("directory", files.path)
         val sent = send(fields.put("type", type))
-        if (!sent) fileLocalError(context.localized(R.string.error_operation_submit))
+        if (!sent) fileLocalError(LocalizedMessage(R.string.error_operation_submit))
         return sent
     }
     fun openChannelFiles() {
@@ -551,7 +576,7 @@ internal object ClientSession {
             if (ui.fileImporting || ui.fileCacheClearing || ui.fileCache.status == "clearing") false
             else { mutableState.update { it.copy(fileImporting = true) }; true }
         }
-        if (!importing) { fileLocalError(context.localized(R.string.files_cache_busy)); return }
+        if (!importing) { fileLocalError(LocalizedMessage(R.string.files_cache_busy)); return }
         try {
             runCatching {
                 kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
@@ -568,7 +593,7 @@ internal object ClientSession {
                         if (!fileCommand("files_upload", target.command().put("name", name).put("source", staged.absolutePath))) staged.delete()
                     } catch (error: Exception) { staged.delete(); throw error }
                 }
-            }.onFailure { fileLocalError(context.localized(R.string.error_with_detail, context.localized(R.string.files_choose_failed), it.message.orEmpty())) }
+            }.onFailure { fileLocalError(localizedFailureSource(R.string.files_choose_failed, it)) }
         } finally { synchronized(fileCacheLock) { mutableState.update { it.copy(fileImporting = false) } } }
     }
 
@@ -648,10 +673,10 @@ internal object ClientSession {
         val result = runCatching {
             NativeCore.command(handle, command.toString().toByteArray(Charsets.UTF_8))
         }.getOrElse {
-            fail(context.localized(R.string.error_with_detail, context.localized(R.string.error_operation_submit), it.message.orEmpty()))
+            fail(localizedFailureSource(R.string.error_operation_submit, it))
             return false
         }
-        if (result != 0) fail(context.localized(R.string.error_operation_submit))
+        if (result != 0) fail(LocalizedMessage(R.string.error_operation_submit))
         return result == 0
     }
 
@@ -665,11 +690,24 @@ internal object ClientSession {
             latest.map {
                 if (it.id == connectedBookmark && it.automaticallyNamed && it.title != name) it.copy(title = name) else it
             } to Unit
-        } }.onFailure { fail(context.localized(R.string.error_with_detail, context.localized(R.string.error_bookmark_title_update), it.message.orEmpty())) }
+        } }.onFailure { fail(localizedFailureSource(R.string.error_bookmark_title_update, it)) }
     }
 
-    fun refreshLanguage() = coreExecutor.execute {
+    fun refreshLanguage(language: AppLanguage = AppLanguage.resolve(AppLanguage.selected(), systemLanguageTags())) = coreExecutor.execute {
         if (!initialized) return@execute
+        if (displayedLanguage != language) {
+            val localizedContext = context.contextForLanguage(language)
+            mutableState.update { ui -> ui.copy(
+                error = ui.errorSource?.render(localizedContext) ?: ui.error,
+                nicknameSaveError = ui.nicknameSaveErrorSource?.render(localizedContext) ?: ui.nicknameSaveError,
+                audioProcessingError = ui.audioProcessingErrorSource?.render(localizedContext) ?: ui.audioProcessingError,
+                avatarDetail = ui.avatarDetailSource?.render(localizedContext) ?: ui.avatarDetail,
+                avatarCleanupDetail = ui.avatarCleanupDetailSource?.render(localizedContext) ?: ui.avatarCleanupDetail,
+                channelFilesLocalError = ui.channelFilesLocalErrorSource?.render(localizedContext) ?: ui.channelFilesLocalError,
+                fileCacheMessage = ui.fileCacheMessageSource?.render(localizedContext) ?: ui.fileCacheMessage,
+            ) }
+            displayedLanguage = language
+        }
         updateService()
         val instance = voiceService ?: return@execute
         val requestId = state.value.snapshot.connectionId
@@ -679,7 +717,10 @@ internal object ClientSession {
     }
 
     private fun fail(message: String) {
-        mutableState.update { it.copy(error = message) }
+        mutableState.update { it.copy(error = message, errorSource = null) }
+    }
+    private fun fail(source: LocalizedMessage) {
+        mutableState.update { it.copy(error = source.render(context.languageContext()), errorSource = source) }
     }
 }
 

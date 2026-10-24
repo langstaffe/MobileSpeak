@@ -616,13 +616,14 @@ final class ClientTests: XCTestCase {
                 password: false, permanent: true, key: "fixture-\(id)", icon: nil, iconPath: nil)
         }
         func labels(_ view: UIView) -> [UILabel] { (view as? UILabel).map { [$0] } ?? view.subviews.flatMap(labels) }
-        for language in ["en", "zh-Hans"] {
+        for language in ["en", "zh-Hans", "zh-Hant"] {
             UserDefaults.standard.set(language, forKey: AppLanguage.preferenceKey)
             for (width, category, weight) in [(CGFloat(320), ContentSizeCategory.large, LegibilityWeight.regular),
                                                (280, .large, .regular), (390, .accessibilityLarge, .bold)] {
                 host.view.frame = CGRect(x: 0, y: 0, width: width, height: 844)
                 host.rootView = AnyView(NavigationView { HomeView(client: client) }.navigationViewStyle(.stack)
-                    .environmentObject(LanguageSettings()).environment(\.sizeCategory, category).environment(\.legibilityWeight, weight)
+                    .environmentObject(LanguageSettings()).environment(\.locale, L10n.locale)
+                    .environment(\.sizeCategory, category).environment(\.legibilityWeight, weight)
                     .preferredColorScheme(.dark).tint(Palette.accent))
                 let cases = [(5, "A0 User"), (9, "A0 User"), (10, "A0 User"), (100, "A0 User"),
                              (0, "A0 User"), (1, "Solo User"), (2, "Solo User"), (1, "王小明"),
@@ -756,7 +757,7 @@ final class ClientTests: XCTestCase {
             else { UserDefaults.standard.removeObject(forKey: AppLanguage.preferenceKey) }
         }
         try await Task.sleep(nanoseconds: 200_000_000)
-        for language in ["en", "zh-Hans"] {
+        for language in ["en", "zh-Hans", "zh-Hant"] {
             UserDefaults.standard.set(language, forKey: AppLanguage.preferenceKey)
             for category in [ContentSizeCategory.large, .accessibilityExtraExtraExtraLarge] {
                 client.fileCache = FileCacheState(bytes: 16_454_096, items: 2, status: "ready")
@@ -948,7 +949,7 @@ final class ClientTests: XCTestCase {
             if let originalLanguage { UserDefaults.standard.set(originalLanguage, forKey: AppLanguage.preferenceKey) }
             else { UserDefaults.standard.removeObject(forKey: AppLanguage.preferenceKey) }
         }
-        for language in [AppLanguage.english, .simplifiedChinese] {
+        for language in [AppLanguage.english, .simplifiedChinese, .traditionalChinese] {
             UserDefaults.standard.set(language.rawValue, forKey: AppLanguage.preferenceKey)
             for (width, category, long) in [(CGFloat(390), ContentSizeCategory.large, false), (320, .large, true), (240, .large, true), (320, .accessibilityExtraExtraExtraLarge, true)] {
                 var q = NetworkQuality(rttMs: long ? 1234 : 42, deviationMs: long ? 1234.5 : 6, packetLossPercent: 4,
@@ -1427,12 +1428,14 @@ final class ClientTests: XCTestCase {
         let client = Client.shared
         guard !client.connected, !client.busy else { throw XCTSkip("Requires an offline test profile") }
         let savedState = client.state, savedFiles = client.channelFiles
+        let savedFileError = client.channelFilesLocalError
         let savedLanguage = UserDefaults.standard.string(forKey: AppLanguage.preferenceKey)
         let host = UIHostingController(rootView: AnyView(EmptyView()))
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 320, height: 568))
         window.rootViewController = host; window.makeKeyAndVisible()
         defer {
             window.isHidden = true; client.state = savedState; client.channelFiles = savedFiles
+            client.channelFilesLocalError = savedFileError
             if let savedLanguage { UserDefaults.standard.set(savedLanguage, forKey: AppLanguage.preferenceKey) }
             else { UserDefaults.standard.removeObject(forKey: AppLanguage.preferenceKey) }
         }
@@ -1449,11 +1452,11 @@ final class ClientTests: XCTestCase {
             }
             return collect(object)
         }
-        for language in ["en", "zh-Hans"] {
+        for language in ["en", "zh-Hans", "zh-Hant"] {
             UserDefaults.standard.set(language, forKey: AppLanguage.preferenceKey)
-            XCTAssertEqual(L10n.string("files_reload"), language == "en" ? "Refresh" : "刷新")
-            XCTAssertEqual(L10n.string("files_sort_name"), language == "en" ? "Name" : "名称")
-            XCTAssertEqual(L10n.string("files_sort_newest"), language == "en" ? "Time" : "时间")
+            XCTAssertEqual(L10n.string("files_reload"), language == "en" ? "Refresh" : language == "zh-Hans" ? "刷新" : "重新整理")
+            XCTAssertEqual(L10n.string("files_sort_name"), language == "en" ? "Name" : language == "zh-Hans" ? "名称" : "名稱")
+            XCTAssertEqual(L10n.string("files_sort_newest"), language == "en" ? "Time" : language == "zh-Hans" ? "时间" : "時間")
             for category in [ContentSizeCategory.large, .accessibilityExtraExtraExtraLarge] {
                 for (index, fixture) in [("/", "ready", "name", true), ("/文档/a very long folder path/子目录", "ready", "newest", true),
                     ("/empty", "ready", "name", true), ("/文档", "loading", "newest", true), ("/文档", "failed", "newest", true), ("/文档", "failed", "name", false)].enumerated() {
@@ -1497,6 +1500,16 @@ final class ClientTests: XCTestCase {
                     }
                 }
             }
+        }
+        let rawFileError = "files_permission_denied"
+        client.showFileError(NSError(domain: "External", code: 1,
+                                    userInfo: [NSLocalizedDescriptionKey: rawFileError]))
+        for language in ["en", "zh-Hans", "zh-Hant"] {
+            UserDefaults.standard.set(language, forKey: AppLanguage.preferenceKey)
+            client.refreshLocalizedNotices()
+            try await Task.sleep(nanoseconds: 200_000_000)
+            XCTAssertTrue(elements(host.view).contains { $0.accessibilityLabel == rawFileError },
+                          "External file errors that match a core key must remain verbatim")
         }
     }
 
@@ -1590,7 +1603,7 @@ final class ClientTests: XCTestCase {
         trigger.send(.language)
         try await Task.sleep(nanoseconds: 500_000_000)
         let page = stack.topViewController
-        language.select(.english); language.select(.simplifiedChinese)
+        language.select(.english); language.select(.simplifiedChinese); language.select(.traditionalChinese)
         XCTAssertTrue(stack.topViewController === page)
         for _ in 0..<6 {
             try await Task.sleep(nanoseconds: 10_000_000_000)
@@ -1615,6 +1628,8 @@ final class ClientTests: XCTestCase {
 
     @MainActor func testNativeSettingsNavigationKeepsPageWhenLanguageChangesAndCanReturn() async throws {
         let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let client = Client.shared
+        let handle = client.handle, audio = client.audio, state = client.state
         let stored = UserDefaults.standard.object(forKey: AppLanguage.preferenceKey)
         defer {
             if let stored { UserDefaults.standard.set(stored, forKey: AppLanguage.preferenceKey) }
@@ -1641,9 +1656,26 @@ final class ClientTests: XCTestCase {
         try await Task.sleep(nanoseconds: 100_000_000)
         XCTAssertTrue(stack.topViewController === page)
         XCTAssertEqual(stack.viewControllers.count, 2)
+        func image() -> Data? {
+            host.view.layoutIfNeeded()
+            return UIGraphicsImageRenderer(bounds: window.bounds).image { _ in
+                window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+            }.pngData()
+        }
+        let englishPage = image()
         language.select(.simplifiedChinese)
         try await Task.sleep(nanoseconds: 100_000_000)
         XCTAssertTrue(stack.topViewController === page)
+        let simplifiedPage = image()
+        language.select(.traditionalChinese)
+        try await Task.sleep(nanoseconds: 100_000_000)
+        XCTAssertTrue(stack.topViewController === page)
+        let traditionalPage = image()
+        XCTAssertNotEqual(englishPage, simplifiedPage)
+        XCTAssertNotEqual(simplifiedPage, traditionalPage)
+        XCTAssertEqual(client.handle, handle)
+        XCTAssertTrue(client.audio === audio)
+        XCTAssertEqual(client.state, state)
         stack.popViewController(animated: false) // The same native pop used by Back/swipe.
         try await Task.sleep(nanoseconds: 100_000_000)
         XCTAssertTrue(stack.topViewController === home)
@@ -1670,7 +1702,7 @@ final class ClientTests: XCTestCase {
             else { UserDefaults.standard.removeObject(forKey: AppLanguage.preferenceKey) }
         }
         let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.first as? UIWindowScene)
-        for option in [AppLanguage.english, .simplifiedChinese] {
+        for option in [AppLanguage.english, .simplifiedChinese, .traditionalChinese] {
             let language = LanguageSettings()
             language.select(option)
             for page in [SettingsPage.language, .about] {
@@ -1833,7 +1865,7 @@ final class ClientTests: XCTestCase {
             if let language { defaults.set(language, forKey: AppLanguage.preferenceKey) }
             else { defaults.removeObject(forKey: AppLanguage.preferenceKey) }
         }
-        for language in [AppLanguage.english, .simplifiedChinese] {
+        for language in [AppLanguage.english, .simplifiedChinese, .traditionalChinese] {
             defaults.set(language.rawValue, forKey: AppLanguage.preferenceKey)
             for connected in [false, true] {
                 var confirmed = 0
@@ -2057,7 +2089,7 @@ final class ClientTests: XCTestCase {
             if let originalLanguage { defaults.set(originalLanguage, forKey: AppLanguage.preferenceKey) }
             else { defaults.removeObject(forKey: AppLanguage.preferenceKey) }
         }
-        for language in [AppLanguage.english, .simplifiedChinese] {
+        for language in [AppLanguage.english, .simplifiedChinese, .traditionalChinese] {
             defaults.set(language.rawValue, forKey: AppLanguage.preferenceKey)
             for (size, textSize) in [(CGSize(width: 393, height: 852), DynamicTypeSize.large),
                                      (CGSize(width: 393, height: 852), .accessibility3),
@@ -2128,7 +2160,7 @@ final class ClientTests: XCTestCase {
             try await Task.sleep(nanoseconds: 20_000_000)
         }
         XCTAssertEqual(client.avatarIntent, "clear")
-        for language in [AppLanguage.english, .simplifiedChinese] {
+        for language in [AppLanguage.english, .simplifiedChinese, .traditionalChinese] {
             defaults.set(language.rawValue, forKey: AppLanguage.preferenceKey)
             let root = HomeView(client: client, tab: 2).environmentObject(LanguageSettings())
                 .dynamicTypeSize(.large).preferredColorScheme(.dark)
@@ -2146,13 +2178,25 @@ final class ClientTests: XCTestCase {
         }
     }
     func testLanguageResolutionUsesSupportedLocalesAndEnglishFallback() {
-        XCTAssertEqual(AppLanguage.allCases, [.system, .simplifiedChinese, .english])
+        XCTAssertEqual(AppLanguage.allCases, [.system, .simplifiedChinese, .traditionalChinese, .english])
         XCTAssertEqual(AppLanguage.stored(in: UserDefaults(suiteName: "missing-\(UUID())")!), .system)
         XCTAssertEqual(AppLanguage.resolve(.system, systemLanguageTags: ["zh-Hans-CN"]), .simplifiedChinese)
+        XCTAssertEqual(AppLanguage.resolve(.system, systemLanguageTags: ["zh-Hans-TW"]), .simplifiedChinese)
+        XCTAssertEqual(AppLanguage.resolve(.system, systemLanguageTags: ["zh-Hant-CN"]), .traditionalChinese)
         XCTAssertEqual(AppLanguage.resolve(.system, systemLanguageTags: ["zh-CN"]), .simplifiedChinese)
+        XCTAssertEqual(AppLanguage.resolve(.system, systemLanguageTags: ["zh-SG"]), .simplifiedChinese)
+        for region in ["TW", "HK", "MO"] {
+            XCTAssertEqual(AppLanguage.resolve(.system, systemLanguageTags: ["zh-\(region)"]), .traditionalChinese)
+        }
+        XCTAssertEqual(AppLanguage.resolve(.system, systemLanguageTags: ["zh"]), .simplifiedChinese)
+        XCTAssertEqual(AppLanguage.resolve(.system, systemLanguageTags: ["fr-FR", "zh-Hant-HK", "en-US"]), .traditionalChinese)
+        XCTAssertEqual(AppLanguage.resolve(.system, systemLanguageTags: ["en-US", "zh-Hant"]), .english)
+        XCTAssertEqual(AppLanguage.resolve(.system, systemLanguageTags: ["fr-FR", "zh-MY", "zh-Hans"]), .simplifiedChinese)
         XCTAssertEqual(AppLanguage.resolve(.system, systemLanguageTags: ["en-US"]), .english)
         XCTAssertEqual(AppLanguage.resolve(.system, systemLanguageTags: ["fr-FR"]), .english)
+        XCTAssertEqual(AppLanguage.resolve(.system, systemLanguageTags: []), .english)
         XCTAssertEqual(AppLanguage.resolve(.simplifiedChinese, systemLanguageTags: ["en-US"]), .simplifiedChinese)
+        XCTAssertEqual(AppLanguage.resolve(.traditionalChinese, systemLanguageTags: ["zh-Hans"]), .traditionalChinese)
         XCTAssertEqual(AppLanguage.resolve(.english, systemLanguageTags: ["zh-CN"]), .english)
     }
     @MainActor func testLanguageSelectionPersistsAndSameSelectionDoesNothing() throws {
@@ -2162,6 +2206,11 @@ final class ClientTests: XCTestCase {
         defaults.set("old-value", forKey: AppLanguage.preferenceKey)
         let settings = LanguageSettings(defaults: defaults)
         XCTAssertEqual(settings.selection, .system)
+        defaults.set("zh-Hans", forKey: AppLanguage.preferenceKey)
+        XCTAssertEqual(LanguageSettings(defaults: defaults).selection, .simplifiedChinese)
+        XCTAssertTrue(settings.select(.traditionalChinese))
+        XCTAssertEqual(defaults.string(forKey: AppLanguage.preferenceKey), "zh-Hant")
+        XCTAssertEqual(LanguageSettings(defaults: defaults).selection, .traditionalChinese)
         XCTAssertTrue(settings.select(.english))
         XCTAssertEqual(defaults.string(forKey: AppLanguage.preferenceKey), "en")
         XCTAssertFalse(settings.select(.english))
@@ -2177,9 +2226,68 @@ final class ClientTests: XCTestCase {
         let audio = client.audio
         let state = client.state
         XCTAssertTrue(settings.select(.simplifiedChinese))
+        XCTAssertTrue(settings.select(.traditionalChinese))
         XCTAssertEqual(client.handle, handle)
         XCTAssertTrue(client.audio === audio)
         XCTAssertEqual(client.state, state)
+    }
+    @MainActor func testSystemLanguageRefreshUpdatesLocaleWithoutChangingSelection() throws {
+        let suite = "MobileSpeakSystemLanguageTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = LanguageSettings(defaults: defaults)
+        settings.refreshSystemLanguage(systemLanguageTags: ["fr-FR", "zh-Hant-HK"])
+        XCTAssertEqual(settings.selection, .system)
+        XCTAssertEqual(settings.systemLanguage, .traditionalChinese)
+        XCTAssertEqual(settings.locale.identifier, "zh-Hant")
+        settings.refreshSystemLanguage(systemLanguageTags: ["en-US", "zh-Hans"])
+        XCTAssertEqual(settings.systemLanguage, .english)
+        XCTAssertEqual(settings.locale.identifier, "en")
+    }
+    @MainActor func testExistingLocalizedNoticesRefreshWithoutChangingClientState() throws {
+        let stored = UserDefaults.standard.object(forKey: AppLanguage.preferenceKey)
+        let client = Client.shared
+        let previousError = client.error
+        let previousFileError = client.channelFilesLocalError
+        defer {
+            client.error = previousError
+            client.channelFilesLocalError = previousFileError
+            if let stored { UserDefaults.standard.set(stored, forKey: AppLanguage.preferenceKey) }
+            else { UserDefaults.standard.removeObject(forKey: AppLanguage.preferenceKey) }
+        }
+        UserDefaults.standard.set("en", forKey: AppLanguage.preferenceKey)
+        let handle = client.handle, audio = client.audio, state = client.state
+        client.showError(.core("join_channel_failed", "server detail"))
+        client.showFileError(.key("files_disconnected"))
+        XCTAssertEqual(client.error, "Couldn’t join the channel. server detail")
+        XCTAssertEqual(client.channelFilesLocalError, "Disconnected. The transfer failed; reconnect to retry.")
+        UserDefaults.standard.set("zh-Hant", forKey: AppLanguage.preferenceKey)
+        client.refreshLocalizedNotices()
+        XCTAssertEqual(client.error, "加入頻道失敗。 server detail")
+        XCTAssertEqual(client.channelFilesLocalError, "連線已中斷，傳輸失敗；重新連線後可重試。")
+        XCTAssertEqual(client.handle, handle)
+        XCTAssertTrue(client.audio === audio)
+        XCTAssertEqual(client.state, state)
+        client.error = "external failure"
+        UserDefaults.standard.set("zh-Hans", forKey: AppLanguage.preferenceKey)
+        client.refreshLocalizedNotices()
+        XCTAssertEqual(client.error, "external failure")
+        let bookmarkError = LocalizedNotice.detail("error_bookmark_password_read", "-25300").error(domain: "MobileSpeak.Bookmarks", code: 1)
+        XCTAssertNotNil(LocalizedNotice.source(of: bookmarkError))
+        UserDefaults.standard.set("en", forKey: AppLanguage.preferenceKey)
+        client.showError(bookmarkError)
+        XCTAssertEqual(client.error, "The saved bookmark password couldn’t be read. -25300")
+        UserDefaults.standard.set("zh-Hant", forKey: AppLanguage.preferenceKey)
+        client.refreshLocalizedNotices()
+        XCTAssertEqual(client.error, "無法讀取儲存的書籤密碼。 -25300")
+        UserDefaults.standard.set("en", forKey: AppLanguage.preferenceKey)
+        client.showError(.key("error_operation_submit"))
+        let rawError = try XCTUnwrap(client.error)
+        client.showError(NSError(domain: "External", code: 1,
+                                userInfo: [NSLocalizedDescriptionKey: rawError]))
+        UserDefaults.standard.set("zh-Hant", forKey: AppLanguage.preferenceKey)
+        client.refreshLocalizedNotices()
+        XCTAssertEqual(client.error, rawError)
     }
     @MainActor func testLocalizedPluralAndCoreErrorFallbacks() {
         let stored = UserDefaults.standard.object(forKey: AppLanguage.preferenceKey)
@@ -2188,6 +2296,8 @@ final class ClientTests: XCTestCase {
             else { UserDefaults.standard.removeObject(forKey: AppLanguage.preferenceKey) }
         }
         UserDefaults.standard.set("en", forKey: AppLanguage.preferenceKey)
+        let englishZeroSize = L10n.fileSize(0)
+        let englishDate = L10n.fileDate(1_700_000_000)
         XCTAssertEqual(L10n.channelMembers(count: 1), "· 1 member online")
         XCTAssertEqual(L10n.channelMembers(count: 2), "· 2 members online")
         XCTAssertEqual(L10n.channelMembers(count: 100), "· 100 members online")
@@ -2197,6 +2307,37 @@ final class ClientTests: XCTestCase {
         XCTAssertEqual(L10n.channelMembers(count: 1), "· 1 人在线")
         XCTAssertEqual(L10n.channelMembers(count: 5), "· 5 人在线")
         XCTAssertEqual(L10n.channelMembers(count: 100), "· 100 人在线")
+        UserDefaults.standard.set("zh-Hant", forKey: AppLanguage.preferenceKey)
+        XCTAssertEqual(L10n.channelMembers(count: 1), "· 1 人線上")
+        XCTAssertEqual(L10n.channelMembers(count: 5), "· 5 人線上")
+        XCTAssertEqual(L10n.coreError("join_channel_failed"), "加入頻道失敗。")
+        XCTAssertEqual(L10n.string("language_simplified_chinese"), "中文（简体）")
+        XCTAssertEqual(L10n.string("language_traditional_chinese"), "中文（繁體）")
+        XCTAssertEqual(L10n.format("bookmark_delete_message", "TeamSpeak"), "確定刪除「TeamSpeak」及其儲存的密碼嗎？")
+        XCTAssertEqual(L10n.format("network_chart_sample_loss", 5, "2.5"), "5 秒前，封包遺失率為百分之 2.5")
+        XCTAssertEqual(L10n.locale.identifier, "zh-Hant")
+        let traditionalZeroSize = L10n.fileSize(0)
+        let traditionalDate = L10n.fileDate(1_700_000_000)
+        XCTAssertNotEqual(englishZeroSize, traditionalZeroSize)
+        XCTAssertNotEqual(englishDate, traditionalDate)
+        let formats = XCTAttachment(string: "en: \(englishZeroSize), \(englishDate); zh-Hant: \(traditionalZeroSize), \(traditionalDate)")
+        formats.name = "Locale dependent file formats"
+        formats.lifetime = .keepAlways
+        add(formats)
+        for language in ["en", "zh-Hans", "zh-Hant"] {
+            UserDefaults.standard.set(language, forKey: AppLanguage.preferenceKey)
+            XCTAssertEqual(L10n.string("language_english"), "English")
+            XCTAssertEqual(L10n.string("language_simplified_chinese"), "中文（简体）")
+            XCTAssertEqual(L10n.string("language_traditional_chinese"), "中文（繁體）")
+        }
+    }
+    func testTraditionalInfoPlistPrivacyDescriptionsExist() throws {
+        XCTAssertTrue(Bundle.main.localizations.contains("zh-Hant"))
+        let path = try XCTUnwrap(Bundle.main.path(forResource: "zh-Hant", ofType: "lproj"))
+        let data = try Data(contentsOf: URL(fileURLWithPath: path).appendingPathComponent("InfoPlist.strings"))
+        let strings = try XCTUnwrap(PropertyListSerialization.propertyList(from: data, format: nil) as? [String: String])
+        XCTAssertTrue(try XCTUnwrap(strings["NSMicrophoneUsageDescription"]).contains("麥克風"))
+        XCTAssertTrue(try XCTUnwrap(strings["NSLocalNetworkUsageDescription"]).contains("區域網路"))
     }
     @MainActor func testNoiseSuppressionDefaultsPersistsAndSwitches() async throws {
         let suite = "MobileSpeakTests.\(UUID().uuidString)"
@@ -2566,7 +2707,7 @@ extension ClientTests {
             let url = root.appendingPathComponent("status-source-\(index).png"); try image.pngData()?.write(to: url); paths.append(url.path)
         }
         let originals = try paths.compactMap { try $0.map { try Data(contentsOf: URL(fileURLWithPath: $0)) } }
-        for language in ["en", "zh-Hans"] {
+        for language in ["en", "zh-Hans", "zh-Hant"] {
             UserDefaults.standard.set(language, forKey: AppLanguage.preferenceKey)
             let rows: [(CGFloat, String?)] = [CGFloat(24), 30, 34].flatMap { size in paths.map { (size, $0) } }
             host.rootView = AnyView(VStack(alignment: .leading, spacing: 12) {
@@ -2589,7 +2730,7 @@ extension ClientTests {
             try image.pngData()?.write(to: root.appendingPathComponent(name + ".png"))
             let attachment = XCTAttachment(image: image); attachment.name = name; attachment.lifetime = .keepAlways; add(attachment)
             XCTAssertEqual(statusMember(muted: true, deafened: true, away: true, speaking: true).accessibilityLabel,
-                           language == "en" ? "User 7, Away, Listening Off, Muted, Speaking" : "User 7, 离开, 关闭收听, 已静音, 正在说话")
+                           language == "en" ? "User 7, Away, Listening Off, Muted, Speaking" : language == "zh-Hans" ? "User 7, 离开, 关闭收听, 已静音, 正在说话" : "User 7, 離開, 關閉收聽, 已靜音, 正在發言")
         }
         // Render the same live view through all states, then compare its restored pixels.
         let live = Client.shared, previous = live.state
@@ -2656,7 +2797,7 @@ extension ClientTests {
             try image.pngData()?.write(to: root.appendingPathComponent("user-status-" + name + ".png"))
             let attachment = XCTAttachment(image: image); attachment.name = "user-status-" + name; attachment.lifetime = .keepAlways; add(attachment)
         }
-        for language in ["en", "zh-Hans"] {
+        for language in ["en", "zh-Hans", "zh-Hant"] {
             UserDefaults.standard.set(language, forKey: AppLanguage.preferenceKey)
             for category in [ContentSizeCategory.large, .accessibilityExtraExtraExtraLarge] {
                 for page in 0..<5 {
@@ -2879,7 +3020,7 @@ final class ProfileTests: XCTestCase {
             try image.pngData()?.write(to:FileManager.default.temporaryDirectory.appendingPathComponent("profile-"+name+".png"))
             let attachment=XCTAttachment(image:image); attachment.name="profile-"+name; attachment.lifetime = .keepAlways; add(attachment)
         }
-        for language in ["en","zh-Hans"] {
+        for language in ["en","zh-Hans","zh-Hant"] {
             UserDefaults.standard.set(language,forKey:AppLanguage.preferenceKey)
             for category in [ContentSizeCategory.large,.accessibilityExtraExtraExtraLarge] {
                 for state in 0..<4 {

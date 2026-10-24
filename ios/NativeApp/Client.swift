@@ -289,6 +289,57 @@ private func coreChanged(_ context: Int) {
     @Published private(set) var profile = ProfileState()
     @Published private(set) var nicknameSaving = false
     @Published private(set) var nicknameSaveError: String?
+    private enum NoticeSlot: Hashable { case error, fileError, fileCache, audio, nickname, avatar, avatarCleanup }
+    private var notices: [NoticeSlot: (source: LocalizedNotice, text: String)] = [:]
+    private func localized(_ source: LocalizedNotice, for slot: NoticeSlot) -> String {
+        let text = source.text
+        notices[slot] = (source, text)
+        return text
+    }
+    private func localized(_ error: Error, for slot: NoticeSlot) -> String {
+        guard let source = LocalizedNotice.source(of: error) else {
+            notices.removeValue(forKey: slot)
+            return error.localizedDescription
+        }
+        return localized(source, for: slot)
+    }
+    private func localizedDetail(_ key: String, error: Error, for slot: NoticeSlot) -> String {
+        if let source = LocalizedNotice.source(of: error) {
+            return localized(.nested(key, source), for: slot)
+        }
+        return localized(.detail(key, error.localizedDescription), for: slot)
+    }
+    private func refreshed(_ text: String?, for slot: NoticeSlot) -> String? {
+        guard let text, let notice = notices[slot], notice.text == text else {
+            notices.removeValue(forKey: slot)
+            return text
+        }
+        return localized(notice.source, for: slot)
+    }
+    func refreshLocalizedNotices() {
+        error = refreshed(error, for: .error)
+        channelFilesLocalError = refreshed(channelFilesLocalError, for: .fileError)
+        fileCacheMessage = refreshed(fileCacheMessage, for: .fileCache)
+        audioProcessingError = refreshed(audioProcessingError, for: .audio)
+        nicknameSaveError = refreshed(nicknameSaveError, for: .nickname)
+        avatarDetail = refreshed(avatarDetail, for: .avatar)
+        avatarCleanupDetail = refreshed(avatarCleanupDetail, for: .avatarCleanup)
+    }
+    func showFileError(_ source: LocalizedNotice) {
+        channelFilesLocalError = localized(source, for: .fileError)
+    }
+    func showFileError(_ error: Error) {
+        channelFilesLocalError = localized(error, for: .fileError)
+    }
+    func showFileError(_ key: String, error: Error) {
+        channelFilesLocalError = localizedDetail(key, error: error, for: .fileError)
+    }
+    func showError(_ source: LocalizedNotice) {
+        error = localized(source, for: .error)
+    }
+    func showError(_ failure: Error) {
+        error = localized(failure, for: .error)
+    }
     private var nicknameRequest: UInt64 = 0
     private var activeBookmark: (id: UUID, connectionId: String)?
     @Published var address = UserDefaults.standard.string(forKey: "mobilespeak.server.address") ?? ""
@@ -306,8 +357,8 @@ private func coreChanged(_ context: Int) {
             query[kSecValueData as String] = data
             query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
             let added = SecItemAdd(query as CFDictionary, nil)
-            guard added == errSecSuccess else { throw bookmarkError(L10n.withDetail("error_bookmark_password_save", String(added))) }
-        } else if status != errSecSuccess { throw bookmarkError(L10n.withDetail("error_bookmark_password_save", String(status))) }
+            guard added == errSecSuccess else { throw bookmarkError(.detail("error_bookmark_password_save", String(added))) }
+        } else if status != errSecSuccess { throw bookmarkError(.detail("error_bookmark_password_save", String(status))) }
     }
     func bookmarkPassword(_ bookmark: Bookmark) throws -> String {
         guard let current = bookmarks.first(where: { $0.id == bookmark.id }) else { return "" }
@@ -316,20 +367,20 @@ private func coreChanged(_ context: Int) {
         var result: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
         if status == errSecItemNotFound { return "" }
-        guard status == errSecSuccess, let data = result as? Data, let value = String(data: data, encoding: .utf8) else { throw bookmarkError(L10n.withDetail("error_bookmark_password_read", String(status))) }
+        guard status == errSecSuccess, let data = result as? Data, let value = String(data: data, encoding: .utf8) else { throw bookmarkError(.detail("error_bookmark_password_read", String(status))) }
         return value
     }
-    private func bookmarkError(_ message: String) -> NSError {
-        NSError(domain: "MobileSpeak.Bookmarks", code: 1, userInfo: [NSLocalizedDescriptionKey: message])
+    private func bookmarkError(_ source: LocalizedNotice) -> NSError {
+        source.error(domain: "MobileSpeak.Bookmarks", code: 1)
     }
     @discardableResult func saveBookmark(id: UUID?, title: String, host: String, port: String, password: String) throws -> Bookmark {
-        guard !bookmarkLoadFailed else { throw bookmarkError(L10n.string("error_bookmark_protected")) }
+        guard !bookmarkLoadFailed else { throw bookmarkError(.key("error_bookmark_protected")) }
         let host = Bookmark.normalizedHost(host)
-        guard !host.isEmpty, host.utf8.count <= 1000, host.rangeOfCharacter(from: .whitespacesAndNewlines) == nil, !host.contains("/"), let port = UInt16(port), port > 0, password.utf8.count <= 1024 else { throw bookmarkError(L10n.string("error_bookmark_invalid")) }
+        guard !host.isEmpty, host.utf8.count <= 1000, host.rangeOfCharacter(from: .whitespacesAndNewlines) == nil, !host.contains("/"), let port = UInt16(port), port > 0, password.utf8.count <= 1024 else { throw bookmarkError(.key("error_bookmark_invalid")) }
         let existing = id.flatMap { id in bookmarks.first { $0.id == id } }
         let duplicate = bookmarks.first { Bookmark.normalizedHost($0.host) == host && $0.port == port && $0.id != id }
         let endpointChanged = existing.map { Bookmark.normalizedHost($0.host) != host || $0.port != port } ?? true
-        if id != nil && endpointChanged && duplicate != nil { throw bookmarkError(L10n.string("error_bookmark_duplicate")) }
+        if id != nil && endpointChanged && duplicate != nil { throw bookmarkError(.key("error_bookmark_duplicate")) }
         let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
         let automaticallyNamed = title.isEmpty || (existing?.automaticallyNamed == true && title == existing?.title)
         let bookmark = Bookmark(id: id ?? duplicate?.id ?? UUID(), title: title.isEmpty ? host : title, host: host, port: port, password: nil, automaticallyNamed: automaticallyNamed)
@@ -353,17 +404,17 @@ private func coreChanged(_ context: Int) {
             next[index].title = serverName
             UserDefaults.standard.set(try JSONEncoder().encode(next), forKey: "mobilespeak.server.bookmarks")
             bookmarks = next
-        } catch { self.error = error.localizedDescription }
+        } catch { self.error = localized(error, for: .error) }
     }
     func deleteBookmark(_ bookmark: Bookmark) {
         do {
-            guard !bookmarkLoadFailed else { throw bookmarkError(L10n.string("error_bookmark_delete")) }
+            guard !bookmarkLoadFailed else { throw bookmarkError(.key("error_bookmark_delete")) }
             let next = bookmarks.filter { $0.id != bookmark.id }
             let data = try JSONEncoder().encode(next)
             UserDefaults.standard.set(data, forKey: "mobilespeak.server.bookmarks"); bookmarks = next
             let status = SecItemDelete(passwordQuery(bookmark.id) as CFDictionary)
-            if status != errSecSuccess && status != errSecItemNotFound { throw bookmarkError(L10n.withDetail("error_bookmark_password_delete", String(status))) }
-        } catch { self.error = error.localizedDescription }
+            if status != errSecSuccess && status != errSecItemNotFound { throw bookmarkError(.detail("error_bookmark_password_delete", String(status))) }
+        } catch { self.error = localized(error, for: .error) }
     }
     func connectBookmark(_ bookmark: Bookmark) {
         let started = ProcessInfo.processInfo.systemUptime
@@ -374,7 +425,7 @@ private func coreChanged(_ context: Int) {
                 activeBookmark = (bookmark.id, connectionId)
             }
         }
-        catch { self.error = error.localizedDescription }
+        catch { self.error = localized(error, for: .error) }
     }
     private var acceptingConnection = false
     private var connectionId: String?
@@ -434,7 +485,7 @@ private func coreChanged(_ context: Int) {
                     bookmarks = migrated
                 }
             }
-            catch { bookmarkLoadFailed = true; self.error = L10n.withDetail("error_bookmark_migrate", error.localizedDescription) }
+            catch { bookmarkLoadFailed = true; self.error = localizedDetail("error_bookmark_migrate", error: error, for: .error) }
         }
         ts_set_notifier(handle, coreChanged, Int(bitPattern: Unmanaged.passUnretained(self).toOpaque()))
         do {
@@ -452,9 +503,9 @@ private func coreChanged(_ context: Int) {
                 avatarPreview = UIImage(contentsOfFile: (previewDate > uploadDate ? upload : preview).path)
             }
             try send(["type": "configure", "storage": root.path])
-        } catch { self.error = L10n.withDetail("error_cache_prepare", error.localizedDescription) }
+        } catch { self.error = localizedDetail("error_cache_prepare", error: error, for: .error) }
         do { try send(["type": "set_noise_suppression", "mode": noiseSuppression.rawValue, "request_id": audioRequest]) }
-        catch { self.audioProcessingError = L10n.withDetail("error_noise_suppression", error.localizedDescription) }
+        catch { self.audioProcessingError = localizedDetail("error_noise_suppression", error: error, for: .audio) }
         #if DEBUG
         let logger = networkLogger
         networkPathMonitor.pathUpdateHandler = { path in
@@ -467,13 +518,13 @@ private func coreChanged(_ context: Int) {
     func send(_ command: [String: Any]) throws {
         let data = try JSONSerialization.data(withJSONObject: command)
         let result = String(decoding: data, as: UTF8.self).withCString { ts_command(handle, $0) }
-        if result != 0 { throw NSError(domain: "MobileSpeak", code: Int(result), userInfo: [NSLocalizedDescriptionKey: L10n.string("error_operation_submit")]) }
+        if result != 0 { throw LocalizedNotice.key("error_operation_submit").error(domain: "MobileSpeak", code: Int(result)) }
     }
     @discardableResult func saveNickname(_ nickname: String) -> UInt64 {
         nicknameRequest += 1
         nicknameSaving = true; nicknameSaveError = nil
         do { try send(["type": "set_nickname", "nickname": nickname, "request_id": nicknameRequest]) }
-        catch { nicknameSaving = false; nicknameSaveError = error.localizedDescription }
+        catch { nicknameSaving = false; nicknameSaveError = localized(error, for: .nickname) }
         return nicknameRequest
     }
     func beginAvatarSelection() -> Int {
@@ -543,7 +594,7 @@ private func coreChanged(_ context: Int) {
     func avatarImageFailed(selection: Int? = nil) {
         if let selection, selection != avatarSelection { return }
         avatarStatus = "failed"
-        avatarDetail = L10n.string("avatar_image_error")
+        avatarDetail = localized(.key("avatar_image_error"), for: .avatar)
     }
     func receive() {
         guard let pointer = ts_poll(handle) else { return }
@@ -555,7 +606,7 @@ private func coreChanged(_ context: Int) {
                 profile = try JSONDecoder().decode(ProfileState.self, from: JSONSerialization.data(withJSONObject: value))
                 if profile.requestId == nicknameRequest {
                     nicknameSaving = false
-                    nicknameSaveError = profile.error.map { L10n.coreError($0, detail: profile.detail) }
+                    nicknameSaveError = profile.error.map { localized(.core($0, profile.detail), for: .nickname) }
                 }
             }
             for event in envelope["events"] as? [[String: Any]] ?? [] {
@@ -564,7 +615,7 @@ private func coreChanged(_ context: Int) {
                 if event["type"] as? String == "identity", let identity = event["value"] {
                     let started = ProcessInfo.processInfo.systemUptime
                     do { try saveIdentity(JSONSerialization.data(withJSONObject: identity)) }
-                    catch { self.error = error.localizedDescription }
+                    catch { self.error = localized(error, for: .error) }
                     connectionLogger.info("Connection startup phase=identity_save elapsed_ms=\(Int((ProcessInfo.processInfo.systemUptime - started) * 1000))")
                 } else if event["type"] as? String == "file_cache_result" {
                     let request = (event["requestId"] as? NSNumber)?.uint64Value
@@ -573,15 +624,14 @@ private func coreChanged(_ context: Int) {
                         let clearing = request == fileCacheClearRequest
                         if clearing { fileCacheClearing = false; fileCacheClearRequest = nil }
                         if let error = event["error"] as? String {
-                            let detail = error.hasPrefix("files_") ? L10n.string(error) : error
-                            fileCacheMessage = L10n.withDetail(clearing ? "files_cache_clear_failed" : "files_cache_read_failed", detail)
+                            fileCacheMessage = localized(.fileCacheError(clearing ? "files_cache_clear_failed" : "files_cache_read_failed", error), for: .fileCache)
                         } else if clearing {
                             let bytes = (event["removedBytes"] as? NSNumber)?.uint64Value ?? 0
-                            fileCacheMessage = L10n.format("files_cache_cleared", ByteCountFormatter.string(fromByteCount: Int64(clamping: bytes), countStyle: .file))
+                            fileCacheMessage = localized(.fileCacheCleared(bytes), for: .fileCache)
                         }
                     }
                 } else if event["type"] as? String == "error" {
-                    error = L10n.coreError(event["code"] as? String, detail: event["detail"] as? String ?? event["message"] as? String)
+                    error = localized(.core(event["code"] as? String, event["detail"] as? String ?? event["message"] as? String), for: .error)
                 } else if event["type"] as? String == "audio_processing",
                           let applied = event["applied"] as? [String: String],
                           let requested = event["requested"] as? [String: String] {
@@ -592,9 +642,9 @@ private func coreChanged(_ context: Int) {
                     if audioProcessingStatus != "switching" {
                         UserDefaults.standard.set(appliedNoise.rawValue, forKey: NoiseSuppressionMode.preferenceKey)
                     }
-                    audioProcessingError = audioProcessingStatus == "failed" ? L10n.withDetail("error_noise_suppression", event["detail"] as? String) : nil
+                    audioProcessingError = audioProcessingStatus == "failed" ? localized(.detail("error_noise_suppression", event["detail"] as? String), for: .audio) : nil
                 } else if event["type"] as? String == "audio_muted" {
-                    error = L10n.coreError(event["code"] as? String, detail: event["detail"] as? String ?? event["message"] as? String)
+                    error = localized(.core(event["code"] as? String, event["detail"] as? String ?? event["message"] as? String), for: .error)
                     if !muted {
                         microphoneMuted = true
                         audio.stopCapture()
@@ -606,13 +656,14 @@ private func coreChanged(_ context: Int) {
                     else if let path = event["preview"] as? String { avatarPreview = UIImage(contentsOfFile: path) }
                     avatarCleanupDetail = nil
                 } else if event["type"] as? String == "avatar_cleanup_failed" {
-                    avatarCleanupDetail = L10n.withDetail("avatar_cleanup_error", event["detail"] as? String)
+                    avatarCleanupDetail = localized(.detail("avatar_cleanup_error", event["detail"] as? String), for: .avatarCleanup)
                 } else if event["type"] as? String == "avatar_sync" {
                     avatarStatus = event["status"] as? String ?? "idle"
+                    notices.removeValue(forKey: .avatar)
                     avatarDetail = event["detail"] as? String
                     if ["failed", "clear_failed", "clear_save_failed"].contains(avatarStatus), let phase = event["phase"] as? String,
                        ["local_read", "server_self", "upload_connection", "upload_write", "hash_command", "server_hash", "verify_connection", "verify_file", "synced", "delete_command", "clear_hash", "cleared", "previous_transfer_query", "previous_transfer_stop"].contains(phase) {
-                        avatarDetail = L10n.withDetail("avatar_stage_\(phase)", avatarDetail)
+                        avatarDetail = localized(.detail("avatar_stage_\(phase)", avatarDetail), for: .avatar)
                     }
                 }
             }
@@ -672,7 +723,7 @@ private func coreChanged(_ context: Int) {
                     } catch {
                         guard connected && currentIntent == intent && !audioInterrupted,
                               !(error is CancellationError) else { return }
-                        self.error = L10n.withDetail("error_audio_start", error.localizedDescription)
+                        self.error = localizedDetail("error_audio_start", error: error, for: .error)
                         try? send(["type": "mute", "input": true, "output": deafened])
                     }
                 }
@@ -682,14 +733,14 @@ private func coreChanged(_ context: Int) {
                 audioInterrupted = false
                 audio.stop()
             }
-        } catch { self.error = L10n.withDetail("error_generic", error.localizedDescription) }
+        } catch { self.error = localizedDetail("error_generic", error: error, for: .error) }
     }
     @discardableResult func connect(host: String, port: String, password: String) -> Bool {
         guard !connected && !busy else { return false }
         let host = host.trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
         guard !host.isEmpty, host.rangeOfCharacter(from: .whitespacesAndNewlines) == nil,
               !host.contains("/"), let port = UInt16(port), port > 0 else {
-            error = L10n.string("error_server_invalid"); return false
+            error = localized(.key("error_server_invalid"), for: .error); return false
         }
         let started = ProcessInfo.processInfo.systemUptime
         connectionLogger.info("Connection startup begin")
@@ -711,11 +762,11 @@ private func coreChanged(_ context: Int) {
             acceptingConnection = true; intent += 1
             UserDefaults.standard.set(address, forKey: "mobilespeak.server.address")
             return true
-        } catch { self.error = error.localizedDescription; return false }
+        } catch { self.error = localized(error, for: .error); return false }
     }
     func disconnect() {
         endPushToTalk()
-        do { try send(["type": "disconnect"]) } catch { self.error = error.localizedDescription; return }
+        do { try send(["type": "disconnect"]) } catch { self.error = localized(error, for: .error); return }
         connectionStarted = nil
         activeBookmark = nil
         acceptingConnection = false; intent += 1
@@ -732,7 +783,7 @@ private func coreChanged(_ context: Int) {
         fileCachePending = true
         fileCacheMessage = nil
         do { try send(["type": "file_cache_inspect", "request_id": fileCacheRequest]) }
-        catch { fileCachePending = false; fileCacheMessage = L10n.withDetail("files_cache_read_failed", error.localizedDescription) }
+        catch { fileCachePending = false; fileCacheMessage = localizedDetail("files_cache_read_failed", error: error, for: .fileCache) }
     }
     func clearFileCache() {
         guard fileCache.canClear && !fileImporting && !fileCachePending else { return }
@@ -742,12 +793,12 @@ private func coreChanged(_ context: Int) {
         fileCachePending = true
         fileCacheMessage = nil
         do { try send(["type": "file_cache_clear", "request_id": fileCacheRequest]) }
-        catch { fileCachePending = false; fileCacheClearing = false; fileCacheClearRequest = nil; fileCacheMessage = L10n.withDetail("files_cache_clear_failed", error.localizedDescription) }
+        catch { fileCachePending = false; fileCacheClearing = false; fileCacheClearRequest = nil; fileCacheMessage = localizedDetail("files_cache_clear_failed", error: error, for: .fileCache) }
     }
     func join(_ channel: Channel, password: String = "") {
         endPushToTalk()
         do { try send(["type": "join", "channel": channel.id, "password": password]) }
-        catch { self.error = error.localizedDescription }
+        catch { self.error = localized(error, for: .error) }
     }
     func messages(in conversation: String) -> [ChatMessage] {
         messages.filter { $0.conversation == conversation }
@@ -755,22 +806,22 @@ private func coreChanged(_ context: Int) {
     func setChatVisible(server: String, conversation: String, token: UUID, visible: Bool) {
         do { try send(["type": "set_chat_visible", "server": server, "conversation": conversation,
                        "token": token.uuidString, "visible": visible]) }
-        catch { self.error = error.localizedDescription }
+        catch { self.error = localized(error, for: .error) }
     }
     func setAppActive(_ active: Bool) {
         if !active { endPushToTalk() }
         do { try send(["type": "set_app_active", "active": active]) }
-        catch { self.error = error.localizedDescription }
+        catch { self.error = localized(error, for: .error) }
     }
     func setReceiveAgc(_ enabled: Bool) {
         do { try send(["type": "set_receive_agc", "enabled": enabled]) }
-        catch { self.error = L10n.withDetail("error_generic", error.localizedDescription) }
+        catch { self.error = localizedDetail("error_generic", error: error, for: .error) }
     }
     func setUserVolume(server: String, member: Member, percent: Int) {
         guard let token = member.volumeToken else { return }
         do { try send(["type": "set_user_volume", "server": server, "client": member.id,
                        "uid": member.uid as Any? ?? NSNull(), "token": token, "percent": percent]) }
-        catch { self.error = L10n.withDetail("error_generic", error.localizedDescription) }
+        catch { self.error = localizedDetail("error_generic", error: error, for: .error) }
     }
     func setNoiseSuppression(_ mode: NoiseSuppressionMode) {
         endPushToTalk()
@@ -778,22 +829,22 @@ private func coreChanged(_ context: Int) {
         do {
             try send(["type": "set_noise_suppression", "mode": mode.rawValue, "request_id": audioRequest])
             noiseSuppression = mode; audioProcessingStatus = "switching"; audioProcessingError = nil
-        } catch { audioProcessingError = L10n.withDetail("error_noise_suppression", error.localizedDescription) }
+        } catch { audioProcessingError = localizedDetail("error_noise_suppression", error: error, for: .audio) }
     }
     @discardableResult func sendChannelMessage(_ text: String, channel: Channel) -> Bool {
         do {
             try send(["type": "send_channel_message", "request_id": UUID().uuidString,
                       "channel": channel.id, "message": text])
             return true
-        } catch { self.error = error.localizedDescription; return false }
+        } catch { self.error = localized(error, for: .error); return false }
     }
     @discardableResult func sendPrivateMessage(_ text: String, member: Member) -> Bool {
-        guard let uid = member.uid else { error = L10n.string("error_user_identity_unavailable"); return false }
+        guard let uid = member.uid else { error = localized(.key("error_user_identity_unavailable"), for: .error); return false }
         do {
             try send(["type": "send_private_message", "request_id": UUID().uuidString,
                       "client": member.id, "uid": uid, "message": text])
             return true
-        } catch { self.error = error.localizedDescription; return false }
+        } catch { self.error = localized(error, for: .error); return false }
     }
     func setAudio(input: Bool? = nil, output: Bool? = nil) async {
         guard !audioBusy else { return }
@@ -811,7 +862,7 @@ private func coreChanged(_ context: Int) {
                 do {
                     try send(["type": "mute", "input": true, "output": next.deafened])
                     microphoneMuted = next.microphoneMuted; deafened = next.deafened
-                } catch { self.error = error.localizedDescription }
+                } catch { self.error = localized(error, for: .error) }
                 return
             }
             try await audio.ensureRunning()
@@ -825,10 +876,10 @@ private func coreChanged(_ context: Int) {
                     do {
                         try send(["type": "mute", "input": true, "output": next.deafened])
                         microphoneMuted = next.microphoneMuted; deafened = next.deafened
-                    } catch { self.error = error.localizedDescription }
+                    } catch { self.error = localized(error, for: .error) }
                     return
                 }
-                guard allowed else { throw NSError(domain: "MobileSpeak", code: 1, userInfo: [NSLocalizedDescriptionKey: L10n.string("error_microphone_permission")]) }
+                guard allowed else { throw LocalizedNotice.key("error_microphone_permission").error(domain: "MobileSpeak", code: 1) }
                 try await audio.startCapture()
                 guard connected && currentIntent == intent && !audioInterrupted else { return }
             }
@@ -848,7 +899,7 @@ private func coreChanged(_ context: Int) {
             }
             guard connected && currentIntent == intent && !audioInterrupted else { return }
             try? send(["type": "mute", "input": muted, "output": deafened])
-            self.error = failure.localizedDescription
+            self.error = localized(failure, for: .error)
         }
     }
     static func resolveAudioState(microphoneMuted: Bool, deafened: Bool, input: Bool?, output: Bool?) -> (microphoneMuted: Bool, deafened: Bool, inputMuted: Bool) {
@@ -864,7 +915,7 @@ private func coreChanged(_ context: Int) {
             speech.mode = mode; speech.available = false; speech.transmitting = false
             // A mode change gates transmission in Rust; an in-flight manual audio intent still owns its work.
             if connected { Task { await setAudio() } }
-        } catch { self.error = error.localizedDescription }
+        } catch { self.error = localized(error, for: .error) }
     }
     @discardableResult func beginPushToTalk() -> String? {
         guard speech.mode == .pushToTalk, speech.available, !muted, !audioBusy, !audioInterrupted,
@@ -875,7 +926,7 @@ private func coreChanged(_ context: Int) {
             try send(["type": "push_to_talk", "pressed": true, "token": token])
             pushToTalkToken = token
             return token
-        } catch { self.error = error.localizedDescription; return nil }
+        } catch { self.error = localized(error, for: .error); return nil }
     }
     func endPushToTalk(token: String? = nil) {
         guard let held = pushToTalkToken, token == nil || token == held else { return }
@@ -940,7 +991,7 @@ private func coreChanged(_ context: Int) {
                     let allowed = speech.mode == .automatic ? await audio.permission() : microphonePermission == .granted
                     microphonePermission = AVAudioSession.sharedInstance().recordPermission
                     guard connected && currentIntent == intent && !audioInterrupted else { return }
-                    guard allowed else { throw NSError(domain: "MobileSpeak", code: 1, userInfo: [NSLocalizedDescriptionKey: L10n.string("error_microphone_permission")]) }
+                    guard allowed else { throw LocalizedNotice.key("error_microphone_permission").error(domain: "MobileSpeak", code: 1) }
                     if !muted { try await audio.startCapture() }
                 }
                 guard connected && currentIntent == intent && !audioInterrupted else { return }
@@ -949,7 +1000,7 @@ private func coreChanged(_ context: Int) {
                 guard connected && currentIntent == intent && !audioInterrupted,
                       !(error is CancellationError) else { return }
                 audio.stopCapture()
-                self.error = L10n.withDetail("error_audio_recovery", error.localizedDescription)
+                self.error = localizedDetail("error_audio_recovery", error: error, for: .error)
                 try? send(["type": "mute", "input": true, "output": deafened])
             }
         }
@@ -976,6 +1027,6 @@ private func coreChanged(_ context: Int) {
         } else if code != errSecSuccess { throw keychainError(code) }
     }
     private func keychainError(_ code: OSStatus) -> NSError {
-        NSError(domain: NSOSStatusErrorDomain, code: Int(code), userInfo: [NSLocalizedDescriptionKey: L10n.withDetail("error_identity", String(code))])
+        LocalizedNotice.detail("error_identity", String(code)).error(domain: NSOSStatusErrorDomain, code: Int(code))
     }
 }

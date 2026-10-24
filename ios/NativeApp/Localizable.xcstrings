@@ -16,6 +16,12 @@
             "state" : "translated",
             "value" : "此用户的连接已改变，请重新调节音量。"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此使用者的連線已改變，請重新調整音量。"
+          }
         }
       }
     },
@@ -32,6 +38,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "无法读取已保存的音频设置，已保留原文件。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "無法讀取已儲存的音訊設定，已保留原檔案。"
           }
         }
       }
@@ -50,6 +62,12 @@
             "state" : "translated",
             "value" : "无法保存音频设置，重启后可能无法恢复本次更改。"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "無法儲存音訊設定，重新啟動後可能無法恢復本次更改。"
+          }
         }
       }
     },
@@ -66,6 +84,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%d 秒前，丢包百分之 %@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%d 秒前，封包遺失率為百分之 %@"
           }
         }
       }
@@ -84,6 +108,12 @@
             "state" : "translated",
             "value" : "自动增益控制"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自動增益控制"
+          }
         }
       }
     },
@@ -101,6 +131,12 @@
             "state" : "translated",
             "value" : "自动调整其他用户的音量"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自動調整其他使用者的音量"
+          }
         }
       }
     },
@@ -114,6 +150,12 @@
           }
         },
         "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 的音量"
+          }
+        },
+        "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "%@ 的音量"
@@ -135,6 +177,12 @@
             "state" : "translated",
             "value" : "暂无其他在线用户"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "目前沒有其他線上使用者"
+          }
         }
       }
     },
@@ -151,6 +199,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "调节用户音量"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "調整使用者音量"
           }
         }
       }
@@ -169,6 +223,12 @@
             "state" : "translated",
             "value" : "服务器工具"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "伺服器工具"
+          }
         }
       }
     },
@@ -185,6 +245,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "选择语言"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "選擇語言"
           }
         }
       }
@@ -203,6 +269,12 @@
             "state" : "translated",
             "value" : "关闭错误提示"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "關閉錯誤提示"
+          }
         }
       }
     },
@@ -216,6 +288,12 @@
           }
         },
         "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "返回"
+          }
+        },
+        "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "返回"
@@ -237,6 +315,12 @@
             "state" : "translated",
             "value" : "取消"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "取消"
+          }
         }
       }
     },
@@ -253,6 +337,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "关闭"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "關閉"
           }
         }
       }
@@ -271,6 +361,12 @@
             "state" : "translated",
             "value" : "连接服务器"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "連線到伺服器"
+          }
         }
       }
     },
@@ -287,6 +383,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "删除"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "刪除"
           }
         }
       }
@@ -305,6 +407,12 @@
             "state" : "translated",
             "value" : "断开连接"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "中斷連線"
+          }
         }
       }
     },
@@ -322,6 +430,12 @@
             "state" : "translated",
             "value" : "编辑"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "編輯"
+          }
         }
       }
     },
@@ -335,6 +449,12 @@
           }
         },
         "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "加入"
+          }
+        },
+        "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "加入"
@@ -356,6 +476,12 @@
             "state" : "translated",
             "value" : "保存"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "儲存"
+          }
         }
       }
     },
@@ -372,6 +498,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "保存并连接"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "儲存並連線"
           }
         }
       }
@@ -390,6 +522,12 @@
             "state" : "translated",
             "value" : "发送"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "傳送"
+          }
         }
       }
     },
@@ -406,6 +544,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "更换头像"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更換頭像"
           }
         }
       }
@@ -424,6 +568,12 @@
             "state" : "translated",
             "value" : "正在检查头像设置…"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在檢查頭像設定…"
+          }
         }
       }
     },
@@ -440,6 +590,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "选择头像"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "選擇頭像"
           }
         }
       }
@@ -458,6 +614,12 @@
             "state" : "translated",
             "value" : "从照片图库中选择图片"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "從照片圖庫中選擇圖片"
+          }
         }
       }
     },
@@ -474,6 +636,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "头像设置已保存，但旧本地文件清理失败。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "頭像設定已儲存，但舊本機檔案清理失敗。"
           }
         }
       }
@@ -492,6 +660,12 @@
             "state" : "translated",
             "value" : "清除本地头像，并清除当前服务器上的个人头像。其他服务器上的头像将在下次连接时清除。"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "清除本機頭像，並清除目前伺服器上的個人頭像。其他伺服器上的頭像將在下次連線時清除。"
+          }
         }
       }
     },
@@ -508,6 +682,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "清除本地头像。各服务器上的个人头像将在下次连接时清除。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "清除本機頭像。各伺服器上的個人頭像將在下次連線時清除。"
           }
         }
       }
@@ -526,6 +706,12 @@
             "state" : "translated",
             "value" : "未能确认此服务器头像已清除。清除设置仍然保留。"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未能確認此伺服器頭像已清除。清除設定仍然保留。"
+          }
         }
       }
     },
@@ -542,6 +728,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "本地已清除，等待连接服务器。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "本機已清除，等待連線伺服器。"
           }
         }
       }
@@ -560,6 +752,12 @@
             "state" : "translated",
             "value" : "无法保存清除设置，原头像设置保持不变。"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "無法儲存清除設定，原頭像設定保持不變。"
+          }
         }
       }
     },
@@ -576,6 +774,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "此服务器已无个人头像。其他服务器将在连接时同步。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此伺服器已無個人頭像。其他伺服器將在連線時同步。"
           }
         }
       }
@@ -594,6 +798,12 @@
             "state" : "translated",
             "value" : "本地头像已清除"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "本機頭像已清除"
+          }
         }
       }
     },
@@ -610,6 +820,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "正在清除此服务器的头像…"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在清除此伺服器的頭像…"
           }
         }
       }
@@ -628,6 +844,12 @@
             "state" : "translated",
             "value" : "正方形裁切区域与圆形头像预览"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正方形裁切區域與圓形頭像預覽"
+          }
         }
       }
     },
@@ -644,6 +866,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "裁切区域向下移动"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "裁切區域向下移動"
           }
         }
       }
@@ -662,6 +890,12 @@
             "state" : "translated",
             "value" : "无法处理或保存此头像，原头像保持不变。"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "無法處理或儲存此頭像，原頭像保持不變。"
+          }
         }
       }
     },
@@ -678,6 +912,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "拖动或双指缩放调整构图。上传的是正方形图片，圆形仅预览头像显示效果。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "拖曳或雙指縮放以調整構圖。上傳的是正方形圖片；圓形區域只用於預覽頭像。"
           }
         }
       }
@@ -696,6 +936,12 @@
             "state" : "translated",
             "value" : "裁切区域向左移动"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "裁切區域向左移動"
+          }
         }
       }
     },
@@ -712,6 +958,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "裁切区域向右移动"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "裁切區域向右移動"
           }
         }
       }
@@ -730,6 +982,12 @@
             "state" : "translated",
             "value" : "正在保存头像…"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在儲存頭像…"
+          }
         }
       }
     },
@@ -746,6 +1004,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "裁切头像"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "裁切頭像"
           }
         }
       }
@@ -764,6 +1028,12 @@
             "state" : "translated",
             "value" : "裁切区域向上移动"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "裁切區域向上移動"
+          }
         }
       }
     },
@@ -780,6 +1050,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "使用此头像"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用此頭像"
           }
         }
       }
@@ -798,6 +1074,12 @@
             "state" : "translated",
             "value" : "缩放"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "縮放"
+          }
         }
       }
     },
@@ -814,6 +1096,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "头像同步失败"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "頭像同步失敗"
           }
         }
       }
@@ -832,6 +1120,12 @@
             "state" : "translated",
             "value" : "全局头像设置会在连接各服务器时逐个同步。清除后，其他服务器上的头像将在下次连接时清除。"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "全域頭像設定會在連線各伺服器時逐個同步。清除後，其他伺服器上的頭像將在下次連線時清除。"
+          }
         }
       }
     },
@@ -848,6 +1142,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "无法处理或保存此图片，请选择受支持的静态图片。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "無法處理或儲存此圖片，請選擇受支援的靜態圖片。"
           }
         }
       }
@@ -866,6 +1166,12 @@
             "state" : "translated",
             "value" : "已保存在本机"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已儲存在本機"
+          }
         }
       }
     },
@@ -882,6 +1188,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已保存在本机；连接后同步。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已儲存在本機；連線後同步。"
           }
         }
       }
@@ -900,6 +1212,12 @@
             "state" : "translated",
             "value" : "尚未选择本地头像"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "尚未選擇本機頭像"
+          }
         }
       }
     },
@@ -916,6 +1234,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "本地个人头像预览"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "本機個人頭像預覽"
           }
         }
       }
@@ -934,6 +1258,12 @@
             "state" : "translated",
             "value" : "清除头像"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "清除頭像"
+          }
         }
       }
     },
@@ -950,6 +1280,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "服务器无头像状态确认"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "伺服器無頭像狀態確認"
           }
         }
       }
@@ -968,6 +1304,12 @@
             "state" : "translated",
             "value" : "服务器头像已清除"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "伺服器頭像已清除"
+          }
         }
       }
     },
@@ -984,6 +1326,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "服务器头像删除"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "伺服器頭像刪除"
           }
         }
       }
@@ -1002,6 +1350,12 @@
             "state" : "translated",
             "value" : "提交头像哈希"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更新頭像雜湊值"
+          }
         }
       }
     },
@@ -1018,6 +1372,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "读取本地头像"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "讀取本機頭像"
           }
         }
       }
@@ -1036,6 +1396,12 @@
             "state" : "translated",
             "value" : "上一次头像传输确认"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "上一次頭像傳輸確認"
+          }
         }
       }
     },
@@ -1052,6 +1418,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "停止上一次头像传输"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "停止上一次頭像傳輸"
           }
         }
       }
@@ -1070,6 +1442,12 @@
             "state" : "translated",
             "value" : "确认服务器头像哈希"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "確認伺服器頭像雜湊值"
+          }
         }
       }
     },
@@ -1086,6 +1464,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "当前身份的服务器头像状态"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "目前身分的伺服器頭像狀態"
           }
         }
       }
@@ -1104,6 +1488,12 @@
             "state" : "translated",
             "value" : "头像核验完成后"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "頭像驗證完成後"
+          }
         }
       }
     },
@@ -1120,6 +1510,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "建立头像上传连接"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "建立頭像上傳連線"
           }
         }
       }
@@ -1138,6 +1534,12 @@
             "state" : "translated",
             "value" : "写入头像数据"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "寫入頭像資料"
+          }
         }
       }
     },
@@ -1154,6 +1556,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "建立头像核验连接"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "建立頭像驗證連線"
           }
         }
       }
@@ -1172,6 +1580,12 @@
             "state" : "translated",
             "value" : "核验服务器头像文件"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "驗證伺服器頭像檔案"
+          }
         }
       }
     },
@@ -1188,6 +1602,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "头像已同步到此服务器。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "頭像已同步到此伺服器。"
           }
         }
       }
@@ -1206,6 +1626,12 @@
             "state" : "translated",
             "value" : "个人头像"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "個人頭像"
+          }
         }
       }
     },
@@ -1222,6 +1648,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "此服务器已有相同头像。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此伺服器已有相同頭像。"
           }
         }
       }
@@ -1240,6 +1672,12 @@
             "state" : "translated",
             "value" : "正在同步头像…"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在同步頭像…"
+          }
         }
       }
     },
@@ -1256,6 +1694,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "添加服务器"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "新增伺服器"
           }
         }
       }
@@ -1274,6 +1718,12 @@
             "state" : "translated",
             "value" : "确定删除“%1$@”及其保存的密码吗？"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "確定刪除「%1$@」及其儲存的密碼嗎？"
+          }
         }
       }
     },
@@ -1290,6 +1740,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "删除书签"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "刪除書籤"
           }
         }
       }
@@ -1308,6 +1764,12 @@
             "state" : "translated",
             "value" : "断开当前连接后，可选择其他服务器连接。"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "中斷目前的連線後，才能連線到其他伺服器。"
+          }
         }
       }
     },
@@ -1325,6 +1787,12 @@
             "state" : "translated",
             "value" : "编辑服务器"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "編輯伺服器"
+          }
         }
       }
     },
@@ -1338,6 +1806,12 @@
           }
         },
         "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "管理%1$@"
+          }
+        },
+        "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "管理%1$@"
@@ -1359,6 +1833,12 @@
             "state" : "translated",
             "value" : "书签名称（可选）"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "書籤名稱（選填）"
+          }
         }
       }
     },
@@ -1375,6 +1855,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "保存书签"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "儲存書籤"
           }
         }
       }
@@ -1393,6 +1879,12 @@
             "state" : "translated",
             "value" : "服务器书签"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "伺服器書籤"
+          }
         }
       }
     },
@@ -1410,6 +1902,12 @@
             "state" : "translated",
             "value" : "打开%1$@的频道聊天"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "開啟%1$@的頻道聊天"
+          }
         }
       }
     },
@@ -1426,6 +1924,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "加入频道"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "加入頻道"
           }
         }
       }
@@ -1462,6 +1966,18 @@
               }
             }
           }
+        },
+        "zh-Hant" : {
+          "variations" : {
+            "plural" : {
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "· %lld 人線上"
+                }
+              }
+            }
+          }
         }
       }
     },
@@ -1478,6 +1994,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "暂时没有成员"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "暫時沒有成員"
           }
         }
       }
@@ -1496,6 +2018,12 @@
             "state" : "translated",
             "value" : "频道密码"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "頻道密碼"
+          }
         }
       }
     },
@@ -1512,6 +2040,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "输入消息"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "輸入訊息"
           }
         }
       }
@@ -1530,6 +2064,12 @@
             "state" : "translated",
             "value" : "消息过长。"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "訊息過長。"
+          }
         }
       }
     },
@@ -1547,6 +2087,12 @@
             "state" : "translated",
             "value" : "发送失败"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "傳送失敗"
+          }
         }
       }
     },
@@ -1560,6 +2106,12 @@
           }
         },
         "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OFF"
+          }
+        },
+        "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "OFF"
@@ -1581,6 +2133,12 @@
             "state" : "translated",
             "value" : "连接你的 TeamSpeak 服务器，和朋友一起聊天"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "連線到你的 TeamSpeak 伺服器，和朋友聊天"
+          }
         }
       }
     },
@@ -1597,6 +2155,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "随时加入对话"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "隨時加入對話"
           }
         }
       }
@@ -1615,6 +2179,12 @@
             "state" : "translated",
             "value" : "音频引擎未启动。"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "音訊引擎未啟動。"
+          }
         }
       }
     },
@@ -1631,6 +2201,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "麦克风音频格式不可用（%1$.0f Hz，%2$lld 声道）。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "麥克風音訊格式無法使用（%1$.0f Hz，%2$lld 聲道）。"
           }
         }
       }
@@ -1649,6 +2225,12 @@
             "state" : "translated",
             "value" : "音频恢复失败。"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "音訊恢復失敗。"
+          }
         }
       }
     },
@@ -1665,6 +2247,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "音频启动失败。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "音訊啟動失敗。"
           }
         }
       }
@@ -1683,6 +2271,12 @@
             "state" : "translated",
             "value" : "无法删除书签。"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "無法刪除書籤。"
+          }
         }
       }
     },
@@ -1699,6 +2293,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "相同地址和端口的书签已存在。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "相同位址和連接埠的書籤已存在。"
           }
         }
       }
@@ -1717,6 +2317,12 @@
             "state" : "translated",
             "value" : "请输入有效的地址、端口和密码。"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "請輸入有效的位址、連接埠和密碼。"
+          }
         }
       }
     },
@@ -1733,6 +2339,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "无法读取或安全迁移已有书签。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "無法讀取或安全遷移已有書籤。"
           }
         }
       }
@@ -1751,6 +2363,12 @@
             "state" : "translated",
             "value" : "书签已删除，但无法清理保存的密码。"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "書籤已刪除，但無法清理儲存的密碼。"
+          }
         }
       }
     },
@@ -1767,6 +2385,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "无法读取保存的书签密码。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "無法讀取儲存的書籤密碼。"
           }
         }
       }
@@ -1785,6 +2409,12 @@
             "state" : "translated",
             "value" : "无法安全保存书签密码。"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "無法安全儲存書籤密碼。"
+          }
         }
       }
     },
@@ -1801,6 +2431,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "无法读取书签数据，已停止写入以保护原有数据。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "無法讀取書籤資料，已停止寫入以保護原有資料。"
           }
         }
       }
@@ -1819,6 +2455,12 @@
             "state" : "translated",
             "value" : "无法准备本地头像和聊天缓存。"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "無法準備本機頭像和聊天儲存空間。"
+          }
         }
       }
     },
@@ -1835,6 +2477,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "无法订阅频道。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "無法訂閱頻道。"
           }
         }
       }
@@ -1853,6 +2501,12 @@
             "state" : "translated",
             "value" : "频道不可用。"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "頻道不可用。"
+          }
         }
       }
     },
@@ -1869,6 +2523,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "无法读取本地聊天记录。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "無法讀取本機聊天記錄。"
           }
         }
       }
@@ -1887,6 +2547,12 @@
             "state" : "translated",
             "value" : "保存聊天记录失败。"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "儲存聊天記錄失敗。"
+          }
         }
       }
     },
@@ -1903,6 +2569,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "客户端状态尚未准备好。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "客戶端狀態尚未準備好。"
           }
         }
       }
@@ -1921,6 +2593,12 @@
             "state" : "translated",
             "value" : "连接恢复中，请稍后再加入频道。"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "連線恢復中，請稍後再加入頻道。"
+          }
         }
       }
     },
@@ -1937,6 +2615,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "请先断开当前服务器，再连接其他服务器。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "請先中斷目前伺服器的連線，再連線到其他伺服器。"
           }
         }
       }
@@ -1955,6 +2639,12 @@
             "state" : "translated",
             "value" : "发生了错误。"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "發生了錯誤。"
+          }
         }
       }
     },
@@ -1971,6 +2661,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "无法安全读取或保存 TeamSpeak 身份。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "無法安全讀取或儲存 TeamSpeak 身分。"
           }
         }
       }
@@ -1989,6 +2685,12 @@
             "state" : "translated",
             "value" : "加入频道失败。"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "加入頻道失敗。"
+          }
         }
       }
     },
@@ -2005,6 +2707,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "此频道使用旧版编码，仅支持 Opus。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此頻道使用舊版編碼，僅支援 Opus。"
           }
         }
       }
@@ -2023,6 +2731,12 @@
             "state" : "translated",
             "value" : "消息发送失败。"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "訊息傳送失敗。"
+          }
         }
       }
     },
@@ -2039,6 +2753,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "连接暂时中断，服务器未确认消息。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "連線暫時中斷，伺服器未確認訊息。"
           }
         }
       }
@@ -2057,6 +2777,12 @@
             "state" : "translated",
             "value" : "应用上次退出前未收到服务器发送结果。"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "應用程式上次關閉前，伺服器尚未確認這則訊息。"
+          }
         }
       }
     },
@@ -2073,6 +2799,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "你已不在这个频道。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你已不在這個頻道。"
           }
         }
       }
@@ -2091,6 +2823,12 @@
             "state" : "translated",
             "value" : "请在设置中允许麦克风权限。"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "請在設定中允許麥克風權限。"
+          }
         }
       }
     },
@@ -2107,6 +2845,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "音频处理切换失败，已保留原方案。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "音訊處理切換失敗，已保留原本的選項。"
           }
         }
       }
@@ -2125,6 +2869,12 @@
             "state" : "translated",
             "value" : "操作未能提交。"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "無法提交操作。"
+          }
         }
       }
     },
@@ -2141,6 +2891,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "请输入有效的服务器地址和端口。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "請輸入有效的伺服器位址和連接埠。"
           }
         }
       }
@@ -2159,6 +2915,12 @@
             "state" : "translated",
             "value" : "连接期间不能更改存储位置。"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "連線期間不能更改儲存位置。"
+          }
         }
       }
     },
@@ -2175,6 +2937,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "不支持此消息目标。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不支援此訊息目標。"
           }
         }
       }
@@ -2193,6 +2961,12 @@
             "state" : "translated",
             "value" : "更新音频状态失败。"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更新音訊狀態失敗。"
+          }
         }
       }
     },
@@ -2209,6 +2983,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "用户连接已变化，请重新打开对话。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用者連線已變化，請重新開啟對話。"
           }
         }
       }
@@ -2227,6 +3007,12 @@
             "state" : "translated",
             "value" : "该用户没有可用的 TeamSpeak UID。"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "該使用者沒有可用的 TeamSpeak UID。"
+          }
         }
       }
     },
@@ -2244,6 +3030,12 @@
             "state" : "translated",
             "value" : "该用户已离线。"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "該使用者已離線。"
+          }
         }
       }
     },
@@ -2257,6 +3049,12 @@
           }
         },
         "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ %2$@"
+          }
+        },
+        "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "%1$@ %2$@"
@@ -2278,6 +3076,12 @@
             "state" : "translated",
             "value" : "English"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "English"
+          }
         }
       }
     },
@@ -2287,13 +3091,19 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "简体中文"
+            "value" : "中文（简体）"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "简体中文"
+            "value" : "中文（简体）"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "中文（简体）"
           }
         }
       }
@@ -2312,6 +3122,12 @@
             "state" : "translated",
             "value" : "跟随系统"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "跟隨系統"
+          }
         }
       }
     },
@@ -2328,6 +3144,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "关闭收听"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "關閉收聽"
           }
         }
       }
@@ -2346,6 +3168,12 @@
             "state" : "translated",
             "value" : "麦克风开启"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "麥克風已開啟"
+          }
         }
       }
     },
@@ -2362,6 +3190,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "离开"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "離開"
           }
         }
       }
@@ -2380,6 +3214,12 @@
             "state" : "translated",
             "value" : "已静音"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已靜音"
+          }
         }
       }
     },
@@ -2396,6 +3236,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "正在说话"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在發言"
           }
         }
       }
@@ -2414,6 +3260,12 @@
             "state" : "translated",
             "value" : "昵称"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "暱稱"
+          }
         }
       }
     },
@@ -2430,6 +3282,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "密码"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "密碼"
           }
         }
       }
@@ -2448,6 +3306,12 @@
             "state" : "translated",
             "value" : "未选择"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未選擇"
+          }
         }
       }
     },
@@ -2464,6 +3328,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已选择"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已選擇"
           }
         }
       }
@@ -2482,6 +3352,12 @@
             "state" : "translated",
             "value" : "地址 / 域名"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "位址 / 域名"
+          }
         }
       }
     },
@@ -2498,6 +3374,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "服务器密码（可选）"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "伺服器密碼（選填）"
           }
         }
       }
@@ -2516,6 +3398,12 @@
             "state" : "translated",
             "value" : "端口"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "連接埠"
+          }
         }
       }
     },
@@ -2532,6 +3420,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "服务器"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "伺服器"
           }
         }
       }
@@ -2550,6 +3444,12 @@
             "state" : "translated",
             "value" : "语言"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "語言"
+          }
         }
       }
     },
@@ -2566,6 +3466,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "收听"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "收聽"
           }
         }
       }
@@ -2584,6 +3490,12 @@
             "state" : "translated",
             "value" : "麦克风"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "麥克風"
+          }
         }
       }
     },
@@ -2600,6 +3512,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "默认开启，关闭收听时麦克风也会静音。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "預設開啟，關閉收聽時麥克風也會靜音。"
           }
         }
       }
@@ -2618,6 +3536,12 @@
             "state" : "translated",
             "value" : "无"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "無"
+          }
         }
       }
     },
@@ -2634,6 +3558,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "噪音抑制"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "降噪"
           }
         }
       }
@@ -2652,6 +3582,12 @@
             "state" : "translated",
             "value" : "已连接到 #%1$@"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已連線到 #%1$@"
+          }
         }
       }
     },
@@ -2668,6 +3604,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "正在连接…"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在連線…"
           }
         }
       }
@@ -2686,6 +3628,12 @@
             "state" : "translated",
             "value" : "正在连接服务器…"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在連線到伺服器…"
+          }
         }
       }
     },
@@ -2702,6 +3650,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "未连接"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未連線"
           }
         }
       }
@@ -2720,6 +3674,12 @@
             "state" : "translated",
             "value" : "正在重新连接…"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在重新連線…"
+          }
         }
       }
     },
@@ -2736,6 +3696,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "频道"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "頻道"
           }
         }
       }
@@ -2754,6 +3720,12 @@
             "state" : "translated",
             "value" : "成员"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "成員"
+          }
         }
       }
     },
@@ -2770,6 +3742,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "设置"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "設定"
           }
         }
       }
@@ -2788,6 +3766,12 @@
             "state" : "translated",
             "value" : "关闭收听"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "關閉收聽"
+          }
         }
       }
     },
@@ -2805,6 +3789,12 @@
             "state" : "translated",
             "value" : "收起连接状态抽屉"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "收起連線狀態抽屜"
+          }
         }
       }
     },
@@ -2818,6 +3808,12 @@
           }
         },
         "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已收起"
+          }
+        },
+        "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "已收起"
@@ -2839,6 +3835,12 @@
             "state" : "translated",
             "value" : "展开连接状态抽屉"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "展開連線狀態抽屜"
+          }
         }
       }
     },
@@ -2855,6 +3857,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已展开"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已展開"
           }
         }
       }
@@ -2873,6 +3881,12 @@
             "state" : "translated",
             "value" : "开启收听"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "開啟收聽"
+          }
         }
       }
     },
@@ -2889,6 +3903,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "开启麦克风"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "開啟麥克風"
           }
         }
       }
@@ -2907,6 +3927,12 @@
             "state" : "translated",
             "value" : "静音"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "靜音"
+          }
         }
       }
     },
@@ -2923,6 +3949,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "关于 MobileSpeak"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "關於 MobileSpeak"
           }
         }
       }
@@ -2941,6 +3973,12 @@
             "state" : "translated",
             "value" : "项目地址"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "專案位址"
+          }
         }
       }
     },
@@ -2957,6 +3995,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "当前版本"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "目前版本"
           }
         }
       }
@@ -2975,6 +4019,12 @@
             "state" : "translated",
             "value" : "使用浏览器打开"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用瀏覽器開啟"
+          }
         }
       }
     },
@@ -2991,6 +4041,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "正在切换…"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在切換…"
           }
         }
       }
@@ -3009,6 +4065,12 @@
             "state" : "translated",
             "value" : "当前生效：%@"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "目前生效：%@"
+          }
         }
       }
     },
@@ -3026,6 +4088,12 @@
             "state" : "translated",
             "value" : "DPDFNet2 的处理和耗电开销较高；较慢设备尤其在后台可能出现语音断续。"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "DPDFNet2 會消耗較多處理器資源和電量。效能較低的裝置可能出現語音斷續，尤其是在背景執行時。"
+          }
         }
       }
     },
@@ -3042,6 +4110,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "“无”关闭 MobileSpeak 降噪；系统语音处理仍可能生效。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "「無」會關閉 MobileSpeak 降噪；系統語音處理仍可能生效。"
           }
         }
       }
@@ -3062,6 +4136,12 @@
             "state" : "translated",
             "value" : "最近 30 秒延迟"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "最近 30 秒延遲"
+          }
         }
       }
     },
@@ -3078,6 +4158,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%d 个采样，纵轴 0 至 %@ 毫秒"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%d 個取樣，縱軸 0 至 %@ 毫秒"
           }
         }
       }
@@ -3096,6 +4182,12 @@
             "state" : "translated",
             "value" : "延迟"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "延遲"
+          }
         }
       }
     },
@@ -3112,6 +4204,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "丢包"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "封包遺失率"
           }
         }
       }
@@ -3130,6 +4228,12 @@
             "state" : "translated",
             "value" : "延迟 %@ 毫秒，RTT 波动 %@ 毫秒，丢包百分之 %@"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "延遲 %@ 毫秒，RTT 波動 %@ 毫秒，封包遺失率為百分之 %@"
+          }
         }
       }
     },
@@ -3147,6 +4251,12 @@
             "state" : "translated",
             "value" : "暂无网络统计"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "目前沒有網路統計"
+          }
         }
       }
     },
@@ -3157,6 +4267,12 @@
             "state" : "new",
             "value" : "%1$@ · %2$@"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ · %2$@"
+          }
         }
       }
     },
@@ -3165,6 +4281,12 @@
         "en" : {
           "stringUnit" : {
             "state" : "new",
+            "value" : "%1$@ · %2$@ / %3$@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
             "value" : "%1$@ · %2$@ / %3$@"
           }
         }
@@ -3184,6 +4306,12 @@
             "state" : "translated",
             "value" : "此文件正在传输中。"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此檔案正在傳輸中。"
+          }
         }
       }
     },
@@ -3200,6 +4328,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "存储"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "儲存"
           }
         }
       }
@@ -3218,6 +4352,12 @@
             "state" : "translated",
             "value" : "清除文件缓存"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "清除檔案快取"
+          }
         }
       }
     },
@@ -3234,6 +4374,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "频道下载与上传暂存"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "頻道下載檔案與上傳暫存檔"
           }
         }
       }
@@ -3252,6 +4398,12 @@
             "state" : "translated",
             "value" : "文件操作进行中，请稍后重试。"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "檔案操作進行中，請稍後重試。"
+          }
         }
       }
     },
@@ -3268,6 +4420,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "文件传输完成后可清理"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "檔案傳輸完成後可清理"
           }
         }
       }
@@ -3286,6 +4444,12 @@
             "state" : "translated",
             "value" : "清除文件缓存？"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "清除檔案快取？"
+          }
         }
       }
     },
@@ -3299,6 +4463,12 @@
           }
         },
         "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "清除"
+          }
+        },
+        "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "清除"
@@ -3320,6 +4490,12 @@
             "state" : "translated",
             "value" : "将清除 MobileSpeak 内所有服务器、频道的本地下载和上传暂存。服务器文件、原始文件及已导出的文件不受影响。失败的上传需重新选择文件。"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "清除 MobileSpeak 中所有伺服器和頻道的本機下載檔案與上傳暫存檔。伺服器檔案、原始檔案及已匯出的副本不受影響。上傳失敗的檔案需要重新選擇。"
+          }
         }
       }
     },
@@ -3336,6 +4512,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "无法读取文件缓存大小。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "無法計算檔案快取大小。"
           }
         }
       }
@@ -3354,6 +4536,12 @@
             "state" : "translated",
             "value" : "未能完整清理文件缓存，请重试。"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未能完整清理檔案快取，請重試。"
+          }
         }
       }
     },
@@ -3367,6 +4555,12 @@
           }
         },
         "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已清理 %@"
+          }
+        },
+        "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "已清理 %@"
@@ -3388,6 +4582,12 @@
             "state" : "translated",
             "value" : "重新读取"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重新計算"
+          }
         }
       }
     },
@@ -3404,6 +4604,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "远程文件已改变，请刷新目录后重试。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "遠端檔案已改變，請重新整理目錄後重試。"
           }
         }
       }
@@ -3422,6 +4628,12 @@
             "state" : "translated",
             "value" : "当前频道已改变，请重新打开频道文件。"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "目前頻道已改變，請重新開啟頻道檔案。"
+          }
         }
       }
     },
@@ -3439,6 +4651,12 @@
             "state" : "translated",
             "value" : "无法选择或打开此文件。"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "無法選擇或開啟此檔案。"
+          }
         }
       }
     },
@@ -3452,6 +4670,12 @@
           }
         },
         "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "完成"
+          }
+        },
+        "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "完成"
@@ -3473,6 +4697,12 @@
             "state" : "translated",
             "value" : "连接已断开，传输失败；重新连接后可重试。"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "連線已中斷，傳輸失敗；重新連線後可重試。"
+          }
         }
       }
     },
@@ -3489,6 +4719,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "下载"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "下載"
           }
         }
       }
@@ -3507,6 +4743,12 @@
             "state" : "translated",
             "value" : "已下载"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已下載"
+          }
         }
       }
     },
@@ -3523,6 +4765,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "暂无文件"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "目前沒有檔案"
           }
         }
       }
@@ -3541,6 +4789,12 @@
             "state" : "translated",
             "value" : "已存在同名文件。请选择其他文件，不会自动覆盖。"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已存在同名檔案。請選擇其他檔案，不會自動覆蓋。"
+          }
         }
       }
     },
@@ -3557,6 +4811,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "失败"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "失敗"
           }
         }
       }
@@ -3575,6 +4835,12 @@
             "state" : "translated",
             "value" : "文件"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "檔案"
+          }
         }
       }
     },
@@ -3591,6 +4857,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "文件夹"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "資料夾"
           }
         }
       }
@@ -3609,6 +4881,12 @@
             "state" : "translated",
             "value" : "传输提前结束，文件不完整。"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "傳輸提前結束，檔案不完整。"
+          }
         }
       }
     },
@@ -3625,6 +4903,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "文件信息"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "檔案資訊"
           }
         }
       }
@@ -3643,6 +4927,12 @@
             "state" : "translated",
             "value" : "服务器返回了无效的传输位置，请重试。"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "伺服器傳回無效的傳輸位移，請重試。"
+          }
         }
       }
     },
@@ -3659,6 +4949,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "文件名或路径无效。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "檔案名稱或路徑無效。"
           }
         }
       }
@@ -3677,6 +4973,12 @@
             "state" : "translated",
             "value" : "无法加载目录"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "無法載入目錄"
+          }
         }
       }
     },
@@ -3693,6 +4995,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "请先加载目录再上传。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "請先載入目錄再上傳。"
           }
         }
       }
@@ -3711,6 +5019,12 @@
             "state" : "translated",
             "value" : "加载中…"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "載入中…"
+          }
         }
       }
     },
@@ -3727,6 +5041,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "目录位置"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "位置"
           }
         }
       }
@@ -3745,6 +5065,12 @@
             "state" : "translated",
             "value" : "打开"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "開啟"
+          }
         }
       }
     },
@@ -3761,6 +5087,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "服务器拒绝了此文件操作的权限。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "伺服器拒絕了此檔案操作的權限。"
           }
         }
       }
@@ -3779,6 +5111,12 @@
             "state" : "translated",
             "value" : "刷新"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重新整理"
+          }
         }
       }
     },
@@ -3795,6 +5133,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "重试"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重試"
           }
         }
       }
@@ -3813,6 +5157,12 @@
             "state" : "translated",
             "value" : "传输中"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "傳輸中"
+          }
         }
       }
     },
@@ -3826,6 +5176,12 @@
           }
         },
         "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "分享"
+          }
+        },
+        "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "分享"
@@ -3847,6 +5203,12 @@
             "state" : "translated",
             "value" : "大小"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "大小"
+          }
         }
       }
     },
@@ -3863,6 +5225,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "名称"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "名稱"
           }
         }
       }
@@ -3881,6 +5249,12 @@
             "state" : "translated",
             "value" : "时间"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "時間"
+          }
         }
       }
     },
@@ -3897,6 +5271,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "正在准备上传…"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在準備上傳…"
           }
         }
       }
@@ -3915,6 +5295,12 @@
             "state" : "translated",
             "value" : "无法读取或保存本地文件。"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "無法讀取或儲存本機檔案。"
+          }
         }
       }
     },
@@ -3931,6 +5317,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "浏览与上传"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "瀏覽與上傳"
           }
         }
       }
@@ -3949,6 +5341,12 @@
             "state" : "translated",
             "value" : "服务器时间"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "伺服器時間"
+          }
         }
       }
     },
@@ -3965,6 +5363,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "请求超时。可重试；服务器无响应时请重新连接。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "請求逾時。可重試；若伺服器沒有回應，請重新連線。"
           }
         }
       }
@@ -3983,6 +5387,12 @@
             "state" : "translated",
             "value" : "频道文件"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "頻道檔案"
+          }
         }
       }
     },
@@ -3999,6 +5409,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "频道工具"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "頻道工具"
           }
         }
       }
@@ -4017,6 +5433,12 @@
             "state" : "translated",
             "value" : "类型"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "類型"
+          }
         }
       }
     },
@@ -4033,6 +5455,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "服务器返回了异常传输响应，请重试。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "伺服器傳回非預期的傳輸回應，請重試。"
           }
         }
       }
@@ -4051,6 +5479,12 @@
             "state" : "translated",
             "value" : "上传"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "上傳"
+          }
         }
       }
     },
@@ -4067,6 +5501,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "个人资料"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "個人資料"
           }
         }
       }
@@ -4085,6 +5525,12 @@
             "state" : "translated",
             "value" : "修改昵称"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "修改暱稱"
+          }
         }
       }
     },
@@ -4101,6 +5547,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "修改昵称，%@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "修改暱稱，%@"
           }
         }
       }
@@ -4119,6 +5571,12 @@
             "state" : "translated",
             "value" : "昵称不能为空，且不能超过 128 个 UTF-8 字节。"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "暱稱須為 1 至 128 個 UTF-8 位元組。"
+          }
         }
       }
     },
@@ -4135,6 +5593,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "无法保存昵称，请重试。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "無法儲存暱稱，請重試。"
           }
         }
       }
@@ -4153,6 +5617,12 @@
             "state" : "translated",
             "value" : "无法读取个人资料，已保留原有数据。"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "無法讀取個人資料，已保留原有資料。"
+          }
         }
       }
     },
@@ -4169,6 +5639,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "服务器未能修改你的昵称。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "伺服器未能修改你的暱稱。"
           }
         }
       }
@@ -4187,6 +5663,12 @@
             "state" : "translated",
             "value" : "发言方式"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "發言方式"
+          }
         }
       }
     },
@@ -4203,6 +5685,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "自动发言"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自動發言"
           }
         }
       }
@@ -4221,6 +5709,12 @@
             "state" : "translated",
             "value" : "按键说话"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "按鍵說話"
+          }
         }
       }
     },
@@ -4237,6 +5731,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "按住说话"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "按住說話"
           }
         }
       }
@@ -4255,6 +5755,12 @@
             "state" : "translated",
             "value" : "正在发言"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在發言"
+          }
         }
       }
     },
@@ -4271,6 +5777,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "语音发言频道：%@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "語音發言頻道：%@"
           }
         }
       }
@@ -4289,6 +5801,12 @@
             "state" : "translated",
             "value" : "按住发言，松开或滑出按钮停止。"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "按住以說話；放開或移出按鈕即可停止。"
+          }
         }
       }
     },
@@ -4305,6 +5823,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "允许使用麦克风"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "允許使用麥克風"
           }
         }
       }
@@ -4323,6 +5847,12 @@
             "state" : "translated",
             "value" : "前往系统设置允许麦克风"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "前往系統設定啟用麥克風"
+          }
         }
       }
     },
@@ -4339,6 +5869,35 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "无法保存发言方式，请重试。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "無法儲存發言方式，請重試。"
+          }
+        }
+      }
+    },
+    "language_traditional_chinese" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "中文（繁體）"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "中文（繁體）"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "中文（繁體）"
           }
         }
       }

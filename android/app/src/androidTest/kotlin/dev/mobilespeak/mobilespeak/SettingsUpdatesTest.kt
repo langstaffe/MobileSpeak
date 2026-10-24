@@ -62,6 +62,10 @@ class SettingsUpdatesTest {
                 scenario.recreate()
                 waitFor { node(context.localized(R.string.language_system)) != null }
                 assertTrue(node(context.localized(R.string.language_simplified_chinese))!!.let { it.isSelected || it.isChecked })
+                click(context.localized(R.string.language_traditional_chinese))
+                waitFor { AppLanguage.selected() == AppLanguage.TRADITIONAL_CHINESE && node("跟隨系統") != null }
+                assertTrue(node("中文（繁體）")!!.let { it.isSelected || it.isChecked })
+                assertEquals(before.snapshot.connectionId, ClientSession.state.value.snapshot.connectionId)
                 click(context.localized(R.string.action_back))
                 waitFor { node(context.localized(R.string.settings_language)) != null }
                 assertNotNull(node(context.localized(R.string.settings_language)))
@@ -71,18 +75,21 @@ class SettingsUpdatesTest {
                 click(context.localized(R.string.settings_about))
                 waitFor { node("v" + AppUpdates.installedVersion(), clickable = false) != null }
                 assertNotNull(describeTree(), node("https://github.com/langstaffe/MobileSpeak"))
+                click("https://github.com/langstaffe/MobileSpeak")
+                waitFor { instrumentation.uiAutomation.rootInActiveWindow?.packageName?.toString() != context.packageName }
+                assertTrue(instrumentation.uiAutomation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK))
+                waitFor { node("v" + AppUpdates.installedVersion(), clickable = false) != null }
                 waitFor { !AppUpdates.state.value.checking && node(context.localized(R.string.update_check)) != null }
                 assertNotNull(node(context.localized(R.string.update_check)))
                 click(context.localized(R.string.update_check))
                 waitFor { !AppUpdates.state.value.checking && AppUpdates.state.value.result != null }
                 val realCheck = requireNotNull(AppUpdates.state.value.result)
-                assertNotNull(node(context.localized(realCheck.message, realCheck.version), clickable = false))
+                scrollTo(context.localized(realCheck.message, realCheck.version), clickable = false)
+                assertNotNull(describeTree(), node(context.localized(realCheck.message, realCheck.version), clickable = false))
                 java.io.File(context.cacheDir, "real-update-check.txt").writeText(context.localized(realCheck.message, realCheck.version) + " " + realCheck.detail)
-                click("https://github.com/langstaffe/MobileSpeak")
-                waitFor { instrumentation.uiAutomation.rootInActiveWindow?.packageName?.toString() != context.packageName }
-                assertTrue(instrumentation.uiAutomation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK))
-                waitFor { node("v" + AppUpdates.installedVersion(), clickable = false) != null }
                 click(context.localized(R.string.action_back))
+                waitFor { node(context.localized(R.string.tab_settings), clickable = false) != null }
+                scrollTo(context.localized(R.string.settings_about), backwards = true)
                 assertNotNull(node(context.localized(R.string.settings_about)))
                 assertSame(core, ClientSession.javaClass.getDeclaredField("handle\$delegate").apply { isAccessible = true }.get(ClientSession))
                 assertEquals(before.microphoneMuted, ClientSession.state.value.microphoneMuted)
@@ -92,12 +99,12 @@ class SettingsUpdatesTest {
         }
     }
 
-    @Test fun largeTextPagesRetainAccessibleControlsInBothLanguages() {
+    @Test fun largeTextPagesRetainAccessibleControlsInAllLanguages() {
         unlocked()
         val original = AppCompatDelegate.getApplicationLocales()
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             try {
-                for (language in listOf(AppLanguage.ENGLISH, AppLanguage.SIMPLIFIED_CHINESE)) {
+                for (language in listOf(AppLanguage.ENGLISH, AppLanguage.SIMPLIFIED_CHINESE, AppLanguage.TRADITIONAL_CHINESE)) {
                     instrumentation.runOnMainSync { AppLanguage.select(language) }
                     instrumentation.waitForIdleSync()
                     for (page in listOf("language", "about")) {
@@ -128,6 +135,54 @@ class SettingsUpdatesTest {
                         java.io.File(context.cacheDir, "secondary-$page-${language.name}.png").outputStream().use { shot.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
                         shot.recycle()
                     }
+                }
+            } finally { instrumentation.runOnMainSync { AppCompatDelegate.setApplicationLocales(original) } }
+        }
+    }
+
+    @Test fun languageChangeRefreshesDisplayedUpdateNotificationWithoutChangingDownload() {
+        ActivityScenario.launch(MainActivity::class.java).use {
+            val manager = context.getSystemService(NotificationManager::class.java)
+            assertTrue("Notifications are disabled", manager.areNotificationsEnabled())
+            if (Build.VERSION.SDK_INT >= 33) assertTrue("Notification permission unavailable",
+                context.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) == android.content.pm.PackageManager.PERMISSION_GRANTED)
+            val original = AppCompatDelegate.getApplicationLocales()
+            try {
+                instrumentation.runOnMainSync { AppLanguage.select(AppLanguage.ENGLISH) }
+                instrumentation.waitForIdleSync()
+                withDownloadRecord("v9.0.0") { id, _, _ ->
+                        lateinit var oldNotification: Notification
+                        instrumentation.runOnMainSync {
+                            updateState.value = updateState.value.copy(download = DownloadStatus.READY)
+                            if (Build.VERSION.SDK_INT >= 26 && manager.getNotificationChannel("updates") == null)
+                                manager.createNotificationChannel(NotificationChannel("updates", "Updates", NotificationManager.IMPORTANCE_DEFAULT))
+                            val builder = if (Build.VERSION.SDK_INT >= 26) Notification.Builder(context, "updates") else Notification.Builder(context)
+                            oldNotification = builder.setSmallIcon(android.R.drawable.stat_sys_download_done)
+                                .setContentTitle("Old language fixture").build()
+                            manager.notify(300, oldNotification)
+                        }
+                        waitFor { manager.activeNotifications.firstOrNull { it.id == 300 }?.notification?.extras
+                            ?.getCharSequence(Notification.EXTRA_TITLE)?.toString() == "Old language fixture" }
+                        instrumentation.runOnMainSync { AppLanguage.select(AppLanguage.TRADITIONAL_CHINESE) }
+                        waitFor { manager.activeNotifications.firstOrNull { it.id == 300 }?.notification?.extras
+                            ?.getCharSequence(Notification.EXTRA_TITLE)?.toString() == "v9.0.0 已下載並通過驗證。" }
+                        assertTrue(manager.activeNotifications.single { it.id == 300 }.notification.flags and Notification.FLAG_ONLY_ALERT_ONCE != 0)
+                        assertEquals(id, context.getSharedPreferences("app_updates", 0).getLong("notified_download", -1))
+                        assertEquals(DownloadStatus.READY, AppUpdates.state.value.download)
+                        // A restored READY download should also refresh a still-visible old-language notice.
+                        manager.notify(300, oldNotification)
+                        waitFor { manager.activeNotifications.firstOrNull { it.id == 300 }?.notification?.extras
+                            ?.getCharSequence(Notification.EXTRA_TITLE)?.toString() == "Old language fixture" }
+                        val record = requireNotNull(updateField("record").get(AppUpdates))
+                        AppUpdates.javaClass.getDeclaredMethod("notifyReady", record.javaClass).apply { isAccessible = true }
+                            .invoke(AppUpdates, record)
+                        waitFor { manager.activeNotifications.firstOrNull { it.id == 300 }?.notification?.extras
+                            ?.getCharSequence(Notification.EXTRA_TITLE)?.toString() == "v9.0.0 已下載並通過驗證。" }
+                        assertTrue(manager.activeNotifications.single { it.id == 300 }.notification.flags and Notification.FLAG_ONLY_ALERT_ONCE != 0)
+                        manager.cancel(300)
+                        instrumentation.runOnMainSync { AppLanguage.select(AppLanguage.ENGLISH) }
+                        instrumentation.waitForIdleSync()
+                        assertFalse(manager.activeNotifications.any { it.id == 300 })
                 }
             } finally { instrumentation.runOnMainSync { AppCompatDelegate.setApplicationLocales(original) } }
         }
@@ -448,7 +503,7 @@ class SettingsUpdatesTest {
         else assertTrue("Only an already selected radio option may omit duplicate activation", target.isChecked || target.isSelected)
         instrumentation.waitForIdleSync(); SystemClock.sleep(400)
     }
-    private fun scrollTo(text: String, clickable: Boolean = true) {
+    private fun scrollTo(text: String, clickable: Boolean = true, backwards: Boolean = false) {
         fun scrollable(root: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
             if (root == null) return null
             if (root.isScrollable) return root
@@ -457,8 +512,19 @@ class SettingsUpdatesTest {
         }
         repeat(8) {
             if (node(text, clickable) != null) return
-            scrollable(instrumentation.uiAutomation.rootInActiveWindow)?.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
+            val scroll = scrollable(instrumentation.uiAutomation.rootInActiveWindow)
+            scroll?.performAction(if (backwards) AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD else AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
             instrumentation.waitForIdleSync(); SystemClock.sleep(250)
+            if (node(text, clickable) != null) return
+            // Some emulator Compose scroll semantics report success without moving the viewport.
+            scroll?.let {
+                val bounds = Rect().also(it::getBoundsInScreen)
+                val x = bounds.centerX()
+                val start = bounds.top + bounds.height() * (if (backwards) 1 else 4) / 5
+                val end = bounds.top + bounds.height() * (if (backwards) 4 else 1) / 5
+                instrumentation.uiAutomation.executeShellCommand("input swipe $x $start $x $end 350").close()
+                instrumentation.waitForIdleSync(); SystemClock.sleep(250)
+            }
         }
         assertNotNull("Visible $text", node(text, clickable))
     }

@@ -10,6 +10,12 @@
             "state" : "new",
             "value" : "MobileSpeak"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MobileSpeak"
+          }
         }
       }
     },
@@ -20,6 +26,12 @@
         "en" : {
           "stringUnit" : {
             "state" : "new",
+            "value" : "MobileSpeak"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
             "value" : "MobileSpeak"
           }
         }
@@ -39,6 +51,12 @@
             "state" : "translated",
             "value" : "连接你选择的局域网 TeamSpeak 服务器。"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "連線到你選擇的區域網路 TeamSpeak 伺服器。"
+          }
         }
       }
     },
@@ -55,6 +73,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "在你开启麦克风后，将语音发送给 TeamSpeak 频道中的成员。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "開啟麥克風後，將你的語音傳送給 TeamSpeak 頻道中的成員。"
           }
         }
       }

@@ -1,6 +1,7 @@
 package dev.mobilespeak.mobilespeak
 
 import android.app.ActivityManager
+import android.app.Notification
 import android.app.NotificationManager
 import android.app.Service
 import android.content.Context
@@ -11,6 +12,8 @@ import android.os.Looper
 import android.os.Message
 import android.os.PowerManager
 import android.os.SystemClock
+import androidx.appcompat.app.AppCompatDelegate
+import androidx.test.core.app.ActivityScenario
 import androidx.test.platform.app.InstrumentationRegistry
 import kotlinx.coroutines.flow.MutableStateFlow
 import org.json.JSONObject
@@ -161,6 +164,56 @@ class VoiceServiceLifecycleTest {
         ClientSession.disconnect()
         settle { actual() == null && !serviceExists() }
         assertReleased(service)
+    }
+
+    @Test fun languageSwitchUpdatesLiveNotificationWithoutReplacingServiceOrAudio() {
+        ActivityScenario.launch(MainActivity::class.java).use {
+            val original = AppCompatDelegate.getApplicationLocales()
+            try {
+                main { AppLanguage.select(AppLanguage.ENGLISH) }
+                assertEquals(AppLanguage.ENGLISH, AppLanguage.selected())
+                val service = running()
+                val audio = property(service, "audio")!!
+                val connection = ClientSession.state.value.snapshot.connectionId
+                val before = ClientSession.state.value
+                val foregroundMicrophone = property(service, "foregroundHasMicrophone")
+                val notifications = context.getSystemService(NotificationManager::class.java)
+                data class Expected(val language: AppLanguage, val title: String, val body: String, val disconnect: String)
+                for ((language, title, body, disconnect) in listOf(
+                    Expected(AppLanguage.ENGLISH, "MobileSpeak Call", "TeamSpeak remains connected in the background", "Disconnect"),
+                    Expected(AppLanguage.SIMPLIFIED_CHINESE, "MobileSpeak 通话中", "TeamSpeak 连接保持在后台", "断开连接"),
+                    Expected(AppLanguage.TRADITIONAL_CHINESE, "MobileSpeak 通話中", "TeamSpeak 連線會在背景保持運作", "中斷連線"),
+                )) {
+                    main { AppLanguage.select(language) }
+                    drainRequests()
+                    try {
+                        await { notifications.activeNotifications.firstOrNull { it.id == 7 }?.notification?.extras
+                            ?.getCharSequence(Notification.EXTRA_TITLE)?.toString() == title }
+                    } catch (error: IllegalStateException) {
+                        val current = notifications.activeNotifications.map { it.id to it.notification.extras.getCharSequence(Notification.EXTRA_TITLE) }
+                        throw AssertionError("$language wanted $title, selected=${AppLanguage.selected()}, notifications=$current", error)
+                    }
+                    val notice = notifications.activeNotifications.single { it.id == 7 }.notification
+                    assertEquals(title, notice.extras.getCharSequence(Notification.EXTRA_TITLE)?.toString())
+                    assertEquals(body, notice.extras.getCharSequence(Notification.EXTRA_TEXT)?.toString())
+                    assertEquals(disconnect, notice.actions.single().title.toString())
+                    assertSame(service, actual())
+                    assertSame(audio, property(service, "audio"))
+                    assertTrue((property(audio, "running") as AtomicBoolean).get())
+                    assertEquals(foregroundMicrophone, property(service, "foregroundHasMicrophone"))
+                    assertEquals(connection, ClientSession.state.value.snapshot.connectionId)
+                    assertEquals(before.snapshot.status, ClientSession.state.value.snapshot.status)
+                    assertEquals(before.microphoneMuted, ClientSession.state.value.microphoneMuted)
+                    assertEquals(before.deafened, ClientSession.state.value.deafened)
+                    assertEquals(before.noiseSuppression, ClientSession.state.value.noiseSuppression)
+                    assertEquals(before.audioProcessingStatus, ClientSession.state.value.audioProcessingStatus)
+                }
+            } finally {
+                main { AppCompatDelegate.setApplicationLocales(original) }
+                ClientSession.refreshLanguage()
+                drainRequests()
+            }
+        }
     }
 
     @Test fun creationBeforeAStartRequestIsRecordedRetainsAnActiveSession() {

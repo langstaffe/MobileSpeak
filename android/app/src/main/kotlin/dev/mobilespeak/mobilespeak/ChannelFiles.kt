@@ -107,7 +107,7 @@ internal fun JSONObject.fileCache() = FileCacheState(
 @Composable private fun FileCacheSize(ui: SessionUiState) {
     val context = LocalContext.current
     if (ui.fileCache.working || ui.fileCachePending) CircularProgressIndicator(Modifier.size(20.dp))
-    else Text(ui.fileCache.bytes?.let { android.text.format.Formatter.formatFileSize(context, it) } ?: "—", color = Palette.muted)
+    else Text(ui.fileCache.bytes?.let(context::localizedFileSize) ?: "—", color = Palette.muted)
 }
 data class ChannelFileEntry(val name: String, val size: Long, val timestamp: Long, val directory: Boolean, val icon: String, val localPath: String?)
 data class ChannelFileTransfer(val id: Long, val server: String, val channel: Long, val path: String, val name: String,
@@ -135,24 +135,26 @@ internal fun JSONObject.channelFiles() = ChannelFilesState(
     "file-archive" -> UiIcons.FileArchive
     else -> UiIcons.File
 }
-internal fun android.content.Context.fileError(value: String): String = when (value) {
-    "files_cache_busy" -> localized(R.string.files_cache_busy)
-    "files_permission_denied" -> localized(R.string.files_permission_denied)
-    "files_invalid_offset" -> localized(R.string.files_invalid_offset)
-    "files_unexpected_response" -> localized(R.string.files_unexpected_response)
-    "files_disconnected" -> localized(R.string.files_disconnected)
-    "files_channel_changed" -> localized(R.string.files_channel_changed)
-    "files_timeout" -> localized(R.string.files_timeout)
-    "files_invalid_path" -> localized(R.string.files_invalid_path)
-    "files_storage_failed" -> localized(R.string.files_storage_failed)
-    "files_load_first" -> localized(R.string.files_load_first)
-    "files_busy" -> localized(R.string.files_busy)
-    "files_changed" -> localized(R.string.files_changed)
-    "files_incomplete" -> localized(R.string.files_incomplete)
-    "files_exists" -> localized(R.string.files_exists)
-    else -> value
+internal fun fileErrorSource(value: String): LocalizedMessage? = when (value) {
+    "files_cache_busy" -> LocalizedMessage(R.string.files_cache_busy)
+    "files_permission_denied" -> LocalizedMessage(R.string.files_permission_denied)
+    "files_invalid_offset" -> LocalizedMessage(R.string.files_invalid_offset)
+    "files_unexpected_response" -> LocalizedMessage(R.string.files_unexpected_response)
+    "files_disconnected" -> LocalizedMessage(R.string.files_disconnected)
+    "files_channel_changed" -> LocalizedMessage(R.string.files_channel_changed)
+    "files_timeout" -> LocalizedMessage(R.string.files_timeout)
+    "files_invalid_path" -> LocalizedMessage(R.string.files_invalid_path)
+    "files_storage_failed" -> LocalizedMessage(R.string.files_storage_failed)
+    "files_load_first" -> LocalizedMessage(R.string.files_load_first)
+    "files_busy" -> LocalizedMessage(R.string.files_busy)
+    "files_changed" -> LocalizedMessage(R.string.files_changed)
+    "files_incomplete" -> LocalizedMessage(R.string.files_incomplete)
+    "files_exists" -> LocalizedMessage(R.string.files_exists)
+    else -> null
 }
-private fun fileDate(timestamp: Long, context: android.content.Context) = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT, context.resources.configuration.locales[0]).format(Date(timestamp * 1000))
+internal fun android.content.Context.fileError(value: String): String =
+    fileErrorSource(value)?.render(languageContext()) ?: value
+private fun fileDate(timestamp: Long, context: android.content.Context) = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT, context.languageContext().resources.configuration.locales[0]).format(Date(timestamp * 1000))
 
 @Composable private fun DrawerPageHeader(title: String, subtitle: String, onBack: () -> Unit,
                                         onUpload: (() -> Unit)? = null, canUpload: Boolean = false) {
@@ -349,14 +351,16 @@ private enum class DrawerPage { Home, Volumes, Files }
         }
         LazyColumn(Modifier.weight(1f).fillMaxWidth().testTag("channel-files-list")) {
             if (preparing) item { Text(stringResource(R.string.files_staging), Modifier.padding(16.dp), color = Palette.muted) }
-            (ui.channelFilesLocalError ?: files.error)?.let { error -> item { Text(context.fileError(error), Modifier.padding(16.dp), color = Palette.disconnect) } }
+            (ui.channelFilesLocalError ?: files.error?.let(context::fileError))?.let { error ->
+                item { Text(error, Modifier.padding(16.dp), color = Palette.disconnect) }
+            }
             val selected = info
             if (selected != null) item {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                     Icon(fileIcon(selected.icon), null, Modifier.size(28.dp), tint = Palette.muted)
                     Text(selected.name, color = Palette.text, style = MaterialTheme.typography.titleMedium)
                     FileMetadata(R.string.files_type, selected.name.substringAfterLast('.', "").takeIf { selected.name.lastIndexOf('.') > 0 && it.isNotEmpty() }?.uppercase() ?: context.localized(R.string.files_file))
-                    FileMetadata(R.string.files_size, android.text.format.Formatter.formatFileSize(context, selected.size))
+                    FileMetadata(R.string.files_size, context.localizedFileSize(selected.size))
                     FileMetadata(R.string.files_time, fileDate(selected.timestamp, context))
                     FileMetadata(R.string.files_location, files.path)
                     TextButton(onClick = { if (active) target?.let { ClientSession.downloadChannelFile(selected.name, it) } }, enabled = files.transfer(selected.name)?.status != "running") {
@@ -394,7 +398,7 @@ private enum class DrawerPage { Home, Volumes, Files }
                                 Icon(fileIcon(entry.icon), null, Modifier.size(24.dp), tint = Palette.muted)
                                 Column(Modifier.weight(1f).padding(vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                                     ChannelFileName(entry.name)
-                                    Text("${android.text.format.Formatter.formatFileSize(context, entry.size)} · ${fileDate(entry.timestamp, context)}", color = Palette.muted, style = MaterialTheme.typography.bodySmall)
+                                    Text("${context.localizedFileSize(entry.size)} · ${fileDate(entry.timestamp, context)}", color = Palette.muted, style = MaterialTheme.typography.bodySmall)
                                 }
                                 if (entry.directory) Icon(UiIcons.ChevronRight, null, Modifier.size(18.dp), tint = Palette.muted)
                             }
@@ -432,7 +436,7 @@ private enum class DrawerPage { Home, Volumes, Files }
     when(task.status) {
         "running" -> Column(Modifier.padding(vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             LinearProgressIndicator(progress = { if (task.size > 0) (task.transferred.toDouble()/task.size).toFloat() else 0f }, modifier = Modifier.fillMaxWidth())
-            Text("${stringResource(if (task.upload) R.string.files_upload else R.string.files_download)} · ${android.text.format.Formatter.formatFileSize(context, task.transferred)} / ${android.text.format.Formatter.formatFileSize(context, task.size)}", color = Palette.muted, style = MaterialTheme.typography.bodySmall)
+            Text("${stringResource(if (task.upload) R.string.files_upload else R.string.files_download)} · ${context.localizedFileSize(task.transferred)} / ${context.localizedFileSize(task.size)}", color = Palette.muted, style = MaterialTheme.typography.bodySmall)
         }
         "failed" -> Column {
             Row(verticalAlignment = Alignment.CenterVertically) { Icon(UiIcons.Error, null, Modifier.size(16.dp), tint = Palette.disconnect); Text(context.fileError(task.error ?: context.localized(R.string.files_failed)), Modifier.padding(4.dp), color = Palette.disconnect, style = MaterialTheme.typography.bodySmall) }
@@ -455,7 +459,7 @@ private enum class DrawerPage { Home, Volumes, Files }
             intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             intent.clipData = android.content.ClipData.newRawUri("", uri)
             context.startActivity(Intent.createChooser(intent, context.localized(if (share) R.string.files_share else R.string.files_open)))
-        }.onFailure { ClientSession.fileLocalError(context.localized(R.string.files_choose_failed)) }
+        }.onFailure { ClientSession.fileLocalError(LocalizedMessage(R.string.files_choose_failed)) }
     }
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Icon(UiIcons.Check, null, Modifier.size(16.dp), tint = Palette.green)

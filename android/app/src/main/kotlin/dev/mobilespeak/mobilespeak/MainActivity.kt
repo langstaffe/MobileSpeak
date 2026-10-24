@@ -120,6 +120,10 @@ import kotlin.math.abs
 import kotlin.math.roundToInt
 
 class MainActivity : AppCompatActivity() {
+    override fun attachBaseContext(newBase: android.content.Context) {
+        super.attachBaseContext(newBase.resolvedSystemLanguageContext())
+    }
+
     private var openAbout by mutableStateOf(false)
     private var permissionEnablesMicrophone = true
     private var permissionSettingsPending = false
@@ -143,6 +147,8 @@ class MainActivity : AppCompatActivity() {
         openAbout = savedInstanceState == null && intent.getBooleanExtra("show_about", false)
         AppUpdates.initialize(applicationContext)
         ClientSession.initialize(applicationContext)
+        ClientSession.refreshLanguage()
+        AppUpdates.refreshLanguage()
         ClientSession.setMicrophonePermission(
             checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED,
         )
@@ -1309,7 +1315,9 @@ internal fun Avatar(name: String, path: String?, speaking: Boolean, size: Int, m
                 drawRect(Color.Black.copy(alpha = .75f))
             }
         } else Modifier).background(Palette.accent), contentAlignment = Alignment.Center) {
-            if (member?.statusIcon == null) Text(name.take(2).uppercase(), fontWeight = FontWeight.Bold, fontSize = (size * .36).sp)
+            if (member?.statusIcon == null) Text(name.take(2).uppercase(), fontWeight = FontWeight.Bold,
+                fontSize = with(LocalDensity.current) { (size * .36).dp.toSp() },
+                lineHeight = with(LocalDensity.current) { (size * .36).dp.toSp() })
             LocalImage(path, Modifier.fillMaxSize())
         }
         member?.statusIcon?.let { icon ->

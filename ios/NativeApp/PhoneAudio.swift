@@ -174,13 +174,13 @@ final class PhoneAudio: @unchecked Sendable {
         let started = ProcessInfo.processInfo.systemUptime
         defer { logger.info("Audio capture startup elapsed_ms=\(Int((ProcessInfo.processInfo.systemUptime - started) * 1000)) capturing=\(self.capturing)") }
         try ensureEngineRunning()
-        guard let engine else { throw audioError(L10n.string("error_audio_engine_not_started")) }
+        guard let engine else { throw audioError(.key("error_audio_engine_not_started")) }
         let input = engine.inputNode
         let inputFormat = input.outputFormat(forBus: 0)
         guard inputFormat.sampleRate > 0, inputFormat.channelCount > 0,
               let format = AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 1),
               let converter = AVAudioConverter(from: inputFormat, to: format) else {
-            throw audioError(L10n.format("error_audio_format", inputFormat.sampleRate, Int64(inputFormat.channelCount)))
+            throw audioError(.audioFormat(inputFormat.sampleRate, Int64(inputFormat.channelCount)))
         }
         var pending = [Int16]()
         pending.reserveCapacity(1920)
@@ -234,8 +234,8 @@ final class PhoneAudio: @unchecked Sendable {
             logger.info("Audio engine restarted after configuration change")
         }
     }
-    private func audioError(_ message: String) -> NSError {
-        NSError(domain: "MobileSpeak", code: 2, userInfo: [NSLocalizedDescriptionKey: message])
+    private func audioError(_ source: LocalizedNotice) -> NSError {
+        source.error(domain: "MobileSpeak", code: 2)
     }
     func stopCapture() {
         setCaptureReady(false)

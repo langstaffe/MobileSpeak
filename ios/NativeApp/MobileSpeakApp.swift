@@ -425,7 +425,7 @@ private struct PageTitle: View {
     static let inset: CGFloat = 14
     let key: String
     var body: some View {
-        Text(L10n.string(key))
+        Text(LocalizedStringKey(key))
             .font(.system(.title3).weight(.heavy))
             .fixedSize(horizontal: false, vertical: true)
             .padding(.bottom, 8)
@@ -450,12 +450,19 @@ private extension View {
                 .transaction { if reduceMotion { $0.disablesAnimations = true } }
                 .environmentObject(language)
                 .environment(\.locale, language.locale)
+                .onChange(of: language.selection) { _ in client.refreshLocalizedNotices() }
+                .onChange(of: language.systemLanguage) { _ in
+                    if language.selection == .system { client.refreshLocalizedNotices() }
+                }
                 .preferredColorScheme(.dark)
                 .tint(Palette.accent)
                 .onAppear { client.setAppActive(phase == .active) }
                 .onChange(of: phase) { phase in
                     client.setAppActive(phase == .active)
-                    if phase == .active { client.audioDidBecomeActive() }
+                    if phase == .active {
+                        language.refreshSystemLanguage()
+                        client.audioDidBecomeActive()
+                    }
                 }
                 .onReceive(NotificationCenter.default.publisher(for: .AVAudioEngineConfigurationChange).receive(on: RunLoop.main)) { _ in
                     client.audioConfigurationChanged()
@@ -1917,7 +1924,7 @@ struct ChatView: View {
     private func send() {
         let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard available, !value.isEmpty else { return }
-        guard value.utf8.count <= 8192 else { client.error = L10n.string("chat_message_too_long"); return }
+        guard value.utf8.count <= 8192 else { client.showError(.key("chat_message_too_long")); return }
         if let channel, client.sendChannelMessage(value, channel: channel) { text = "" }
         else if let member = currentMember, client.sendPrivateMessage(value, member: member) { text = "" }
     }
@@ -2024,7 +2031,7 @@ struct ConnectView: View {
     @ObservedObject var client: Client
     var bookmark: Bookmark? = nil
     @State private var title = ""
-    @State private var formError: String?
+    @State private var formError: Error?
     @State private var passwordLoaded = false
     @Environment(\.dismiss) private var dismiss
     @State private var host = ""
@@ -2047,9 +2054,9 @@ struct ConnectView: View {
                             let saved = try client.saveBookmark(id: bookmark?.id, title: title, host: host, port: port, password: password)
                             if bookmark == nil && !client.connected && !client.busy { client.connectBookmark(saved) }
                             dismiss()
-                        } catch { formError = error.localizedDescription }
+                        } catch { formError = error }
                     }.disabled(!passwordLoaded)
-                    if let error = formError { Text(error).foregroundStyle(.red) }
+                    if let error = formError { Text(LocalizedNotice.source(of: error)?.text ?? error.localizedDescription).foregroundStyle(.red) }
                 }
             }.navigationTitle(L10n.string(bookmark == nil ? "bookmark_add_server" : "bookmark_edit_server")).navigationBarTitleDisplayMode(.inline)
                 .toolbar { ToolbarItem(placement: .cancellationAction) { Button(L10n.string("action_cancel")) { dismiss() } } }
@@ -2058,7 +2065,7 @@ struct ConnectView: View {
             host = bookmark?.host ?? url?.host ?? ""; port = String(bookmark?.port ?? UInt16(url?.port ?? 9987))
             title = bookmark?.title ?? ""
             do { password = try bookmark.map { try client.bookmarkPassword($0) } ?? ""; passwordLoaded = true }
-            catch { formError = error.localizedDescription }
+            catch { formError = error }
         }
     }
 }

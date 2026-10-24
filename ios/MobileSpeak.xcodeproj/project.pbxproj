@@ -233,6 +233,7 @@
 			knownRegions = (
 				en,
 				"zh-Hans",
+				"zh-Hant",
 				Base,
 			);
 			mainGroup = 607B1811695CA760B73CC6FB;
