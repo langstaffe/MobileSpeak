@@ -37,7 +37,7 @@ class ModelsTest {
     @Test fun networkNumbersKeepPrecisionAndDoNotOverflowAtLargeValues() {
         val previous = java.util.Locale.getDefault()
         try {
-            java.util.Locale.setDefault(java.util.Locale.GERMANY)
+            java.util.Locale.setDefault(java.util.Locale.ROOT)
             val q = NetworkQuality(rttMs = 1234.5, deviationMs = 123.4, packetLossPercent = 0.8)
             assertEquals("999", q.latencyText)
             assertEquals("123.4", q.deviationText)

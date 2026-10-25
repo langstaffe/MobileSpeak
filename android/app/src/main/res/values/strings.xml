@@ -292,4 +292,12 @@
     <string name="voice_target_unavailable">Voice channel: Not connected</string>
     <string name="voice_grant_microphone">Allow microphone access</string>
     <string name="voice_hold_help">Press and hold to speak. Release or slide outside to stop.</string>
+    <string name="language_german">Deutsch</string>
+    <string name="language_russian">Русский</string>
+    <string name="language_polish">Polski</string>
+    <string name="language_spanish_mexico">Español (México)</string>
+    <string name="language_french">Français</string>
+    <string name="language_portuguese_brazil">Português (Brasil)</string>
+    <string name="language_spanish">Español</string>
+    <string name="voice_hold_compact">Hold</string>
 </resources>

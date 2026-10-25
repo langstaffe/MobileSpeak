@@ -16,6 +16,54 @@
             "state" : "translated",
             "value" : "MobileSpeak"
           }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MobileSpeak"
+          }
+        },
+        "pl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MobileSpeak"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MobileSpeak"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MobileSpeak"
+          }
+        },
+        "es-MX" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MobileSpeak"
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MobileSpeak"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MobileSpeak"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MobileSpeak"
+          }
         }
       }
     },
@@ -30,6 +78,54 @@
           }
         },
         "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MobileSpeak"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MobileSpeak"
+          }
+        },
+        "pl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MobileSpeak"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MobileSpeak"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MobileSpeak"
+          }
+        },
+        "es-MX" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MobileSpeak"
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MobileSpeak"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MobileSpeak"
+          }
+        },
+        "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "MobileSpeak"
@@ -57,6 +153,48 @@
             "state" : "translated",
             "value" : "連線到你選擇的區域網路 TeamSpeak 伺服器。"
           }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Подключение к выбранному вами серверу TeamSpeak в локальной сети."
+          }
+        },
+        "pl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Łączenie z wybranym przez Ciebie serwerem TeamSpeak w sieci lokalnej."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Conectar con el servidor de TeamSpeak de la red local que elijas."
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Conectar ao servidor TeamSpeak da rede local que você escolher."
+          }
+        },
+        "es-MX" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Conectar con el servidor de TeamSpeak de la red local que elijas."
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mit dem von dir ausgewählten lokalen TeamSpeak-Server verbinden."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Se connecter au serveur TeamSpeak local de votre choix."
+          }
         }
       }
     },
@@ -79,6 +217,48 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "開啟麥克風後，將你的語音傳送給 TeamSpeak 頻道中的成員。"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Передача вашего голоса участникам канала TeamSpeak, когда вы включаете микрофон."
+          }
+        },
+        "pl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Przesyłanie Twojego głosu do uczestników kanału TeamSpeak po włączeniu mikrofonu."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enviar tu voz a los miembros de un canal de TeamSpeak cuando actives el micrófono."
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enviar sua voz aos membros de um canal do TeamSpeak quando você ativar o microfone."
+          }
+        },
+        "es-MX" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enviar tu voz a los miembros de un canal de TeamSpeak cuando actives el micrófono."
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Deine Stimme an Mitglieder eines TeamSpeak-Kanals senden, wenn du das Mikrofon einschaltest."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Transmettre votre voix aux membres d’un salon TeamSpeak lorsque vous activez le microphone."
           }
         }
       }

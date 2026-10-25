@@ -291,4 +291,12 @@
     <string name="voice_target_unavailable">语音发言频道：未连接</string>
     <string name="voice_grant_microphone">授权麦克风</string>
     <string name="voice_hold_help">按住时发言，松开或滑出按钮后停止。</string>
+    <string name="language_german">Deutsch</string>
+    <string name="language_russian">Русский</string>
+    <string name="language_polish">Polski</string>
+    <string name="language_spanish_mexico">Español (México)</string>
+    <string name="language_french">Français</string>
+    <string name="language_portuguese_brazil">Português (Brasil)</string>
+    <string name="language_spanish">Español</string>
+    <string name="voice_hold_compact">按住说话</string>
 </resources>

@@ -212,7 +212,8 @@ internal class AudioEngine(private val context: Context) {
                 } catch (error: Throwable) {
                     closeOutput()
                     if (running.get() && connected) {
-                        ClientSession.reportError(localizedFailureSource(R.string.error_audio_playback, error))
+                        Log.e(TAG, "Audio playback failed", error)
+                        ClientSession.reportError(LocalizedMessage(R.string.error_audio_playback))
                         awaitRetry()
                     }
                 }
@@ -271,7 +272,8 @@ internal class AudioEngine(private val context: Context) {
                 // stop() interrupts blocking waits after flipping running to false.
             } catch (error: Throwable) {
                 if (running.get() && shouldCapture()) {
-                    ClientSession.reportError(localizedFailureSource(R.string.error_audio_recording, error))
+                    Log.e(TAG, "Audio recording failed", error)
+                    ClientSession.reportError(LocalizedMessage(R.string.error_audio_recording))
                     releaseCapture()
                     awaitRetry()
                 }

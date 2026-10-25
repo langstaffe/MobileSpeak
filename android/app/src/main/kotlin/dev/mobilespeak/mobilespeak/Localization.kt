@@ -12,18 +12,33 @@ internal enum class AppLanguage(val code: String, val tag: String?, @param:Strin
     SYSTEM("system", null, R.string.language_system),
     SIMPLIFIED_CHINESE("zh-Hans", "zh-Hans", R.string.language_simplified_chinese),
     TRADITIONAL_CHINESE("zh-Hant", "zh-Hant", R.string.language_traditional_chinese),
-    ENGLISH("en", "en", R.string.language_english);
+    ENGLISH("en", "en", R.string.language_english),
+    GERMAN("de", "de", R.string.language_german),
+    RUSSIAN("ru", "ru", R.string.language_russian),
+    POLISH("pl", "pl", R.string.language_polish),
+    SPANISH_MEXICO("es-MX", "es-MX", R.string.language_spanish_mexico),
+    FRENCH("fr", "fr", R.string.language_french),
+    PORTUGUESE_BRAZIL("pt-BR", "pt-BR", R.string.language_portuguese_brazil),
+    SPANISH("es", "es", R.string.language_spanish);
 
     companion object {
         fun fromCode(code: String?) = entries.firstOrNull { it.code == code } ?: SYSTEM
 
         fun selected(): AppLanguage {
-            val locale = AppCompatDelegate.getApplicationLocales()[0] ?: return SYSTEM
-            return supported(locale) ?: SYSTEM
+            return selected(AppCompatDelegate.getApplicationLocales().toLanguageTags().split(',').filter(String::isNotEmpty))
         }
 
+        fun selected(context: Context): AppLanguage = if (android.os.Build.VERSION.SDK_INT >= 33) {
+            val locales = context.getSystemService(android.app.LocaleManager::class.java).applicationLocales
+            selected((0 until locales.size()).map { locales[it].toLanguageTag() })
+        } else selected()
+
+        fun selected(applicationLanguageTags: List<String>): AppLanguage =
+            applicationLanguageTags.firstOrNull()?.let { supported(Locale.forLanguageTag(it)) ?: ENGLISH } ?: SYSTEM
+
         fun select(language: AppLanguage): Boolean {
-            if (!shouldApply(selected(), language)) return false
+            if (!shouldApply(selected(), language) &&
+                AppCompatDelegate.getApplicationLocales().toLanguageTags() == language.tag.orEmpty()) return false
             AppCompatDelegate.setApplicationLocales(
                 language.tag?.let(LocaleListCompat::forLanguageTags) ?: LocaleListCompat.getEmptyLocaleList(),
             )
@@ -39,6 +54,13 @@ internal enum class AppLanguage(val code: String, val tag: String?, @param:Strin
 
         private fun supported(locale: Locale): AppLanguage? = when {
             locale.language == "en" -> ENGLISH
+            locale.language == "de" -> GERMAN
+            locale.language == "ru" -> RUSSIAN
+            locale.language == "pl" -> POLISH
+            locale.language == "fr" -> FRENCH
+            locale.language == "es" && locale.country == "MX" -> SPANISH_MEXICO
+            locale.language == "es" -> SPANISH
+            locale.language == "pt" && locale.country == "BR" -> PORTUGUESE_BRAZIL
             locale.language != "zh" -> null
             locale.script.equals("Hans", ignoreCase = true) -> SIMPLIFIED_CHINESE
             locale.script.equals("Hant", ignoreCase = true) -> TRADITIONAL_CHINESE
@@ -53,7 +75,7 @@ internal enum class AppLanguage(val code: String, val tag: String?, @param:Strin
 }
 
 internal fun Context.languageContext(): Context {
-    val language = AppLanguage.resolve(AppLanguage.selected(), systemLanguageTags())
+    val language = AppLanguage.resolve(AppLanguage.selected(this), systemLanguageTags())
     return contextForLanguage(language)
 }
 
@@ -80,6 +102,25 @@ internal fun Context.localizedQuantity(@PluralsRes id: Int, quantity: Int, varar
 
 internal fun Context.localizedFileSize(bytes: Long): String =
     android.text.format.Formatter.formatFileSize(languageContext(), bytes)
+
+internal fun Context.localizedFileDate(timestamp: Long): String = java.text.DateFormat.getDateTimeInstance(
+    java.text.DateFormat.SHORT, java.text.DateFormat.SHORT, languageContext().resources.configuration.locales[0],
+).format(java.util.Date(timestamp * 1000))
+
+internal fun localizedPercent(percent: Int, locale: Locale): String = java.text.NumberFormat.getPercentInstance(locale).apply {
+    isGroupingUsed = false
+    maximumFractionDigits = 0
+}.format(percent / 100.0)
+
+internal fun percentAffixes(locale: Locale): Pair<String, String> =
+    (java.text.NumberFormat.getPercentInstance(locale) as java.text.DecimalFormat).let { it.positivePrefix to it.positiveSuffix }
+
+internal fun millisecondAffixes(locale: Locale): Pair<String, String> {
+    val position = java.text.FieldPosition(android.icu.text.NumberFormat.INTEGER_FIELD)
+    val text = android.icu.text.MeasureFormat.getInstance(locale, android.icu.text.MeasureFormat.FormatWidth.SHORT)
+        .formatMeasures(StringBuilder(), position, android.icu.util.Measure(0, android.icu.util.MeasureUnit.MILLISECOND)).toString()
+    return text.substring(0, position.beginIndex) to text.substring(position.endIndex)
+}
 
 data class LocalizedMessage(
     @param:StringRes val id: Int,

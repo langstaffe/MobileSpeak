@@ -275,6 +275,44 @@ class PushToTalkUiTest {
         instrumentation.waitForIdleSync()
         return downTime
     }
+    @Test fun localizedCompactLabelsKeepFullAccessibilityAtNarrowLargeTextSize() {
+        assumeUnlocked()
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            for (language in AppLanguage.entries.filter { it != AppLanguage.SYSTEM }) {
+                val localized = context.contextForLanguage(language)
+                scenario.onActivity { activity -> activity.setContent {
+                    androidx.compose.runtime.CompositionLocalProvider(
+                        androidx.compose.ui.platform.LocalContext provides localized,
+                        androidx.compose.ui.platform.LocalConfiguration provides localized.resources.configuration,
+                        androidx.compose.ui.platform.LocalResources provides localized.resources,
+                        androidx.compose.ui.platform.LocalDensity provides androidx.compose.ui.unit.Density(context.resources.displayMetrics.density, 2f),
+                    ) {
+                        MaterialTheme(colorScheme = darkColorScheme()) {
+                            Column(Modifier.width(320.dp).fillMaxHeight().background(Palette.bottom).systemBarsPadding().padding(horizontal = 20.dp),
+                                verticalArrangement = Arrangement.Center) {
+                                PushToTalkButton(fixture(), onTransmit = { _, _ -> })
+                                Spacer(Modifier.height(20.dp))
+                                PushToTalkButton(fixture().copy(speech = fixture().speech.copy(transmitting = true)), onTransmit = { _, _ -> })
+                                Spacer(Modifier.height(20.dp))
+                                PushToTalkButton(fixture().copy(microphoneMuted = true), onTransmit = { _, _ -> })
+                            }
+                        }
+                    }
+                } }
+                instrumentation.waitForIdleSync()
+                val fullTitle = localized.getString(R.string.voice_hold_to_talk)
+                waitFor { find { it.contentDescription?.toString() == fullTitle } != null }
+                val button = requireNotNull(find { it.contentDescription?.toString() == fullTitle && it.isEnabled })
+                val bounds = Rect().also(button::getBoundsInScreen)
+                assertTrue(bounds.width() <= 280 * context.resources.displayMetrics.density + 1)
+                assertTrue(bounds.height() >= 68 * context.resources.displayMetrics.density - 1)
+                if (android.os.Build.VERSION.SDK_INT >= 30) assertEquals(localized.getString(R.string.voice_hold_help), button.stateDescription?.toString())
+                SystemClock.sleep(150)
+                screenshot("push-to-talk-large-${language.code}.png")
+            }
+        }
+    }
+
     private fun buttonBounds() = Rect().also {
         waitFor { find { it.contentDescription?.toString() == context.localized(R.string.voice_hold_to_talk) } != null }
         val node = find { it.contentDescription == context.localized(R.string.voice_hold_to_talk) }

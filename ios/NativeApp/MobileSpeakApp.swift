@@ -68,6 +68,11 @@ extension NetworkGrade {
     }
 }
 
+private struct NetworkPanelHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
+}
+
 // Shared core owns all sampling, grades and scale; this view only draws its snapshot.
 struct NetworkQualityPanel: View {
     var quality: NetworkQuality = NetworkQuality()
@@ -81,12 +86,12 @@ struct NetworkQualityPanel: View {
         VStack(alignment: .leading, spacing: 8) {
             Text(L10n.string("network_latency")).font(.system(size: labelSize))
             (Text(quality.latencyText).foregroundColor(quality.rttGrade?.color ?? Palette.muted)
-                + Text(" ms ± ").foregroundColor(Palette.muted)
+                + Text(" " + L10n.millisecondsUnit + " ± ").foregroundColor(Palette.muted)
                 + Text(quality.deviationText).foregroundColor(quality.deviationGrade?.color ?? Palette.muted))
                 .font(.system(size: valueSize, weight: .semibold)).monospacedDigit().fixedSize(horizontal: false, vertical: true)
-            (Text(L10n.string("network_packet_loss") + " ").foregroundColor(Palette.muted)
+            (Text(L10n.string("network_packet_loss") + " " + L10n.percentPrefix).foregroundColor(Palette.muted)
                 + Text(quality.lossText).foregroundColor(quality.packetLossGrade?.packetLossColor ?? Palette.muted)
-                + Text("%").foregroundColor(Palette.muted))
+                + Text(L10n.percentSuffix).foregroundColor(Palette.muted))
                 .font(.system(size: labelSize)).monospacedDigit().fixedSize(horizontal: false, vertical: true)
         }.foregroundStyle(Palette.muted)
             .accessibilityElement(children: .ignore).accessibilityLabel(quality.accessibilitySummary)
@@ -94,8 +99,8 @@ struct NetworkQualityPanel: View {
     var chart: some View {
         Canvas { context, size in
             let font = Font.system(size: min(labelSize, 16)).monospacedDigit()
-            let upper = context.resolve(Text(quality.axisText + " ms").font(font).foregroundColor(Palette.muted))
-            let middle = context.resolve(Text(quality.midAxisText + " ms").font(font).foregroundColor(Palette.muted))
+            let upper = context.resolve(Text(quality.axisText + " " + L10n.millisecondsUnit).font(font).foregroundColor(Palette.muted))
+            let middle = context.resolve(Text(quality.midAxisText + " " + L10n.millisecondsUnit).font(font).foregroundColor(Palette.muted))
             let upperSize = upper.measure(in: size)
             let middleSize = middle.measure(in: size)
             let labelWidth = max(upperSize.width, middleSize.width)
@@ -155,7 +160,11 @@ struct NetworkQualityPanel: View {
                 .fixedSize(horizontal: false, vertical: true)
             }
         }.padding(.horizontal, 12).padding(.vertical, 12)
-            .background(GeometryReader { proxy in Color.clear.onAppear { width = proxy.size.width - 24 }.onChange(of: proxy.size.width) { width = $0 - 24 } })
+            .background(GeometryReader { proxy in
+                Color.clear.onAppear { width = proxy.size.width - 24 }.onChange(of: proxy.size.width) { width = $0 - 24 }
+                    .preference(key: NetworkPanelHeightKey.self,
+                        value: width > 0 && abs(width - (proxy.size.width - 24)) < 0.5 ? proxy.size.height : 0)
+            })
             .accessibilityIdentifier("network-quality")
     }
 }
@@ -423,9 +432,11 @@ private struct ChannelMemberListHeightKey: PreferenceKey {
 }
 private struct PageTitle: View {
     static let inset: CGFloat = 14
+    @EnvironmentObject private var language: LanguageSettings
     let key: String
     var body: some View {
-        Text(LocalizedStringKey(key))
+        Text(L10n.string(key))
+            .environment(\.locale, language.locale)
             .font(.system(.title3).weight(.heavy))
             .fixedSize(horizontal: false, vertical: true)
             .padding(.bottom, 8)
@@ -994,16 +1005,20 @@ struct PushToTalkPress {
 }
 
 struct PushToTalkButton: View {
+    @Environment(\.sizeCategory) private var sizeCategory
     let available: Bool
     let transmitting: Bool
     let token: String
     let begin: () -> String?
     let end: (String) -> Void
     var body: some View {
+        let title = L10n.string(transmitting ? "voice_push_to_talk_active" : "voice_push_to_talk_hold")
+        let visibleTitle = !transmitting && sizeCategory.isAccessibilityCategory ? L10n.string("voice_hold_compact") : title
         Button {} label: {
             HStack(spacing: 10) {
-                AppIcon(name: "mic-on", scaledSize: 20).accessibilityHidden(true)
-                Text(L10n.string(transmitting ? "voice_push_to_talk_active" : "voice_push_to_talk_hold"))
+                AppIcon(name: "mic-on", size: 20).accessibilityHidden(true)
+                Text(visibleTitle)
+                    .fixedSize(horizontal: false, vertical: true).multilineTextAlignment(.center)
             }
             .font(.headline).foregroundStyle(.white)
             .frame(maxWidth: .infinity, minHeight: 56)
@@ -1013,9 +1028,11 @@ struct PushToTalkButton: View {
         .buttonBorderShape(.roundedRectangle(radius: 14))
         .tint(available ? (transmitting ? Palette.green : Palette.accent) : Palette.muted)
         .frame(maxWidth: .infinity)
+        .fixedSize(horizontal: false, vertical: true)
         .disabled(!available)
         .background(PushToTalkTouchObserver(available: available, token: token, begin: begin, end: end))
         .accessibilityIdentifier("push-to-talk")
+        .accessibilityLabel(title)
         .accessibilityHint(L10n.string("voice_push_to_talk_hint"))
     }
 }
@@ -1261,6 +1278,7 @@ struct HomeView: View {
     @Environment(\.sizeCategory) private var sizeCategory
     @State private var userVolumesOpen = false
     @State private var drawerExpanded = false
+    @State private var networkPanelHeight: CGFloat = 0
     @State private var drawerBlocksClick = false
     @State private var showConnect = false
     @State private var editingBookmark: Bookmark?
@@ -1721,34 +1739,51 @@ struct HomeView: View {
             .tint(Palette.accent).ignoresSafeArea(.container))
     }
     private var drawerTools: some View {
-        VStack(spacing: 0) {
-            NetworkQualityPanel(quality: client.state.networkQuality ?? NetworkQuality()).fixedSize(horizontal: false, vertical: true)
-            ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text(L10n.string("volume_tools")).font(.caption).foregroundStyle(Palette.muted)
-                    Button { userVolumesOpen = true } label: {
-                        HStack(spacing: 14) {
-                            AppIcon(name: "speaker-on", scaledSize: 26).foregroundStyle(Palette.accent)
-                            Text(L10n.string("volume_title")).foregroundStyle(.white).frame(maxWidth: .infinity, alignment: .leading)
-                            AppIcon(name: "chevron-right", size: 18).foregroundStyle(Palette.muted)
-                        }.padding(16).frame(minHeight: 72).background(Palette.card).clipShape(RoundedRectangle(cornerRadius: 14))
-                    }.buttonStyle(.plain).disabled(!client.connected || client.state.ownClient == nil)
-                    .accessibilityIdentifier("user-volumes-tool")
-                    Text(L10n.string("files_tools")).font(.caption).foregroundStyle(Palette.muted)
-                    Button { client.openChannelFiles() } label: {
-                        HStack(spacing: 14) {
-                            AppIcon(name: "folder", scaledSize: 26).foregroundStyle(Palette.accent)
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(L10n.string("files_title")).foregroundStyle(.white)
-                                Text(L10n.string("files_subtitle")).font(.caption).foregroundStyle(Palette.muted)
-                            }.frame(maxWidth: .infinity, alignment: .leading)
-                            AppIcon(name: "chevron-right", size: 18).foregroundStyle(Palette.muted)
-                        }.padding(16).frame(minHeight: 72).background(Palette.card).clipShape(RoundedRectangle(cornerRadius: 14))
-                    }.buttonStyle(.plain).disabled(!client.connected || client.state.ownClient == nil)
-                    .accessibilityIdentifier("channel-files-tool")
-                }.padding(16).dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+        GeometryReader { viewport in
+            Group {
+                if networkPanelHeight > 0 && viewport.size.height - networkPanelHeight < 96 {
+                    ScrollView {
+                        VStack(spacing: 0) {
+                            NetworkQualityPanel(quality: client.state.networkQuality ?? NetworkQuality()).fixedSize(horizontal: false, vertical: true)
+                            drawerToolCards
+                        }
+                    }
+                } else {
+                    VStack(spacing: 0) {
+                        NetworkQualityPanel(quality: client.state.networkQuality ?? NetworkQuality()).fixedSize(horizontal: false, vertical: true)
+                        ScrollView { drawerToolCards }
+                    }
+                }
+            }
+            .onPreferenceChange(NetworkPanelHeightKey.self) { height in
+                if height > 0 && abs(networkPanelHeight - height) > 0.5 { networkPanelHeight = height }
             }
         }
+    }
+    private var drawerToolCards: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(L10n.string("volume_tools")).font(.caption).foregroundStyle(Palette.muted)
+            Button { userVolumesOpen = true } label: {
+                HStack(spacing: 14) {
+                    AppIcon(name: "speaker-on", scaledSize: 26).foregroundStyle(Palette.accent)
+                    Text(L10n.string("volume_title")).foregroundStyle(.white).frame(maxWidth: .infinity, alignment: .leading)
+                    AppIcon(name: "chevron-right", size: 18).foregroundStyle(Palette.muted)
+                }.padding(16).frame(minHeight: 72).background(Palette.card).clipShape(RoundedRectangle(cornerRadius: 14))
+            }.buttonStyle(.plain).disabled(!client.connected || client.state.ownClient == nil)
+            .accessibilityIdentifier("user-volumes-tool")
+            Text(L10n.string("files_tools")).font(.caption).foregroundStyle(Palette.muted)
+            Button { client.openChannelFiles() } label: {
+                HStack(spacing: 14) {
+                    AppIcon(name: "folder", scaledSize: 26).foregroundStyle(Palette.accent)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(L10n.string("files_title")).foregroundStyle(.white)
+                        Text(L10n.string("files_subtitle")).font(.caption).foregroundStyle(Palette.muted)
+                    }.frame(maxWidth: .infinity, alignment: .leading)
+                    AppIcon(name: "chevron-right", size: 18).foregroundStyle(Palette.muted)
+                }.padding(16).frame(minHeight: 72).background(Palette.card).clipShape(RoundedRectangle(cornerRadius: 14))
+            }.buttonStyle(.plain).disabled(!client.connected || client.state.ownClient == nil)
+            .accessibilityIdentifier("channel-files-tool")
+        }.padding(16).dynamicTypeSize(...DynamicTypeSize.xxxLarge)
     }
     private func setDrawerExpanded(_ expanded: Bool) {
         guard client.connected, expanded != drawerExpanded else { return }
@@ -2090,6 +2125,7 @@ struct SettingsEntry: View {
 struct SettingsDetailPage: View {
     let page: SettingsPage
     @EnvironmentObject private var language: LanguageSettings
+    @Environment(\.sizeCategory) private var sizeCategory
     static var installedVersion: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—" }
     var body: some View {
         ScrollView {
@@ -2118,7 +2154,16 @@ struct SettingsDetailPage: View {
                             .font(.callout).fixedSize(horizontal: false, vertical: true)
                             .accessibilityHint(L10n.string("about_browser"))
                     }.padding(16).frame(maxWidth: .infinity, alignment: .leading).background(Palette.card).clipShape(RoundedRectangle(cornerRadius: 14))
-                    HStack { Text(L10n.string("about_version")); Spacer(); Text("v" + Self.installedVersion).foregroundStyle(Palette.muted) }
+                    Group {
+                        if sizeCategory.isAccessibilityCategory {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text(L10n.string("about_version")).fixedSize(horizontal: false, vertical: true)
+                                Text("v" + Self.installedVersion).foregroundStyle(Palette.muted).frame(maxWidth: .infinity, alignment: .trailing)
+                            }.padding(.vertical, 12)
+                        } else {
+                            HStack { Text(L10n.string("about_version")); Spacer(); Text("v" + Self.installedVersion).foregroundStyle(Palette.muted) }
+                        }
+                    }
                         .frame(minHeight: 56).padding(.horizontal, 16).background(Palette.card).clipShape(RoundedRectangle(cornerRadius: 14))
                 }
             }.padding(20)
@@ -2177,7 +2222,7 @@ private struct UserVolumeRow: View {
             HStack(spacing: 12) {
                 Avatar(name: member.name, path: member.avatarPath, speaking: member.speaking, member: member).accessibilityHidden(true)
                 Text(member.name).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading).accessibilityLabel(member.accessibilityLabel)
-                Text("\(Int(value))%").foregroundStyle(Palette.muted).monospacedDigit().fixedSize()
+                Text(L10n.percent(value)).foregroundStyle(Palette.muted).monospacedDigit().fixedSize()
             }
             Slider(value: Binding(get: { value }, set: { next in
                 value = next
@@ -2190,7 +2235,7 @@ private struct UserVolumeRow: View {
                 }
             }).frame(minHeight: 48).disabled(!client.connected || member.volumeToken == nil)
                 .accessibilityLabel(L10n.format("volume_accessibility", member.name))
-                .accessibilityValue("\(Int(value))%")
+                .accessibilityValue(L10n.percent(value))
                 .accessibilityIdentifier("user-volume-\(member.id)")
         }.padding(.horizontal, 16).padding(.vertical, 4)
             .onChange(of: member.volumePercent) { percent in if !editing { value = Double(percent ?? 100) } }

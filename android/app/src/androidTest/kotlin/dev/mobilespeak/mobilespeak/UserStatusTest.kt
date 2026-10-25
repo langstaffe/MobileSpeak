@@ -179,7 +179,7 @@ class UserStatusTest {
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             val original = AppCompatDelegate.getApplicationLocales()
             try {
-                for (language in listOf(AppLanguage.ENGLISH, AppLanguage.SIMPLIFIED_CHINESE, AppLanguage.TRADITIONAL_CHINESE)) {
+                for (language in AppLanguage.entries.filter { it != AppLanguage.SYSTEM }) {
                     instrumentation.runOnMainSync { AppLanguage.select(language) }
                     instrumentation.waitForIdleSync()
                     assertEquals(language, AppLanguage.selected())
@@ -193,7 +193,7 @@ class UserStatusTest {
                         instrumentation.waitForIdleSync(); SystemClock.sleep(50)
                     }
                     assertEquals(expectedChannelTitle, activityChannelTitle)
-                    for (font in listOf(1f, 2f)) for (page in listOf("channel", "chat")) {
+                    for (font in listOf(1f, 2f)) for (page in listOf("channel", "members", "chat")) {
                         scenario.onActivity { activity ->
                             activity.setContent {
                                 CompositionLocalProvider(LocalDensity provides Density(LocalDensity.current.density, font)) {
@@ -203,6 +203,8 @@ class UserStatusTest {
                                                 Box(Modifier.width(320.dp).fillMaxHeight().background(Palette.background)) {
                                                     if (page == "channel") Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
                                                         ChannelScreen(ui, {}, {})
+                                                    } else if (page == "members") Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
+                                                        MemberScreen(ui) {}
                                                     } else ChatScreen(ChatTarget("channel:lobby", "Lobby", channel = channel), ui, false) {}
                                                 }
                                             }
@@ -236,12 +238,16 @@ class UserStatusTest {
                             return result
                         }
                         val visible = labels()
-                        assertTrue("Lobby remains raw in $language/$page/$font: $visible", visible.any { "Lobby" in it })
+                        if (page == "members") assertTrue(visible.any { "User 7" in it })
+                        else assertTrue("Lobby remains raw in $language/$page/$font: $visible", visible.any { "Lobby" in it })
                         if (page == "channel") {
                             assertTrue(visible.contains(localized.getString(R.string.tab_channels)))
                             assertTrue(visible.contains(localized.getString(R.string.channel_chat_open, "Lobby")))
                             val summary = localized.resources.getQuantityString(R.plurals.channel_members_summary, 2, 2)
                             assertTrue(visible.any { summary in it })
+                        } else if (page == "members") {
+                            assertTrue(visible.contains(localized.getString(R.string.tab_members)))
+                            assertTrue(visible.any { localized.getString(R.string.member_muted) in it })
                         } else {
                             assertTrue(visible.any { "User 7" in it })
                             assertTrue(visible.contains("Hello"))

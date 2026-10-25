@@ -291,4 +291,12 @@
     <string name="voice_target_unavailable">語音發言頻道：未連線</string>
     <string name="voice_grant_microphone">授權麥克風</string>
     <string name="voice_hold_help">按住時發言，鬆開或滑出按鈕後停止。</string>
+    <string name="language_german">Deutsch</string>
+    <string name="language_russian">Русский</string>
+    <string name="language_polish">Polski</string>
+    <string name="language_spanish_mexico">Español (México)</string>
+    <string name="language_french">Français</string>
+    <string name="language_portuguese_brazil">Português (Brasil)</string>
+    <string name="language_spanish">Español</string>
+    <string name="voice_hold_compact">按住說話</string>
 </resources>

@@ -84,6 +84,8 @@ internal fun PushToTalkButton(
     val stop = { hold.stop(); pressed = false }
     DisposableEffect(hold) { onDispose { hold.stop() } }
     val title = stringResource(if (ui.speech.transmitting) R.string.voice_transmitting else R.string.voice_hold_to_talk)
+    val visibleTitle = if (!ui.speech.transmitting && androidx.compose.ui.platform.LocalDensity.current.fontScale >= 1.5f)
+        stringResource(R.string.voice_hold_compact) else title
     val help = stringResource(R.string.voice_hold_help)
     // iOS native recording shows approximately 18% white brightening while pressed.
     // shortcut: 80/200ms press/recovery durations remain approximations; remeasure native timing when possible.
@@ -139,7 +141,7 @@ internal fun PushToTalkButton(
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
         Icon(UiIcons.Mic, null, Modifier.size(20.dp), tint = if (enabled) Color.White else Color(0xFFD0D0D1))
         Spacer(Modifier.width(10.dp))
-        Text(title, fontSize = 17.sp, lineHeight = 22.sp, fontWeight = FontWeight.SemiBold,
+        Text(visibleTitle, fontSize = 17.sp, lineHeight = 22.sp, fontWeight = FontWeight.SemiBold,
             color = if (enabled) Color.White else Color(0xFFD0D0D1), textAlign = TextAlign.Center, modifier = Modifier.clearAndSetSemantics {})
     }
 }

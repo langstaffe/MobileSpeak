@@ -178,12 +178,12 @@ class VoiceServiceLifecycleTest {
                 val before = ClientSession.state.value
                 val foregroundMicrophone = property(service, "foregroundHasMicrophone")
                 val notifications = context.getSystemService(NotificationManager::class.java)
-                data class Expected(val language: AppLanguage, val title: String, val body: String, val disconnect: String)
-                for ((language, title, body, disconnect) in listOf(
-                    Expected(AppLanguage.ENGLISH, "MobileSpeak Call", "TeamSpeak remains connected in the background", "Disconnect"),
-                    Expected(AppLanguage.SIMPLIFIED_CHINESE, "MobileSpeak 通话中", "TeamSpeak 连接保持在后台", "断开连接"),
-                    Expected(AppLanguage.TRADITIONAL_CHINESE, "MobileSpeak 通話中", "TeamSpeak 連線會在背景保持運作", "中斷連線"),
-                )) {
+                for (language in AppLanguage.entries.filter { it != AppLanguage.SYSTEM }) {
+                    SystemClock.sleep(350) // Keep the native notification manager below its per-package update rate limit.
+                    val localized = context.contextForLanguage(language)
+                    val title = localized.getString(R.string.notification_call_title)
+                    val body = localized.getString(R.string.notification_call_text)
+                    val disconnect = localized.getString(R.string.action_disconnect)
                     main { AppLanguage.select(language) }
                     drainRequests()
                     try {
@@ -197,6 +197,7 @@ class VoiceServiceLifecycleTest {
                     assertEquals(title, notice.extras.getCharSequence(Notification.EXTRA_TITLE)?.toString())
                     assertEquals(body, notice.extras.getCharSequence(Notification.EXTRA_TEXT)?.toString())
                     assertEquals(disconnect, notice.actions.single().title.toString())
+                    if (android.os.Build.VERSION.SDK_INT >= 26) assertEquals(localized.getString(R.string.notification_channel_voice), notifications.getNotificationChannel("mobilespeak.voice").name.toString())
                     assertSame(service, actual())
                     assertSame(audio, property(service, "audio"))
                     assertTrue((property(audio, "running") as AtomicBoolean).get())
@@ -208,6 +209,13 @@ class VoiceServiceLifecycleTest {
                     assertEquals(before.noiseSuppression, ClientSession.state.value.noiseSuppression)
                     assertEquals(before.audioProcessingStatus, ClientSession.state.value.audioProcessingStatus)
                 }
+                main { for (language in listOf(AppLanguage.RUSSIAN, AppLanguage.POLISH, AppLanguage.GERMAN)) AppLanguage.select(language) }
+                val finalTitle = context.contextForLanguage(AppLanguage.GERMAN).getString(R.string.notification_call_title)
+                settle { notifications.activeNotifications.firstOrNull { it.id == 7 }?.notification?.extras
+                    ?.getCharSequence(Notification.EXTRA_TITLE)?.toString() == finalTitle }
+                assertSame(service, actual())
+                assertSame(audio, property(service, "audio"))
+                assertEquals(connection, ClientSession.state.value.snapshot.connectionId)
             } finally {
                 main { AppCompatDelegate.setApplicationLocales(original) }
                 ClientSession.refreshLanguage()
@@ -283,7 +291,8 @@ class VoiceServiceLifecycleTest {
         }
         settle { actual() == null && !serviceExists() }
         assertEquals("disconnected", ClientSession.state.value.snapshot.status)
-        assertTrue(ClientSession.state.value.error.orEmpty().contains("controlled initialization failure"))
+        assertEquals(context.localized(R.string.error_background_microphone_enable), ClientSession.state.value.error)
+        assertEquals(R.string.error_background_microphone_enable, ClientSession.state.value.errorSource?.id)
         assertReleased(service)
     }
 
@@ -312,7 +321,8 @@ class VoiceServiceLifecycleTest {
         core { field("context").set(ClientSession, failureContext) }
         session("connecting")
         settle { ClientSession.state.value.snapshot.status == "disconnected" }
-        assertTrue(ClientSession.state.value.error.orEmpty().contains("controlled service start failure"))
+        assertEquals(context.localized(R.string.error_background_microphone_enable), ClientSession.state.value.error)
+        assertEquals(R.string.error_background_microphone_enable, ClientSession.state.value.errorSource?.id)
         assertNull(actual())
         assertFalse(serviceExists())
         assertTrue(audioWorkers().isEmpty())

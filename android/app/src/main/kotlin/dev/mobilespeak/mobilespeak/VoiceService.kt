@@ -31,6 +31,8 @@ internal class VoiceService : Service() {
     private lateinit var wakeLock: PowerManager.WakeLock
     private var released = false // Main-thread lifecycle, including partially initialized failures.
     private var notificationConnectionId: String? = null
+    private var notificationLanguage: AppLanguage? = null
+    private var languageRefresh: kotlinx.coroutines.Job? = null
 
     @SuppressLint("WakelockTimeout") // The foreground call may last for hours; onDestroy always releases it.
     override fun onCreate() {
@@ -146,7 +148,12 @@ internal class VoiceService : Service() {
     fun refreshLanguage() {
         if (released) return
         createChannel()
-        showForeground(foregroundHasMicrophone)
+        languageRefresh?.cancel()
+        languageRefresh = serviceScope.launch {
+            kotlinx.coroutines.delay(250) // Coalesce selection/configuration callbacks below Android's notification update limit.
+            val language = AppLanguage.resolve(AppLanguage.selected(this@VoiceService), systemLanguageTags())
+            if (notificationLanguage != language) showForeground(foregroundHasMicrophone)
+        }
     }
 
     fun startCall() {
@@ -155,6 +162,7 @@ internal class VoiceService : Service() {
 
     @Suppress("DEPRECATION")
     private fun showForeground(microphone: Boolean) {
+        val localized = languageContext()
         notificationConnectionId = ClientSession.state.value.snapshot.connectionId
         val open = PendingIntent.getActivity(
             this, 0, Intent(this, MainActivity::class.java),
@@ -169,11 +177,11 @@ internal class VoiceService : Service() {
         val builder = if (Build.VERSION.SDK_INT >= 26) Notification.Builder(this, CHANNEL) else Notification.Builder(this)
         val notification = builder
             .setSmallIcon(android.R.drawable.stat_sys_headset)
-            .setContentTitle(localized(R.string.notification_call_title))
-            .setContentText(localized(R.string.notification_call_text))
+            .setContentTitle(localized.getString(R.string.notification_call_title))
+            .setContentText(localized.getString(R.string.notification_call_text))
             .setContentIntent(open)
             .setOngoing(true)
-            .addAction(android.R.drawable.ic_menu_close_clear_cancel, localized(R.string.action_disconnect), disconnect)
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, localized.getString(R.string.action_disconnect), disconnect)
             .build()
         if (Build.VERSION.SDK_INT >= 29) {
             var type = ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
@@ -183,6 +191,7 @@ internal class VoiceService : Service() {
             startForeground(NOTIFICATION_ID, notification)
         }
         foregroundHasMicrophone = microphone
+        notificationLanguage = AppLanguage.selected(listOf(localized.resources.configuration.locales[0].toLanguageTag()))
         Log.i(TAG, "Foreground service microphone=$microphone")
     }
 
@@ -197,6 +206,13 @@ internal class VoiceService : Service() {
     companion object {
         internal const val ACTION_START_CALL = "dev.mobilespeak.mobilespeak.START_CALL"
         internal const val ACTION_REFRESH_LANGUAGE = "dev.mobilespeak.mobilespeak.REFRESH_LANGUAGE"
+        internal fun refreshChannelName(context: android.content.Context) {
+            if (Build.VERSION.SDK_INT < 26) return
+            val manager = context.getSystemService(NotificationManager::class.java)
+            val channel = manager.getNotificationChannel(CHANNEL) ?: return
+            channel.name = context.localized(R.string.notification_channel_voice)
+            manager.createNotificationChannel(channel)
+        }
         private const val CHANNEL = "mobilespeak.voice"
         private const val NOTIFICATION_ID = 7
         private const val ACTION_DISCONNECT = "dev.mobilespeak.mobilespeak.DISCONNECT"

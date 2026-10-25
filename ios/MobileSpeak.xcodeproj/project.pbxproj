@@ -234,6 +234,13 @@
 				en,
 				"zh-Hans",
 				"zh-Hant",
+				de,
+				ru,
+				pl,
+				"es-MX",
+				fr,
+				"pt-BR",
+				es,
 				Base,
 			);
 			mainGroup = 607B1811695CA760B73CC6FB;

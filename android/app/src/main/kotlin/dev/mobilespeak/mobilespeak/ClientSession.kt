@@ -58,7 +58,7 @@ internal object ClientSession {
         synchronized(this) {
             if (initialized) return
             context = applicationContext.applicationContext
-            displayedLanguage = AppLanguage.resolve(AppLanguage.selected(), systemLanguageTags())
+            displayedLanguage = AppLanguage.resolve(AppLanguage.selected(context), systemLanguageTags())
             store = SecureStore(context)
             val noise = restoreNoiseSuppression(context.getSharedPreferences("mobilespeak.settings", Context.MODE_PRIVATE))
             val root = File(context.filesDir, "core")
@@ -83,6 +83,10 @@ internal object ClientSession {
             send(JSONObject().put("type", "configure").put("storage", root.absolutePath))
             setNoiseSuppression(noise)
             initialized = true
+            context.registerComponentCallbacks(object : android.content.ComponentCallbacks {
+                override fun onConfigurationChanged(newConfig: android.content.res.Configuration) { refreshLanguage() }
+                @Suppress("OVERRIDE_DEPRECATION") override fun onLowMemory() = Unit
+            })
         }
     }
 
@@ -581,19 +585,25 @@ internal object ClientSession {
             runCatching {
                 kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                     val name = context.contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
-                        check(it.moveToFirst()); it.getString(0)
-                    } ?: error("Invalid file name")
-                    require(name.isNotEmpty() && name != "." && name != ".." && name.toByteArray().size <= 255 && name.none { it == '/' || it == '\\' || it.isISOControl() })
-                    val root = File(context.filesDir, "core/file-uploads").apply { check(isDirectory || mkdirs()) }
+                        if (!it.moveToFirst()) throw LocalizedFailure(LocalizedMessage(R.string.files_invalid_path), context)
+                        it.getString(0)
+                    } ?: throw LocalizedFailure(LocalizedMessage(R.string.files_invalid_path), context)
+                    if (name.isEmpty() || name == "." || name == ".." || name.toByteArray().size > 255 || name.any { it == '/' || it == '\\' || it.isISOControl() }) {
+                        throw LocalizedFailure(LocalizedMessage(R.string.files_invalid_path), context)
+                    }
+                    val root = File(context.filesDir, "core/file-uploads").apply {
+                        if (!isDirectory && !mkdirs()) throw LocalizedFailure(LocalizedMessage(R.string.files_storage_failed), context)
+                    }
                     val staged = File(root, UUID.randomUUID().toString())
                     try {
                         context.contentResolver.openInputStream(uri).use { input ->
-                            checkNotNull(input); staged.outputStream().use { input.copyTo(it, 64 * 1024) }
+                            if (input == null) throw LocalizedFailure(LocalizedMessage(R.string.files_choose_failed), context)
+                            staged.outputStream().use { input.copyTo(it, 64 * 1024) }
                         }
                         if (!fileCommand("files_upload", target.command().put("name", name).put("source", staged.absolutePath))) staged.delete()
                     } catch (error: Exception) { staged.delete(); throw error }
                 }
-            }.onFailure { fileLocalError(localizedFailureSource(R.string.files_choose_failed, it)) }
+            }.onFailure { fileLocalError((it as? LocalizedFailure)?.source ?: localizedFailureSource(R.string.files_choose_failed, it)) }
         } finally { synchronized(fileCacheLock) { mutableState.update { it.copy(fileImporting = false) } } }
     }
 
@@ -641,7 +651,8 @@ internal object ClientSession {
 
     private fun serviceStartFailed(error: Throwable) {
         serviceRequested = false
-        fail(error.message.orEmpty())
+        android.util.Log.e("MobileSpeakVoice", "Voice service start failed", error)
+        fail(LocalizedMessage(R.string.error_background_microphone_enable))
         disconnectCore()
     }
 
@@ -693,8 +704,10 @@ internal object ClientSession {
         } }.onFailure { fail(localizedFailureSource(R.string.error_bookmark_title_update, it)) }
     }
 
-    fun refreshLanguage(language: AppLanguage = AppLanguage.resolve(AppLanguage.selected(), systemLanguageTags())) = coreExecutor.execute {
+    fun refreshLanguage(requestedLanguage: AppLanguage? = null) = coreExecutor.execute {
         if (!initialized) return@execute
+        val language = requestedLanguage ?: AppLanguage.resolve(AppLanguage.selected(context), systemLanguageTags())
+        VoiceService.refreshChannelName(context)
         if (displayedLanguage != language) {
             val localizedContext = context.contextForLanguage(language)
             mutableState.update { ui -> ui.copy(
@@ -716,9 +729,6 @@ internal object ClientSession {
         }
     }
 
-    private fun fail(message: String) {
-        mutableState.update { it.copy(error = message, errorSource = null) }
-    }
     private fun fail(source: LocalizedMessage) {
         mutableState.update { it.copy(error = source.render(context.languageContext()), errorSource = source) }
     }

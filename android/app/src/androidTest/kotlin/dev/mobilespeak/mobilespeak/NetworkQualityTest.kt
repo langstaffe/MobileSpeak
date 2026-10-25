@@ -342,7 +342,9 @@ class NetworkQualityTest {
     @Test fun bridgePreservesNullsGradesAndMissingSeconds() {
         val snapshot = JSONObject("""{"status":"connected","channels":[],"clients":[],"networkQuality":{"rttMs":42.5,"deviationMs":6.05,"packetLossPercent":4.0,"rttGrade":"good","deviationGrade":"good","packetLossGrade":"poor","iconGrade":"poor","axisMaxMs":2000,"nowSecond":33,"samples":[{"second":29,"rttMs":1234,"grade":"poor"},{"second":31,"rttMs":50,"grade":"good","packetLossPercent":null,"packetLossGrade":null},{"second":33,"rttMs":42.5,"grade":"good","packetLossPercent":2.004,"packetLossGrade":"fair"}]}}""").snapshot()
         val q = requireNotNull(snapshot.networkQuality)
-        assertEquals("43", q.latencyText); assertEquals("6.1", q.deviationText); assertEquals("4.0", q.lossText)
+        assertEquals("43", NetworkQuality.number(q.rttMs, 0, locale = java.util.Locale.US))
+        assertEquals("6.1", NetworkQuality.number(q.deviationMs, 1, locale = java.util.Locale.US))
+        assertEquals("4.0", NetworkQuality.number(q.packetLossPercent, 1, locale = java.util.Locale.US))
         assertEquals(NetworkGrade.POOR, q.iconGrade); assertEquals(NetworkGrade.GOOD, q.rttGrade)
         assertEquals(listOf(29L, 31L, 33L), q.samples.map { it.second }); assertEquals(2000.0, q.axisMaxMs, 0.0)
         assertNull(q.samples[0].packetLossFraction); assertNull(q.samples[1].packetLossFraction)
@@ -472,11 +474,13 @@ class NetworkQualityTest {
     @Test fun nativePanelRendersLongValuesAtNarrowWidthAndLargeFont() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
-            for ((width, scale) in listOf(320 to 1f, 240 to 1f, 320 to 2f)) {
+            for (language in AppLanguage.entries.filter { it != AppLanguage.SYSTEM }) for ((width, scale) in listOf(320 to 1f, 240 to 1f, 320 to 2f)) {
                 scenario.onActivity { activity ->
                     activity.setContent {
                         val density = LocalDensity.current.density
-                        CompositionLocalProvider(LocalDensity provides Density(density, scale)) {
+                        val localized = activity.contextForLanguage(language)
+                        CompositionLocalProvider(LocalDensity provides Density(density, scale), LocalContext provides localized,
+                            LocalConfiguration provides localized.resources.configuration, LocalResources provides localized.resources) {
                             MaterialTheme {
                                 Box(Modifier.fillMaxSize().background(Palette.bottom).safeDrawingPadding()) {
                                     NetworkQualityPanel(NetworkQuality(rttMs = 1234.0, deviationMs = 1234.5, packetLossPercent = 4.0,
@@ -494,7 +498,8 @@ class NetworkQualityTest {
                 android.os.SystemClock.sleep(300)
                 instrumentation.waitForIdleSync()
                 val screenshot = requireNotNull(instrumentation.uiAutomation.takeScreenshot())
-                File(instrumentation.targetContext.getExternalFilesDir(null), "network-panel-$width-$scale.png").outputStream().use { screenshot.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
+                File(instrumentation.targetContext.getExternalFilesDir(null), "network-panel-${language.code}-$width-$scale.png").outputStream().use { screenshot.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
+                screenshot.recycle()
                 val descriptions = mutableListOf<String>()
                 val elements = mutableListOf<android.view.accessibility.AccessibilityNodeInfo>()
                 fun collect(node: android.view.accessibility.AccessibilityNodeInfo?) {
@@ -504,10 +509,12 @@ class NetworkQualityTest {
                     for (i in 0 until node.childCount) collect(node.getChild(i))
                 }
                 collect(instrumentation.uiAutomation.rootInActiveWindow)
-                assertTrue(descriptions.toString(), descriptions.any { it.contains("999") && it.contains("999.9") })
+                val localized = instrumentation.targetContext.contextForLanguage(language)
+                val decimal = java.text.DecimalFormatSymbols.getInstance(java.util.Locale.forLanguageTag(language.tag!!)).decimalSeparator
+                assertTrue(descriptions.toString(), descriptions.any { it.contains("999") && it.contains("999${decimal}9") })
                 assertTrue(descriptions.toString(), descriptions.any { it.contains("2000") && it.contains("29") })
-                val chart = elements.single { it.contentDescription?.toString()?.startsWith(instrumentation.targetContext.localized(R.string.network_chart)) == true }
-                val numbers = elements.single { it.contentDescription?.toString()?.contains("999.9") == true }
+                val chart = elements.single { it.contentDescription?.toString()?.startsWith(localized.getString(R.string.network_chart)) == true }
+                val numbers = elements.single { it.contentDescription?.toString()?.contains("999${decimal}9") == true }
                 val chartBounds = android.graphics.Rect().also(chart::getBoundsInScreen)
                 val numberBounds = android.graphics.Rect().also(numbers::getBoundsInScreen)
                 if (scale > 1f || width < 263) {
@@ -519,4 +526,74 @@ class NetworkQualityTest {
             }
         }
     }
+
+    @Test fun compactDrawerScrollsLongNetworkCopyAndKeepsChannelFilesReachable() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val context = instrumentation.targetContext
+        val density = context.resources.displayMetrics.density
+        val quality = NetworkQuality(rttMs = 999.0, deviationMs = 999.9, packetLossPercent = 12.5,
+            rttGrade = NetworkGrade.POOR, deviationGrade = NetworkGrade.POOR, packetLossGrade = NetworkGrade.POOR)
+        val ui = SessionUiState(snapshot = Snapshot(status = "connected", ownClient = 1, networkQuality = quality))
+        for (language in AppLanguage.entries.filter { it != AppLanguage.SYSTEM }) ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            lateinit var activity: MainActivity
+            val localized = context.contextForLanguage(language)
+            scenario.onActivity {
+                activity = it
+                it.setContent {
+                    CompositionLocalProvider(LocalContext provides localized, LocalConfiguration provides localized.resources.configuration,
+                        LocalResources provides localized.resources, LocalDensity provides Density(density, 2f)) {
+                        MaterialTheme(colorScheme = darkColorScheme(onSurface = Palette.text)) {
+                            Box(Modifier.size(320.dp, 440.dp).background(Palette.background).safeDrawingPadding()) {
+                                VoiceDrawer(ui, {}, true, {}, 360.dp, 320.dp)
+                            }
+                        }
+                    }
+                }
+            }
+            fun nodes(): List<SemanticsNode> {
+                var result = emptyList<SemanticsNode>()
+                instrumentation.runOnMainSync {
+                    fun root(view: android.view.View): ViewRootForTest? = (view as? ViewRootForTest) ?: (view as? android.view.ViewGroup)?.let { group ->
+                        (0 until group.childCount).firstNotNullOfOrNull { root(group.getChildAt(it)) }
+                    }
+                    fun all(node: SemanticsNode): List<SemanticsNode> = listOf(node) + node.children.flatMap(::all)
+                    result = all(requireNotNull(root(activity.window.decorView)).semanticsOwner.unmergedRootSemanticsNode)
+                }
+                return result
+            }
+            fun tagged(tag: String) = nodes().single { it.config.getOrNull(SemanticsProperties.TestTag) == tag }
+            fun settle() { android.os.SystemClock.sleep(250); instrumentation.waitForIdleSync() }
+            settle()
+            val drawer = tagged("voice-drawer").boundsInRoot
+            val body = tagged("drawer-home-scroll")
+            assertTrue(body.config[SemanticsProperties.VerticalScrollAxisRange].maxValue() > 0)
+            val startX = body.positionOnScreen.x + body.size.width / 2
+            val startY = body.positionOnScreen.y + body.size.height - 16 * density
+            val down = android.os.SystemClock.uptimeMillis()
+            fun touch(action: Int, y: Float) {
+                val event = android.view.MotionEvent.obtain(down, android.os.SystemClock.uptimeMillis(), action, startX, y, 0)
+                try { instrumentation.sendPointerSync(event) } finally { event.recycle() }
+            }
+            touch(android.view.MotionEvent.ACTION_DOWN, startY)
+            val distance = minOf(90 * density, body.size.height - 32 * density)
+            for (step in 1..6) {
+                android.os.SystemClock.sleep(24)
+                touch(android.view.MotionEvent.ACTION_MOVE, startY - distance * step / 6)
+            }
+            touch(android.view.MotionEvent.ACTION_UP, startY - distance)
+            settle()
+            assertTrue("${language.code}: dragging the body must scroll, not collapse the drawer", tagged("drawer-home-scroll").config[SemanticsProperties.VerticalScrollAxisRange].value() > 0)
+            assertEquals(drawer, tagged("voice-drawer").boundsInRoot)
+            val scrollToEnd = requireNotNull(tagged("drawer-home-scroll").config[SemanticsActions.ScrollBy].action)
+            instrumentation.runOnMainSync { assertTrue(scrollToEnd(0f, 10000f)) }
+            settle()
+            val files = tagged("channel-files-tool")
+            assertTrue("${language.code}: channel files remains reachable", files.boundsInRoot.height >= 48 * density)
+            assertNotNull(files.config.getOrNull(SemanticsActions.OnClick)?.action)
+            val shot = requireNotNull(instrumentation.uiAutomation.takeScreenshot())
+            File(context.getExternalFilesDir(null), "compact-tools-${language.code}.png").outputStream().use { shot.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
+            shot.recycle()
+        }
+    }
+
 }

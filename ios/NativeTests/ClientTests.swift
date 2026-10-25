@@ -792,6 +792,12 @@ final class ClientTests: XCTestCase {
     }
 
     func testNetworkQualityBridgeAndNumberFormatting() throws {
+        let stored = UserDefaults.standard.object(forKey: AppLanguage.preferenceKey)
+        defer {
+            if let stored { UserDefaults.standard.set(stored, forKey: AppLanguage.preferenceKey) }
+            else { UserDefaults.standard.removeObject(forKey: AppLanguage.preferenceKey) }
+        }
+        UserDefaults.standard.set("en", forKey: AppLanguage.preferenceKey)
         let data = Data(#"{"status":"connected","channels":[],"clients":[],"networkQuality":{"rttMs":42.5,"deviationMs":6.05,"packetLossPercent":4.0,"rttGrade":"good","deviationGrade":"good","packetLossGrade":"poor","iconGrade":"poor","axisMaxMs":2000,"nowSecond":33,"samples":[{"second":29,"rttMs":1234,"grade":"poor"},{"second":31,"rttMs":50,"grade":"good","packetLossPercent":null,"packetLossGrade":null},{"second":33,"rttMs":42.5,"grade":"good","packetLossPercent":2.004,"packetLossGrade":"fair"}]}}"#.utf8)
         let snapshot = try JSONDecoder().decode(Snapshot.self, from: data)
         let q = try XCTUnwrap(snapshot.networkQuality)
@@ -949,7 +955,7 @@ final class ClientTests: XCTestCase {
             if let originalLanguage { UserDefaults.standard.set(originalLanguage, forKey: AppLanguage.preferenceKey) }
             else { UserDefaults.standard.removeObject(forKey: AppLanguage.preferenceKey) }
         }
-        for language in [AppLanguage.english, .simplifiedChinese, .traditionalChinese] {
+        for language in AppLanguage.allCases where language != .system {
             UserDefaults.standard.set(language.rawValue, forKey: AppLanguage.preferenceKey)
             for (width, category, long) in [(CGFloat(390), ContentSizeCategory.large, false), (320, .large, true), (240, .large, true), (320, .accessibilityExtraExtraExtraLarge, true)] {
                 var q = NetworkQuality(rttMs: long ? 1234 : 42, deviationMs: long ? 1234.5 : 6, packetLossPercent: 4,
@@ -960,8 +966,8 @@ final class ClientTests: XCTestCase {
                     let grade: NetworkGrade = second == 20 ? .poor : second == 25 ? .fair : .good
                     return NetworkSample(second: UInt64(second), rttMs: rtt, grade: grade, packetLossPercent: second == 25 ? 2 : 10, packetLossGrade: second == 25 ? .fair : .poor)
                 }
-                let view = VStack(spacing: 0) { NetworkQualityPanel(quality: q); Spacer(minLength: 0) }
-                    .frame(height: 333, alignment: .top).clipped().frame(maxHeight: .infinity, alignment: .top)
+                let view = VStack(spacing: 0) { NetworkQualityPanel(quality: q).fixedSize(horizontal: false, vertical: true); Spacer(minLength: 0) }
+                    .frame(maxHeight: .infinity, alignment: .top)
                     .background(Palette.bottom).environment(\.sizeCategory, category).environment(\.locale, language.locale)
                 let host = UIHostingController(rootView: view)
                 let window = UIWindow(frame: CGRect(x: 0, y: 0, width: width, height: 568))
@@ -970,7 +976,7 @@ final class ClientTests: XCTestCase {
                 try await Task.sleep(nanoseconds: 200_000_000)
                 host.view.layoutIfNeeded()
                 let image = UIGraphicsImageRenderer(size: host.view.bounds.size).image { _ in host.view.drawHierarchy(in: host.view.bounds, afterScreenUpdates: true) }
-                let name = "network-\(language.rawValue)-\(Int(width))-\(category)"
+                let name = "localization-network-\(language.rawValue)-\(Int(width))-\(category)"
                 try image.pngData()?.write(to: FileManager.default.temporaryDirectory.appendingPathComponent(name + ".png"))
                 let attachment = XCTAttachment(image: image); attachment.name = name; attachment.lifetime = .keepAlways; add(attachment)
                 // Every grade appears in the chart; verify actual native rendered pixels.
@@ -1452,11 +1458,11 @@ final class ClientTests: XCTestCase {
             }
             return collect(object)
         }
-        for language in ["en", "zh-Hans", "zh-Hant"] {
+        for language in AppLanguage.allCases.filter({ $0 != .system }).map(\.rawValue) {
             UserDefaults.standard.set(language, forKey: AppLanguage.preferenceKey)
-            XCTAssertEqual(L10n.string("files_reload"), language == "en" ? "Refresh" : language == "zh-Hans" ? "刷新" : "重新整理")
-            XCTAssertEqual(L10n.string("files_sort_name"), language == "en" ? "Name" : language == "zh-Hans" ? "名称" : "名稱")
-            XCTAssertEqual(L10n.string("files_sort_newest"), language == "en" ? "Time" : language == "zh-Hans" ? "时间" : "時間")
+            XCTAssertNotEqual(L10n.string("files_reload"), "files_reload")
+            XCTAssertNotEqual(L10n.string("files_sort_name"), "files_sort_name")
+            XCTAssertNotEqual(L10n.string("files_sort_newest"), "files_sort_newest")
             for category in [ContentSizeCategory.large, .accessibilityExtraExtraExtraLarge] {
                 for (index, fixture) in [("/", "ready", "name", true), ("/文档/a very long folder path/子目录", "ready", "newest", true),
                     ("/empty", "ready", "name", true), ("/文档", "loading", "newest", true), ("/文档", "failed", "newest", true), ("/文档", "failed", "name", false)].enumerated() {
@@ -1470,6 +1476,7 @@ final class ClientTests: XCTestCase {
                     host.view.layoutIfNeeded()
                     let image = UIGraphicsImageRenderer(size: host.view.bounds.size).image { _ in host.view.drawHierarchy(in: host.view.bounds, afterScreenUpdates: true) }
                     let attachment = XCTAttachment(image: image); attachment.name = "files-controls-\(language)-\(category)-\(index)"; attachment.lifetime = .keepAlways; add(attachment)
+                    try image.pngData()?.write(to: FileManager.default.temporaryDirectory.appendingPathComponent("localization-files-controls-\(language)-\(category)-\(index).png"))
                     let all = elements(host.view)
                     let uploads = all.filter { $0.accessibilityTraits.contains(.button) && $0.accessibilityLabel == L10n.string("files_upload") }
                     XCTAssertEqual(uploads.count, 1, "Upload remains only in the header")
@@ -1504,7 +1511,7 @@ final class ClientTests: XCTestCase {
         let rawFileError = "files_permission_denied"
         client.showFileError(NSError(domain: "External", code: 1,
                                     userInfo: [NSLocalizedDescriptionKey: rawFileError]))
-        for language in ["en", "zh-Hans", "zh-Hant"] {
+        for language in AppLanguage.allCases.filter({ $0 != .system }).map(\.rawValue) {
             UserDefaults.standard.set(language, forKey: AppLanguage.preferenceKey)
             client.refreshLocalizedNotices()
             try await Task.sleep(nanoseconds: 200_000_000)
@@ -1673,6 +1680,18 @@ final class ClientTests: XCTestCase {
         let traditionalPage = image()
         XCTAssertNotEqual(englishPage, simplifiedPage)
         XCTAssertNotEqual(simplifiedPage, traditionalPage)
+        for option in AppLanguage.allCases where option != .system {
+            language.select(option)
+            client.refreshLocalizedNotices()
+            try await Task.sleep(nanoseconds: 100_000_000)
+            XCTAssertTrue(stack.topViewController === page)
+            XCTAssertEqual(stack.viewControllers.count, 2)
+            let snapshot = try XCTUnwrap(image())
+            let attachment = XCTAttachment(data: snapshot, uniformTypeIdentifier: "public.png")
+            attachment.name = "Live language switch \(option.rawValue)"; attachment.lifetime = .keepAlways; add(attachment)
+            try snapshot.write(to: FileManager.default.temporaryDirectory.appendingPathComponent("localization-language-live-\(option.rawValue).png"))
+            XCTAssertNotEqual(L10n.string("settings_language"), "settings_language")
+        }
         XCTAssertEqual(client.handle, handle)
         XCTAssertTrue(client.audio === audio)
         XCTAssertEqual(client.state, state)
@@ -1702,7 +1721,7 @@ final class ClientTests: XCTestCase {
             else { UserDefaults.standard.removeObject(forKey: AppLanguage.preferenceKey) }
         }
         let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.first as? UIWindowScene)
-        for option in [AppLanguage.english, .simplifiedChinese, .traditionalChinese] {
+        for option in AppLanguage.allCases where option != .system {
             let language = LanguageSettings()
             language.select(option)
             for page in [SettingsPage.language, .about] {
@@ -1724,7 +1743,7 @@ final class ClientTests: XCTestCase {
                     let attachment = XCTAttachment(image: image)
                     attachment.name = "Settings \(page) \(option.rawValue) \(Int(size.width))x\(Int(size.height)) large text"
                     attachment.lifetime = .keepAlways; add(attachment)
-                    try image.pngData()?.write(to: FileManager.default.temporaryDirectory.appendingPathComponent("secondary-\(page)-\(option.rawValue)-\(Int(size.width)).png"))
+                    try image.pngData()?.write(to: FileManager.default.temporaryDirectory.appendingPathComponent("localization-secondary-\(page)-\(option.rawValue)-\(Int(size.width)).png"))
                     XCTAssertEqual(host.view.bounds.size, size)
                     XCTAssertFalse(language.select(option))
                 }
@@ -2178,7 +2197,7 @@ final class ClientTests: XCTestCase {
         }
     }
     func testLanguageResolutionUsesSupportedLocalesAndEnglishFallback() {
-        XCTAssertEqual(AppLanguage.allCases, [.system, .simplifiedChinese, .traditionalChinese, .english])
+        XCTAssertEqual(AppLanguage.allCases.map(\.rawValue), ["system", "zh-Hans", "zh-Hant", "en", "de", "ru", "pl", "es-MX", "fr", "pt-BR", "es"])
         XCTAssertEqual(AppLanguage.stored(in: UserDefaults(suiteName: "missing-\(UUID())")!), .system)
         XCTAssertEqual(AppLanguage.resolve(.system, systemLanguageTags: ["zh-Hans-CN"]), .simplifiedChinese)
         XCTAssertEqual(AppLanguage.resolve(.system, systemLanguageTags: ["zh-Hans-TW"]), .simplifiedChinese)
@@ -2189,12 +2208,21 @@ final class ClientTests: XCTestCase {
             XCTAssertEqual(AppLanguage.resolve(.system, systemLanguageTags: ["zh-\(region)"]), .traditionalChinese)
         }
         XCTAssertEqual(AppLanguage.resolve(.system, systemLanguageTags: ["zh"]), .simplifiedChinese)
-        XCTAssertEqual(AppLanguage.resolve(.system, systemLanguageTags: ["fr-FR", "zh-Hant-HK", "en-US"]), .traditionalChinese)
+        XCTAssertEqual(AppLanguage.resolve(.system, systemLanguageTags: ["ja-JP", "zh-Hant-HK", "en-US"]), .traditionalChinese)
         XCTAssertEqual(AppLanguage.resolve(.system, systemLanguageTags: ["en-US", "zh-Hant"]), .english)
-        XCTAssertEqual(AppLanguage.resolve(.system, systemLanguageTags: ["fr-FR", "zh-MY", "zh-Hans"]), .simplifiedChinese)
+        XCTAssertEqual(AppLanguage.resolve(.system, systemLanguageTags: ["ja-JP", "zh-MY", "zh-Hans"]), .simplifiedChinese)
         XCTAssertEqual(AppLanguage.resolve(.system, systemLanguageTags: ["en-US"]), .english)
-        XCTAssertEqual(AppLanguage.resolve(.system, systemLanguageTags: ["fr-FR"]), .english)
+        XCTAssertEqual(AppLanguage.resolve(.system, systemLanguageTags: ["ja-JP"]), .english)
         XCTAssertEqual(AppLanguage.resolve(.system, systemLanguageTags: []), .english)
+        for (tag, language) in [("es-MX", AppLanguage.spanishMexico), ("es-ES", .spanish), ("es-AR", .spanish),
+                                ("es", .spanish), ("pt-BR", .portugueseBrazil), ("pt-PT", .english), ("pt", .english),
+                                ("de-AT", .german), ("fr-CA", .french), ("ru-BY", .russian), ("pl-PL", .polish)] {
+            XCTAssertEqual(AppLanguage.resolve(.system, systemLanguageTags: [tag]), language, tag)
+        }
+        XCTAssertEqual(AppLanguage.resolve(.system, systemLanguageTags: ["pt-PT", "de-AT", "es-MX"]), .german)
+        XCTAssertEqual(AppLanguage.resolve(.system, systemLanguageTags: ["es-AR", "es-MX"]), .spanish)
+        XCTAssertEqual(AppLanguage.resolve(.system, systemLanguageTags: ["es-MX", "es-ES"]), .spanishMexico)
+        XCTAssertEqual(AppLanguage.resolve(.system, systemLanguageTags: ["pt-PT", "fr-CA", "de"]), .french)
         XCTAssertEqual(AppLanguage.resolve(.simplifiedChinese, systemLanguageTags: ["en-US"]), .simplifiedChinese)
         XCTAssertEqual(AppLanguage.resolve(.traditionalChinese, systemLanguageTags: ["zh-Hans"]), .traditionalChinese)
         XCTAssertEqual(AppLanguage.resolve(.english, systemLanguageTags: ["zh-CN"]), .english)
@@ -2215,6 +2243,12 @@ final class ClientTests: XCTestCase {
         XCTAssertEqual(defaults.string(forKey: AppLanguage.preferenceKey), "en")
         XCTAssertFalse(settings.select(.english))
         XCTAssertEqual(LanguageSettings(defaults: defaults).selection, .english)
+        for language in AppLanguage.allCases where language != .system {
+            settings.select(language)
+            XCTAssertEqual(defaults.string(forKey: AppLanguage.preferenceKey), language.rawValue)
+            XCTAssertEqual(LanguageSettings(defaults: defaults).selection, language)
+            XCTAssertEqual(AppLanguage.resolve(language, systemLanguageTags: ["ja-JP"]), language)
+        }
     }
     @MainActor func testLanguageChangeDoesNotRecreateClientCoreAudioOrState() throws {
         let suite = "MobileSpeakLanguageStateTests.\(UUID().uuidString)"
@@ -2236,7 +2270,7 @@ final class ClientTests: XCTestCase {
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let settings = LanguageSettings(defaults: defaults)
-        settings.refreshSystemLanguage(systemLanguageTags: ["fr-FR", "zh-Hant-HK"])
+        settings.refreshSystemLanguage(systemLanguageTags: ["ja-JP", "zh-Hant-HK"])
         XCTAssertEqual(settings.selection, .system)
         XCTAssertEqual(settings.systemLanguage, .traditionalChinese)
         XCTAssertEqual(settings.locale.identifier, "zh-Hant")
@@ -2794,10 +2828,10 @@ extension ClientTests {
         func capture(_ name: String) throws {
             host.view.layoutIfNeeded()
             let image = UIGraphicsImageRenderer(size: host.view.bounds.size).image { _ in host.view.drawHierarchy(in: host.view.bounds, afterScreenUpdates: true) }
-            try image.pngData()?.write(to: root.appendingPathComponent("user-status-" + name + ".png"))
+            try image.pngData()?.write(to: root.appendingPathComponent("localization-user-status-" + name + ".png"))
             let attachment = XCTAttachment(image: image); attachment.name = "user-status-" + name; attachment.lifetime = .keepAlways; add(attachment)
         }
-        for language in ["en", "zh-Hans", "zh-Hant"] {
+        for language in AppLanguage.allCases.filter({ $0 != .system }).map(\.rawValue) {
             UserDefaults.standard.set(language, forKey: AppLanguage.preferenceKey)
             for category in [ContentSizeCategory.large, .accessibilityExtraExtraExtraLarge] {
                 for page in 0..<5 {
@@ -3168,5 +3202,269 @@ private struct PushToTalkInteractionFixture: View {
         .padding(20).foregroundStyle(.white).background(Palette.background)
         .preferredColorScheme(.dark).tint(Palette.accent)
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in model.invalidate() }
+    }
+}
+
+extension ClientTests {
+    func testAllLanguageBundlesContainAppStringsAndPrivacyDescriptions() throws {
+        func table(_ language: String, name: String) throws -> [String: Any] {
+            let path = try XCTUnwrap(Bundle.main.path(forResource: language, ofType: "lproj"), language)
+            let url = URL(fileURLWithPath: path).appendingPathComponent(name)
+            return try XCTUnwrap(PropertyListSerialization.propertyList(from: Data(contentsOf: url), format: nil) as? [String: Any])
+        }
+        let english = try table("en", name: "Localizable.strings")
+        for language in AppLanguage.allCases where language != .system {
+            let strings = try table(language.rawValue, name: "Localizable.strings")
+            XCTAssertTrue(Set(english.keys).isSubset(of: Set(strings.keys)), language.rawValue)
+            let privacy = try table(language.rawValue, name: "InfoPlist.strings")
+            for key in ["NSMicrophoneUsageDescription", "NSLocalNetworkUsageDescription"] {
+                let value = try XCTUnwrap(privacy[key] as? String, "\(language.rawValue) \(key)")
+                XCTAssertFalse(value.isEmpty)
+                XCTAssertTrue(value.contains("TeamSpeak"))
+            }
+        }
+    }
+
+    @MainActor func testAllLanguageDisplayFormatsAndExistingNoticesFollowSelection() throws {
+        let defaults = UserDefaults.standard
+        let stored = defaults.object(forKey: AppLanguage.preferenceKey)
+        let client = Client.shared
+        let previousError = client.error, previousFileError = client.channelFilesLocalError
+        defer {
+            client.error = previousError; client.channelFilesLocalError = previousFileError
+            if let stored { defaults.set(stored, forKey: AppLanguage.preferenceKey) }
+            else { defaults.removeObject(forKey: AppLanguage.preferenceKey) }
+        }
+        defaults.set("en", forKey: AppLanguage.preferenceKey)
+        let settings = LanguageSettings()
+        let handle = client.handle, audio = client.audio, state = client.state
+        let userContent = "Server «München / Москва / Łódź»"
+        client.showError(.core("join_channel_failed", userContent))
+        client.showFileError(.key("files_disconnected"))
+        let englishError = client.error
+        let titles: [(AppLanguage, String)] = [(.german, "Deutsch"), (.russian, "Русский"), (.polish, "Polski"),
+            (.spanishMexico, "Español (México)"), (.french, "Français"), (.portugueseBrazil, "Português (Brasil)"), (.spanish, "Español")]
+        for language in AppLanguage.allCases where language != .system {
+            settings.select(language)
+            client.refreshLocalizedNotices()
+            XCTAssertEqual(LanguageSettings().selection, language)
+            XCTAssertEqual(settings.locale.identifier, L10n.locale.identifier)
+            XCTAssertEqual(client.error, L10n.coreError("join_channel_failed", detail: userContent))
+            XCTAssertEqual(client.channelFilesLocalError, L10n.string("files_disconnected"))
+            XCTAssertTrue(try XCTUnwrap(client.error).contains(userContent))
+            if language != .english { XCTAssertNotEqual(client.error, englishError) }
+            let decimal = [AppLanguage.german, .russian, .polish, .french, .portugueseBrazil, .spanish].contains(language) ? "," : "."
+            XCTAssertEqual(NetworkQuality.number(12.25, decimals: 1), "12\(decimal)3", language.rawValue)
+            XCTAssertEqual(NetworkQuality.number(1234, decimals: 0), "1234", language.rawValue)
+            XCTAssertEqual(NetworkQuality.number(12.25, decimals: 1, locale: Locale(identifier: "en_US_POSIX")), "12.3", language.rawValue)
+            XCTAssertEqual(NetworkQuality.number(1234, decimals: 1, maximum: 999.9, locale: Locale(identifier: "en_US_POSIX")), "999.9", language.rawValue)
+            XCTAssertEqual(NetworkQuality(deviationMs: 1234).deviationText, "999\(decimal)9", language.rawValue)
+            XCTAssertEqual(NetworkQuality.number(.infinity, decimals: 1), "—")
+            XCTAssertEqual(L10n.percent(42), L10n.percentPrefix + "42" + L10n.percentSuffix)
+            XCTAssertEqual(L10n.percent(300), L10n.percentPrefix + "300" + L10n.percentSuffix)
+            XCTAssertFalse(L10n.millisecondsUnit.isEmpty)
+            XCTAssertEqual(L10n.fileSize(1_500_000), Int64(1_500_000).formatted(.byteCount(style: .file).locale(settings.locale)))
+            XCTAssertEqual(L10n.fileDate(1_700_000_000), Date(timeIntervalSince1970: 1_700_000_000)
+                .formatted(Date.FormatStyle(date: .numeric, time: .shortened).locale(settings.locale)))
+            XCTAssertTrue(L10n.format("channel_chat_open", userContent).contains(userContent))
+            for (option, title) in titles { XCTAssertEqual(L10n.string(option.titleKey), title, language.rawValue) }
+            for count in [0, 1, 2, 5, 11, 21, 22, 25] {
+                let summary = L10n.channelMembers(count: count)
+                XCTAssertTrue(summary.contains(String(count)), "\(language.rawValue) \(count): \(summary)")
+                XCTAssertFalse(summary.contains("%")); XCTAssertFalse(summary.contains("channel_members_summary"))
+            }
+            XCTAssertEqual(client.handle, handle); XCTAssertTrue(client.audio === audio); XCTAssertEqual(client.state, state)
+        }
+        XCTAssertEqual(AppLanguage.spanish.locale.identifier, "es-ES")
+        XCTAssertEqual(AppLanguage.spanishMexico.locale.identifier, "es-MX")
+    }
+}
+
+extension ClientTests {
+    func testRussianAndPolishPluralCategoriesForChannelMembers() {
+        let defaults = UserDefaults.standard
+        let stored = defaults.object(forKey: AppLanguage.preferenceKey)
+        defer {
+            if let stored { defaults.set(stored, forKey: AppLanguage.preferenceKey) }
+            else { defaults.removeObject(forKey: AppLanguage.preferenceKey) }
+        }
+        let counts = [0, 1, 2, 5, 11, 21, 22, 25]
+        defaults.set("ru", forKey: AppLanguage.preferenceKey)
+        for (count, noun) in zip(counts, ["участников", "участник", "участника", "участников", "участников", "участник", "участника", "участников"]) {
+            XCTAssertEqual(L10n.channelMembers(count: count), "· \(count) \(noun) в сети")
+        }
+        defaults.set("pl", forKey: AppLanguage.preferenceKey)
+        for (count, noun) in zip(counts, ["osób", "osoba", "osoby", "osób", "osób", "osób", "osoby", "osób"]) {
+            XCTAssertEqual(L10n.channelMembers(count: count), "· \(count) \(noun) online")
+        }
+    }
+}
+
+extension ClientTests {
+    @MainActor func testAllLanguagesMainSettingsRemainScrollableAtNarrowAndLargeText() async throws {
+        #if targetEnvironment(simulator)
+        let library = try XCTUnwrap(dlopen("/usr/lib/libAccessibility.dylib", RTLD_NOW))
+        let automation = unsafeBitCast(try XCTUnwrap(dlsym(library, "_AXSSetAutomationEnabled")), to: (@convention(c) (Bool) -> Void).self)
+        let enabled = unsafeBitCast(try XCTUnwrap(dlsym(library, "_AXSAutomationEnabled")), to: (@convention(c) () -> Bool).self)()
+        automation(true)
+        defer { automation(enabled); dlclose(library) }
+        #endif
+        let client = Client.shared
+        guard !client.connected, !client.busy else { throw XCTSkip("Requires an offline test installation") }
+        let handle = client.handle, audio = client.audio, state = client.state, avatar = client.avatarPreview
+        let importing = client.fileImporting
+        let stored = UserDefaults.standard.object(forKey: AppLanguage.preferenceKey)
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let window = UIWindow(windowScene: scene)
+        let host = UIHostingController(rootView: AnyView(EmptyView()))
+        let container = UIViewController(); window.rootViewController = container
+        container.addChild(host); container.view.addSubview(host.view); host.didMove(toParent: container)
+        window.makeKeyAndVisible()
+        // Keep this visual fixture from submitting file-cache inspection or modifying retained notices.
+        client.fileImporting = true
+        defer {
+            host.rootView = AnyView(EmptyView()); window.isHidden = true; client.fileImporting = importing
+            if let stored { UserDefaults.standard.set(stored, forKey: AppLanguage.preferenceKey) }
+            else { UserDefaults.standard.removeObject(forKey: AppLanguage.preferenceKey) }
+        }
+        func scrolls(_ view: UIView) -> [UIScrollView] {
+            (view as? UIScrollView).map { [$0] } ?? view.subviews.flatMap(scrolls)
+        }
+        func elements(_ root: NSObject) -> [NSObject] {
+            var visited = Set<ObjectIdentifier>()
+            func collect(_ object: NSObject) -> [NSObject] {
+                guard visited.insert(ObjectIdentifier(object)).inserted, !object.accessibilityElementsHidden else { return [] }
+                if let view = object as? UIView, view.isHidden || view.alpha < 0.01 { return [] }
+                let explicit = object.accessibilityElements as? [NSObject]
+                let count = object.accessibilityElementCount()
+                let children = explicit ?? (count > 0 && count < 1_000 ? (0..<count).compactMap { object.accessibilityElement(at: $0) as? NSObject } : [])
+                if explicit == nil, count == NSNotFound, !object.isAccessibilityElement { return ((object as? UIView)?.subviews ?? []).flatMap(collect) }
+                return (object.isAccessibilityElement ? [object] : []) + children.flatMap(collect)
+            }
+            return collect(root)
+        }
+        for language in AppLanguage.allCases where language != .system {
+            UserDefaults.standard.set(language.rawValue, forKey: AppLanguage.preferenceKey)
+            for (width, category) in [(CGFloat(390), ContentSizeCategory.large), (320, .accessibilityExtraExtraExtraLarge)] {
+                host.view.frame = CGRect(x: 0, y: 0, width: width, height: 568)
+                host.rootView = AnyView(NavigationView { HomeView(client: client, tab: 2) }.navigationViewStyle(.stack)
+                    .id("settings-\(language.rawValue)-\(category)").environmentObject(LanguageSettings())
+                    .environment(\.sizeCategory, category).environment(\.locale, language.locale)
+                    .preferredColorScheme(.dark).tint(Palette.accent))
+                try await Task.sleep(nanoseconds: 160_000_000)
+                host.view.layoutIfNeeded()
+                let scroll = try XCTUnwrap(scrolls(host.view).max { $0.contentSize.height < $1.contentSize.height })
+                XCTAssertGreaterThan(scroll.contentSize.height, scroll.bounds.height)
+                let maximum = max(0, scroll.contentSize.height - scroll.bounds.height + scroll.adjustedContentInset.bottom)
+                var reachable = Set<String>()
+                let controls = ["settings_language", "files_cache_clear", "settings_about"]
+                for step in 0...8 {
+                    scroll.setContentOffset(CGPoint(x: 0, y: maximum * CGFloat(step) / 8), animated: false)
+                    try await Task.sleep(nanoseconds: 50_000_000)
+                    let viewport = host.view.convert(host.view.bounds, to: window)
+                    let visible = elements(host.view).filter { $0.accessibilityFrame.intersects(viewport) }
+                    for key in controls where visible.contains(where: { $0.accessibilityLabel?.contains(L10n.string(key)) == true }) { reachable.insert(key) }
+                    if step == 0 || step == 4 || step == 8 {
+                        let image = UIGraphicsImageRenderer(size: host.view.bounds.size).image { _ in host.view.drawHierarchy(in: host.view.bounds, afterScreenUpdates: true) }
+                        let name = "localization-main-settings-\(language.rawValue)-\(Int(width))-\(category)-\(step)"
+                        try image.pngData()?.write(to: FileManager.default.temporaryDirectory.appendingPathComponent(name + ".png"))
+                        let attachment = XCTAttachment(image: image); attachment.name = name; attachment.lifetime = .keepAlways; add(attachment)
+                    }
+                }
+                XCTAssertEqual(reachable, Set(controls), "All settings controls stay reachable: \(language.rawValue), \(category)")
+                XCTAssertEqual(client.handle, handle); XCTAssertTrue(client.audio === audio); XCTAssertEqual(client.state, state)
+                XCTAssertTrue(client.avatarPreview === avatar)
+            }
+        }
+    }
+}
+
+extension ClientTests {
+    @MainActor func testAllLanguagesExpandedDrawerKeepsToolsReachableAtNarrowLargeText() async throws {
+        #if targetEnvironment(simulator)
+        let library = try XCTUnwrap(dlopen("/usr/lib/libAccessibility.dylib", RTLD_NOW))
+        let automation = unsafeBitCast(try XCTUnwrap(dlsym(library, "_AXSSetAutomationEnabled")), to: (@convention(c) (Bool) -> Void).self)
+        let enabled = unsafeBitCast(try XCTUnwrap(dlsym(library, "_AXSAutomationEnabled")), to: (@convention(c) () -> Bool).self)()
+        automation(true)
+        defer { automation(enabled); dlclose(library) }
+        #endif
+        let client = Client.shared
+        guard !client.connected, !client.busy else { throw XCTSkip("Requires an offline test installation") }
+        let saved = client.state, savedFiles = client.channelFiles, importing = client.fileImporting
+        let stored = UserDefaults.standard.object(forKey: AppLanguage.preferenceKey)
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let window = UIWindow(windowScene: scene)
+        let host = UIHostingController(rootView: AnyView(EmptyView()))
+        let container = UIViewController(); window.rootViewController = container
+        container.addChild(host); container.view.addSubview(host.view); host.didMove(toParent: container)
+        host.view.frame = CGRect(x: 0, y: 0, width: 320, height: 568); window.makeKeyAndVisible()
+        client.fileImporting = true
+        defer {
+            host.rootView = AnyView(EmptyView()); window.isHidden = true
+            client.state = saved; client.channelFiles = savedFiles; client.fileImporting = importing
+            if let stored { UserDefaults.standard.set(stored, forKey: AppLanguage.preferenceKey) }
+            else { UserDefaults.standard.removeObject(forKey: AppLanguage.preferenceKey) }
+        }
+        func elements(_ root: NSObject) -> [NSObject] {
+            var visited = Set<ObjectIdentifier>()
+            func collect(_ object: NSObject) -> [NSObject] {
+                guard visited.insert(ObjectIdentifier(object)).inserted, !object.accessibilityElementsHidden else { return [] }
+                if let view = object as? UIView, view.isHidden || view.alpha < 0.01 { return [] }
+                let explicit = object.accessibilityElements as? [NSObject]
+                let count = object.accessibilityElementCount()
+                let children = explicit ?? (count > 0 && count < 1_000 ? (0..<count).compactMap { object.accessibilityElement(at: $0) as? NSObject } : [])
+                if explicit == nil, count == NSNotFound, !object.isAccessibilityElement { return ((object as? UIView)?.subviews ?? []).flatMap(collect) }
+                return (object.isAccessibilityElement ? [object] : []) + children.flatMap(collect)
+            }
+            return collect(root)
+        }
+        func pane(_ view: UIView) -> UIView? {
+            view.accessibilityIdentifier == "voice-drawer" ? view : view.subviews.lazy.compactMap(pane).first
+        }
+        func scrolls(_ view: UIView) -> [UIScrollView] {
+            (view as? UIScrollView).map { [$0] } ?? view.subviews.flatMap(scrolls)
+        }
+        let channel = Channel(id: 7, parent: 0, order: 0, name: "User channel", password: false, permanent: true, key: "7", icon: nil, iconPath: nil)
+        let member = Member(id: 1, channel: 7, uid: "self", name: "Self", avatarHash: "", avatarPath: nil, badges: [], serverGroupIcons: [], channelGroupIcon: nil, muted: false, deafened: false, speaking: false)
+        let quality = NetworkQuality(rttMs: 1234, deviationMs: 1234.5, packetLossPercent: 4,
+            rttGrade: .poor, deviationGrade: .poor, packetLossGrade: .poor, iconGrade: .poor,
+            axisMaxMs: 2000, nowSecond: 29, samples: (0..<30).map { NetworkSample(second: UInt64($0), rttMs: 42, grade: .good) })
+        let snapshot = Snapshot(status: "connected", server: "Drawer fixture", serverId: "fixture", ownClient: 1, channels: [channel], clients: [member], networkQuality: quality)
+        for language in AppLanguage.allCases where language != .system {
+            UserDefaults.standard.set(language.rawValue, forKey: AppLanguage.preferenceKey)
+            for category in [ContentSizeCategory.large, .accessibilityExtraExtraExtraLarge] {
+                client.state = saved; client.channelFiles = ChannelFilesState()
+                host.rootView = AnyView(NavigationView { HomeView(client: client) }.navigationViewStyle(.stack)
+                    .id("drawer-\(language.rawValue)-\(category)").environmentObject(LanguageSettings())
+                    .environment(\.sizeCategory, category).environment(\.locale, language.locale)
+                    .preferredColorScheme(.dark).tint(Palette.accent))
+                try await Task.sleep(nanoseconds: 150_000_000)
+                client.state = snapshot
+                try await Task.sleep(nanoseconds: 150_000_000)
+                let handle = try XCTUnwrap(elements(host.view).first { $0.accessibilityLabel == L10n.string("voice_drawer_expand") })
+                XCTAssertTrue(handle.accessibilityActivate())
+                try await Task.sleep(nanoseconds: 500_000_000)
+                let drawer = try XCTUnwrap(pane(host.view))
+                let tools = try XCTUnwrap(scrolls(drawer).max { $0.contentSize.height < $1.contentSize.height })
+                XCTAssertGreaterThanOrEqual(tools.bounds.height, 44, "Tools must retain a scrollable touch area: \(language.rawValue), \(category)")
+                var reachable = Set<String>()
+                let keys = ["volume_title", "files_title"]
+                for step in 0...4 {
+                    let maximum = max(0, tools.contentSize.height - tools.bounds.height + tools.adjustedContentInset.bottom)
+                    tools.setContentOffset(CGPoint(x: 0, y: maximum * CGFloat(step) / 4), animated: false)
+                    try await Task.sleep(nanoseconds: 50_000_000)
+                    let viewport = UIAccessibility.convertToScreenCoordinates(drawer.bounds, in: drawer)
+                    let visible = elements(host.view).filter { $0.accessibilityFrame.intersects(viewport) }
+                    for key in keys where visible.contains(where: { $0.accessibilityLabel?.contains(L10n.string(key)) == true }) { reachable.insert(key) }
+                    if step == 0 || step == 4 {
+                        let image = UIGraphicsImageRenderer(size: host.view.bounds.size).image { _ in host.view.drawHierarchy(in: host.view.bounds, afterScreenUpdates: true) }
+                        let name = "localization-expanded-drawer-\(language.rawValue)-\(category)-\(step)"
+                        try image.pngData()?.write(to: FileManager.default.temporaryDirectory.appendingPathComponent(name + ".png"))
+                        let attachment = XCTAttachment(image: image); attachment.name = name; attachment.lifetime = .keepAlways; add(attachment)
+                    }
+                }
+                XCTAssertEqual(reachable, Set(keys), "Both tools remain reachable: \(language.rawValue), \(category)")
+            }
+        }
     }
 }

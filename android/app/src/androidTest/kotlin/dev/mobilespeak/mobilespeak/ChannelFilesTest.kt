@@ -1,6 +1,11 @@
 package dev.mobilespeak.mobilespeak
 
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.activity.compose.LocalActivityResultRegistryOwner
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.compose.foundation.background
@@ -58,7 +63,7 @@ class ChannelFilesTest {
         org.junit.Assume.assumeFalse(context.getSystemService(android.app.KeyguardManager::class.java).isKeyguardLocked)
         val files = ChannelFilesState(open = true, server = "fixture", channel = 7, channelName = "当前实际加入的频道", path = "/文档/a very long folder path/子目录", status = "ready",
             entries = (0..40).map { ChannelFileEntry("很长的中文文件名称用于保留扩展名-$it.pdf", 1_234_567, 1700000000, false, "file-text", null) })
-        for (language in listOf("en", "zh-Hans", "zh-Hant")) for (font in listOf(1f, 2f)) ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+        for (language in AppLanguage.entries.filter { it != AppLanguage.SYSTEM }.map { it.code }) for (font in listOf(1f, 2f)) ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             val original = AppCompatDelegate.getApplicationLocales()
             try {
                 instrumentation.runOnMainSync { AppLanguage.select(AppLanguage.fromCode(language)) }
@@ -71,7 +76,7 @@ class ChannelFilesTest {
                 scenario.onActivity { current ->
                     activity = current
                     activity.setContent { CompositionLocalProvider(LocalDensity provides Density(density, font), LocalContext provides localized, LocalConfiguration provides configuration, LocalResources provides localized.resources, LocalActivityResultRegistryOwner provides activity) {
-                        MaterialTheme(colorScheme = darkColorScheme(primary = Palette.accent, surface = Palette.card, onSurface = Palette.text)) { Box(Modifier.width(320.dp).background(Palette.bottom)) {
+                        MaterialTheme(colorScheme = darkColorScheme(primary = Palette.accent, surface = Palette.card, onSurface = Palette.text)) { Box(Modifier.width(320.dp).background(Palette.bottom).windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top))) {
                             ChannelFilesDrawer(SessionUiState(snapshot = Snapshot(status = "connected"), channelFiles = files))
                         } }
                     } }
@@ -109,8 +114,13 @@ class ChannelFilesTest {
                 assertEquals(160 * density, heading.center.x, density)
                 assertEquals(heading.center.x, subtitle.center.x, density)
                 assertEquals(2 * density, subtitle.top - heading.bottom, density / 2)
-                assertTrue(tagged("drawer-page-back").right <= heading.left)
-                assertTrue(heading.right <= tagged("files-upload").left)
+                if (font >= 1.5f) {
+                    assertTrue(tagged("drawer-page-back").bottom <= heading.top)
+                    assertTrue(tagged("files-upload").bottom <= heading.top)
+                } else {
+                    assertTrue(tagged("drawer-page-back").right <= heading.left)
+                    assertTrue(heading.right <= tagged("files-upload").left)
+                }
                 assertTrue(semantics().any { texts(it).any { text -> text.contains(".pdf") } })
                 val locale = java.util.Locale.forLanguageTag(language)
                 val expectedDate = java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.SHORT, java.text.DateFormat.SHORT, locale)
@@ -131,7 +141,7 @@ class ChannelFilesTest {
                 for ((status, connected) in listOf("ready" to true, "loading" to true, "failed" to true, "failed" to false)) {
                     instrumentation.runOnMainSync {
                         activity.setContent { CompositionLocalProvider(LocalDensity provides Density(density, font), LocalContext provides localized, LocalConfiguration provides configuration, LocalResources provides localized.resources, LocalActivityResultRegistryOwner provides activity) {
-                            MaterialTheme(colorScheme = darkColorScheme(primary = Palette.accent, surface = Palette.card, onSurface = Palette.text)) { Box(Modifier.width(320.dp).background(Palette.bottom)) {
+                            MaterialTheme(colorScheme = darkColorScheme(primary = Palette.accent, surface = Palette.card, onSurface = Palette.text)) { Box(Modifier.width(320.dp).background(Palette.bottom).windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top))) {
                                 ChannelFilesDrawer(SessionUiState(snapshot = Snapshot(status = if (connected) "connected" else "disconnected"),
                                     channelFiles = files.copy(path = if (status == "ready") "/" else files.path, sort = "newest", status = status, entries = emptyList())))
                             } }
@@ -377,7 +387,8 @@ class ChannelFilesTest {
                 instrumentation.runOnMainSync { ui = ui.copy(channelFiles = files.copy(path = "/parent")) }; settle()
                 checkDrag(160 * density, bounds(node(R.string.files_title)).exactCenterY())
                 instrumentation.runOnMainSync { ui = ui.copy(channelFiles = files.copy(open = false)) }; settle()
-                checkDrag(319 * density, top() + 90 * density)
+                // Compact home bodies scroll; the fixed voice header remains draggable.
+                checkDrag(319 * density, top() + 40 * density)
                 instrumentation.runOnMainSync { ui = ui.copy(channelFiles = files); expanded = false }
                 android.os.SystemClock.sleep(80)
                 instrumentation.runOnMainSync { ui = ui.copy(snapshot = ui.snapshot.copy(status = "disconnected"), channelFiles = files.copy(open = false)) }

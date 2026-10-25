@@ -81,12 +81,12 @@ data class NetworkQuality(
     val axisText get() = axisNumber(axisMaxMs)
     val midAxisText get() = axisNumber(axisMaxMs / 2)
     companion object {
-        fun axisNumber(value: Double): String = number(value, if (value % 1.0 == 0.0) 0 else 1)
-        fun number(value: Double?, decimals: Int, maximum: Double = Double.POSITIVE_INFINITY): String =
+        fun axisNumber(value: Double, locale: Locale = Locale.getDefault()): String = number(value, if (value % 1.0 == 0.0) 0 else 1, locale = locale)
+        fun number(value: Double?, decimals: Int, maximum: Double = Double.POSITIVE_INFINITY, locale: Locale = Locale.getDefault()): String =
             if (value == null || !value.isFinite()) "—"
             else {
                 val scale = if (decimals == 0) 1.0 else 10.0
-                String.format(Locale.ROOT, "%.${decimals}f", kotlin.math.floor(minOf(value, maximum) * scale + 0.5) / scale)
+                String.format(locale, "%.${decimals}f", kotlin.math.floor(minOf(value, maximum) * scale + 0.5) / scale)
             }
     }
 }

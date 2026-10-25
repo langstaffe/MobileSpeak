@@ -81,9 +81,16 @@ internal fun SettingsDetailPage(page: String, onBack: () -> Unit, onModal: (Bool
                     Text(stringResource(R.string.about_project))
                     Text("https://github.com/langstaffe/MobileSpeak", color = Palette.accent, fontSize = 15.sp, lineHeight = 20.sp)
                 }
-                Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Palette.card).heightIn(min = 56.dp).padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(stringResource(R.string.about_version), Modifier.weight(1f))
-                    Text("v" + AppUpdates.installedVersion(), color = Palette.muted)
+                Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Palette.card).heightIn(min = 56.dp).padding(16.dp)) {
+                    if (androidx.compose.ui.platform.LocalDensity.current.fontScale >= 1.5f) {
+                        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(stringResource(R.string.about_version))
+                            Text("v" + AppUpdates.installedVersion(), Modifier.align(Alignment.End), color = Palette.muted, maxLines = 1)
+                        }
+                    } else Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(stringResource(R.string.about_version), Modifier.weight(1f))
+                        Text("v" + AppUpdates.installedVersion(), color = Palette.muted, maxLines = 1)
+                    }
                 }
                 SettingsEntry(stringResource(if (updates.checking) R.string.update_checking else R.string.update_check), pressFeedback = null) { AppUpdates.check(manual = true) }
                 updates.result?.let { result ->

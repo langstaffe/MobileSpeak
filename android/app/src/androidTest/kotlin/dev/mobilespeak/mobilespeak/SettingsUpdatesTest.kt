@@ -16,6 +16,8 @@ import androidx.appcompat.app.AppCompatDelegate
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Density
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -104,7 +106,7 @@ class SettingsUpdatesTest {
         val original = AppCompatDelegate.getApplicationLocales()
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             try {
-                for (language in listOf(AppLanguage.ENGLISH, AppLanguage.SIMPLIFIED_CHINESE, AppLanguage.TRADITIONAL_CHINESE)) {
+                for (language in AppLanguage.entries.filter { it != AppLanguage.SYSTEM }) {
                     instrumentation.runOnMainSync { AppLanguage.select(language) }
                     instrumentation.waitForIdleSync()
                     for (page in listOf("language", "about")) {
@@ -112,7 +114,9 @@ class SettingsUpdatesTest {
                             activity.setContent {
                                 MaterialTheme(colorScheme = androidx.compose.material3.darkColorScheme(onSurface = Palette.text, onBackground = Palette.text)) {
                                     androidx.compose.material3.Surface(color = Palette.background, contentColor = Palette.text) {
-                                        CompositionLocalProvider(LocalDensity provides Density(LocalDensity.current.density, 2f)) { SettingsDetailPage(page, {}) }
+                                        CompositionLocalProvider(LocalDensity provides Density(LocalDensity.current.density, 2f)) {
+                                            androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.width(320.dp)) { SettingsDetailPage(page, {}) }
+                                        }
                                     }
                                 }
                             }
@@ -151,6 +155,9 @@ class SettingsUpdatesTest {
                 instrumentation.runOnMainSync { AppLanguage.select(AppLanguage.ENGLISH) }
                 instrumentation.waitForIdleSync()
                 withDownloadRecord("v9.0.0") { id, _, _ ->
+                    // This notice fixture is not a real signed APK; activity recreation must not re-verify it.
+                    instrumentation.runOnMainSync { updateField("refreshing").setBoolean(AppUpdates, true) }
+                    try {
                         lateinit var oldNotification: Notification
                         instrumentation.runOnMainSync {
                             updateState.value = updateState.value.copy(download = DownloadStatus.READY)
@@ -163,12 +170,19 @@ class SettingsUpdatesTest {
                         }
                         waitFor { manager.activeNotifications.firstOrNull { it.id == 300 }?.notification?.extras
                             ?.getCharSequence(Notification.EXTRA_TITLE)?.toString() == "Old language fixture" }
+                        for (language in AppLanguage.entries.filter { it != AppLanguage.SYSTEM }) {
+                            instrumentation.runOnMainSync { AppLanguage.select(language); AppUpdates.refreshLanguage() }
+                            waitFor { manager.activeNotifications.firstOrNull { it.id == 300 }?.notification?.extras
+                                ?.getCharSequence(Notification.EXTRA_TITLE)?.toString() == context.localized(R.string.update_downloaded, "9.0.0") }
+                            val notification = manager.activeNotifications.single { it.id == 300 }.notification
+                            assertEquals(context.localized(R.string.update_download_notice), notification.extras.getCharSequence(Notification.EXTRA_TEXT)?.toString())
+                            assertTrue(notification.flags and Notification.FLAG_ONLY_ALERT_ONCE != 0)
+                            assertEquals(id, context.getSharedPreferences("app_updates", 0).getLong("notified_download", -1))
+                            assertEquals(DownloadStatus.READY, AppUpdates.state.value.download)
+                            if (Build.VERSION.SDK_INT >= 26) assertEquals(context.localized(R.string.update_notifications), manager.getNotificationChannel("updates").name.toString())
+                        }
                         instrumentation.runOnMainSync { AppLanguage.select(AppLanguage.TRADITIONAL_CHINESE) }
-                        waitFor { manager.activeNotifications.firstOrNull { it.id == 300 }?.notification?.extras
-                            ?.getCharSequence(Notification.EXTRA_TITLE)?.toString() == "v9.0.0 已下載並通過驗證。" }
-                        assertTrue(manager.activeNotifications.single { it.id == 300 }.notification.flags and Notification.FLAG_ONLY_ALERT_ONCE != 0)
-                        assertEquals(id, context.getSharedPreferences("app_updates", 0).getLong("notified_download", -1))
-                        assertEquals(DownloadStatus.READY, AppUpdates.state.value.download)
+                        instrumentation.waitForIdleSync()
                         // A restored READY download should also refresh a still-visible old-language notice.
                         manager.notify(300, oldNotification)
                         waitFor { manager.activeNotifications.firstOrNull { it.id == 300 }?.notification?.extras
@@ -183,6 +197,12 @@ class SettingsUpdatesTest {
                         instrumentation.runOnMainSync { AppLanguage.select(AppLanguage.ENGLISH) }
                         instrumentation.waitForIdleSync()
                         assertFalse(manager.activeNotifications.any { it.id == 300 })
+                    } finally {
+                        instrumentation.runOnMainSync {
+                            updateField("refreshing").setBoolean(AppUpdates, false)
+                            updateField("refreshRequested").setBoolean(AppUpdates, false)
+                        }
+                    }
                 }
             } finally { instrumentation.runOnMainSync { AppCompatDelegate.setApplicationLocales(original) } }
         }

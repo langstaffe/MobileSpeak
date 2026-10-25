@@ -201,6 +201,7 @@ private struct ChannelFileAction: Identifiable {
     var id: String { url.path + (share ? ":share" : ":open") }
 }
 struct ChannelFilesDrawer: View {
+    @Environment(\.sizeCategory) private var sizeCategory
     @ObservedObject var client: Client
     var presentation: ChannelFilesState? = nil
     var presentationError: String? = nil
@@ -216,24 +217,31 @@ struct ChannelFilesDrawer: View {
     var body: some View {
         let target = client.connected ? files.server.flatMap { server in files.channel.map { ChannelFileTarget(server: server, channel: $0, path: files.path) } } : nil
         let canRefresh = target != nil && files.status != "loading" && client.connected
-        VStack(spacing: 0) {
-            HStack(spacing: 4) {
-                Button {
-                    if info != nil { info = nil } else { client.fileCommand("files_back", fields: target?.command ?? [:]) }
-                } label: {
-                    HStack(spacing: 2) { AppIcon(name: "chevron-right", size: 18).scaleEffect(x: -1, y: 1); Text(L10n.string("action_back")) }
-                        .frame(minWidth: 64, minHeight: 44)
-                        .foregroundStyle(Palette.accent)
+        let back = Button {
+            if info != nil { info = nil } else { client.fileCommand("files_back", fields: target?.command ?? [:]) }
+        } label: {
+            HStack(spacing: 2) { AppIcon(name: "chevron-right", size: 18).scaleEffect(x: -1, y: 1); Text(L10n.string("action_back")) }
+                .frame(minWidth: 64, minHeight: 44).foregroundStyle(Palette.accent)
+        }.fixedSize(horizontal: true, vertical: false).accessibilityIdentifier("files-back")
+        let title = VStack(spacing: 2) {
+            Text(L10n.string("files_title")).font(.system(size: min(titleSize, 22), weight: .semibold))
+            Text(files.channelName ?? "").font(.system(size: min(chromeSize, 16))).foregroundStyle(Palette.muted).lineLimit(1)
+        }.frame(maxWidth: .infinity)
+        let upload = Button { uploadTarget = target; choosing = uploadTarget != nil } label: {
+            HStack(spacing: 4) { AppIcon(name: "upload", size: 18); Text(L10n.string("files_upload")) }
+                .frame(minWidth: 64, minHeight: 44).foregroundStyle(Palette.accent)
+        }.fixedSize(horizontal: true, vertical: false)
+            .disabled(files.status != "ready" || preparing || !client.connected).accessibilityIdentifier("files-upload")
+        return VStack(spacing: 0) {
+            Group {
+                if sizeCategory.isAccessibilityCategory {
+                    VStack(spacing: 4) {
+                        HStack { back; Spacer(minLength: 8); upload }
+                        title
+                    }
+                } else {
+                    HStack(spacing: 4) { back; title; upload }
                 }
-                .accessibilityIdentifier("files-back")
-                VStack(spacing: 2) {
-                    Text(L10n.string("files_title")).font(.system(size: min(titleSize, 22), weight: .semibold))
-                    Text(files.channelName ?? "").font(.system(size: min(chromeSize, 16))).foregroundStyle(Palette.muted).lineLimit(1)
-                }.frame(maxWidth: .infinity)
-                Button { uploadTarget = target; choosing = uploadTarget != nil } label: {
-                    HStack(spacing: 4) { AppIcon(name: "upload", size: 18); Text(L10n.string("files_upload")) }.frame(minWidth: 64, minHeight: 44).foregroundStyle(Palette.accent)
-                }.disabled(files.status != "ready" || preparing || !client.connected)
-                .accessibilityIdentifier("files-upload")
             }.font(.system(size: min(actionSize, 20))).padding(.horizontal, 8)
             HStack(spacing: 6) {
                 AppIcon(name: "folder", size: 18).foregroundStyle(Palette.muted)
@@ -303,7 +311,7 @@ struct ChannelFilesDrawer: View {
                     FileIcon(name: entry.icon).foregroundStyle(Palette.muted)
                     VStack(alignment: .leading, spacing: 5) {
                         ChannelFileName(name: entry.name).foregroundStyle(.white)
-                        Text("\(fileSize(entry.size)) · \(fileDate(entry.timestamp))").font(.caption).foregroundStyle(Palette.muted)
+                        Text(L10n.format("%@ · %@", fileSize(entry.size), fileDate(entry.timestamp))).font(.caption).foregroundStyle(Palette.muted)
                     }.frame(maxWidth: .infinity, alignment: .leading)
                     if entry.directory { AppIcon(name: "chevron-right", size: 18).foregroundStyle(Palette.muted) }
                 }.frame(minHeight: 64).contentShape(Rectangle())
@@ -324,7 +332,7 @@ struct ChannelFilesDrawer: View {
         if task.status == "running" {
             VStack(alignment: .leading, spacing: 4) {
                 ProgressView(value: task.size > 0 ? Double(task.transferred) / Double(task.size) : 0)
-                Text("\(L10n.string(task.upload ? "files_upload" : "files_download")) · \(fileSize(task.transferred)) / \(fileSize(task.size))").font(.caption).foregroundStyle(Palette.muted)
+                Text(L10n.format("%@ · %@ / %@", L10n.string(task.upload ? "files_upload" : "files_download"), fileSize(task.transferred), fileSize(task.size))).font(.caption).foregroundStyle(Palette.muted)
             }
         } else if task.status == "failed" {
             VStack(alignment: .leading) {

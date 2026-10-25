@@ -19,7 +19,11 @@ def digest(path):
 def fingerprint(root=ROOT):
     files = set()
     for pattern in ('native/src/**/*', 'native/patched/**/*', 'native/.cargo/**/*',
-                    '.cargo/**/*', 'native/models/**/*', 'tool/*', 'native/Cargo.*',
+                    '.cargo/**/*', 'native/models/**/*', 'native/Cargo.*',
+                    # Keep the tool inputs aligned with build_ios_core.sh and its helpers.
+                    'tool/ios_core_fingerprint.py', 'tool/build_ios_core.sh',
+                    'tool/prepare_audio_runtime.py', 'tool/build_sherpa_fft.py',
+                    'tool/sherpa-onnx-fft.patch',
                     'native/build.rs', 'rust-toolchain*', 'native/rust-toolchain*'):
         files.update(p for p in root.glob(pattern) if p.is_file() and p.name != '.DS_Store' and '__pycache__' not in p.parts and p.suffix != '.pyc')
     return {'files': {str(p.relative_to(root)): digest(p) for p in sorted(files)},

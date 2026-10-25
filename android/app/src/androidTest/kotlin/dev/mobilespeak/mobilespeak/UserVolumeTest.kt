@@ -38,7 +38,7 @@ class UserVolumeTest {
         val before = ClientSession.state.value
         org.junit.Assume.assumeTrue("Requires offline test profile", before.snapshot.status == "disconnected")
         val density = context.resources.displayMetrics.density
-        for (language in listOf("en", "zh-Hans")) for (font in listOf(1f, 2f)) ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+        for (language in AppLanguage.entries.filter { it != AppLanguage.SYSTEM }.map { it.code }) for (font in listOf(1f, 2f)) ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             val config = android.content.res.Configuration(context.resources.configuration).apply { setLocale(java.util.Locale.forLanguageTag(language)) }
             val localized = context.createConfigurationContext(config)
             lateinit var activity: MainActivity
@@ -92,7 +92,7 @@ class UserVolumeTest {
         val density = context.resources.displayMetrics.density
         ClientSession.closeUserVolumes()
         try {
-            for (language in listOf("en","zh-Hans")) for(font in listOf(1f,2f)) ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            for (language in AppLanguage.entries.filter { it != AppLanguage.SYSTEM }.map { it.code }) for(font in listOf(1f,2f)) ActivityScenario.launch(MainActivity::class.java).use { scenario ->
                 val config = android.content.res.Configuration(context.resources.configuration).apply { setLocale(java.util.Locale.forLanguageTag(language)) }
                 val localized = context.createConfigurationContext(config)
                 var fixtureOpen by mutableStateOf(false)
@@ -131,11 +131,13 @@ class UserVolumeTest {
                 assertEquals(original.center.x, heading.center.x, density)
                 assertEquals(heading.center.x, subtitle.center.x, density)
                 assertEquals(2 * density, subtitle.top - heading.bottom, density / 2)
-                assertTrue(tag("drawer-page-back").boundsInRoot.right <= heading.left)
+                if (font >= 1.5f) assertTrue(tag("drawer-page-back").boundsInRoot.bottom <= heading.top)
+                else assertTrue(tag("drawer-page-back").boundsInRoot.right <= heading.left)
                 assertFalse(nodes().any { it.config.getOrNull(SemanticsProperties.Text)?.any { t -> t.text=="SELF MUST BE EXCLUDED" } == true })
                 val slider=tag("user-volume-2")
                 val range=slider.config[SemanticsProperties.ProgressBarRangeInfo]
                 assertEquals(0f..300f,range.range); assertEquals(143f,range.current); assertEquals(299,range.steps)
+                assertEquals(localizedPercent(143, java.util.Locale.forLanguageTag(language)), slider.config[SemanticsProperties.StateDescription])
                 val shot=requireNotNull(instrumentation.uiAutomation.takeScreenshot())
                 java.io.File(context.getExternalFilesDir(null),"user-volumes-$language-$font.png").outputStream().use { shot.compress(android.graphics.Bitmap.CompressFormat.PNG,100,it) }; shot.recycle()
                 val bounds=slider.boundsInRoot

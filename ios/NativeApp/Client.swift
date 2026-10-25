@@ -120,11 +120,18 @@ struct NetworkQuality: Decodable, Equatable {
     var nowSecond: UInt64 = 0
     var samples: [NetworkSample] = []
 
-    static func number(_ value: Double?, decimals: Int, maximum: Double = .infinity) -> String {
+    static func number(_ value: Double?, decimals: Int, maximum: Double = .infinity, locale: Locale = L10n.locale) -> String {
         guard let value, value.isFinite else { return "—" }
         let scale = decimals == 0 ? 1.0 : 10.0
         let displayed = (min(value, maximum) * scale).rounded(.toNearestOrAwayFromZero) / scale
-        return String(format: "%.*f", locale: Locale(identifier: "en_US_POSIX"), decimals, displayed)
+        let formatter = NumberFormatter()
+        formatter.locale = locale
+        formatter.numberStyle = .decimal
+        formatter.usesGroupingSeparator = false
+        formatter.minimumFractionDigits = decimals
+        formatter.maximumFractionDigits = decimals
+        formatter.maximumIntegerDigits = 309
+        return formatter.string(from: NSNumber(value: displayed)) ?? "—"
     }
     var latencyText: String { Self.number(rttMs, decimals: 0, maximum: 999) }
     var deviationText: String { Self.number(deviationMs, decimals: 1, maximum: 999.9) }
@@ -694,7 +701,10 @@ private func coreChanged(_ context: Int) {
             #if DEBUG
             if next.status != state.status || next.networkQuality != state.networkQuality {
                 let wallMs = Int64(Date().timeIntervalSince1970 * 1000)
-                networkLogger.info("NetworkDiag phase=ui wall_ms=\(wallMs) status=\(next.status, privacy: .public) rtt_ms=\(next.networkQuality?.latencyText ?? "—", privacy: .public) deviation_ms=\(next.networkQuality?.deviationText ?? "—", privacy: .public)")
+                let diagnosticLocale = Locale(identifier: "en_US_POSIX")
+                let rtt = NetworkQuality.number(next.networkQuality?.rttMs, decimals: 0, maximum: 999, locale: diagnosticLocale)
+                let deviation = NetworkQuality.number(next.networkQuality?.deviationMs, decimals: 1, maximum: 999.9, locale: diagnosticLocale)
+                networkLogger.info("NetworkDiag phase=ui wall_ms=\(wallMs) status=\(next.status, privacy: .public) rtt_ms=\(rtt, privacy: .public) deviation_ms=\(deviation, privacy: .public)")
             }
             #endif
             if next.status != state.status || next.clients.first(where: { $0.id == next.ownClient })?.channel != currentChannel { endPushToTalk() }

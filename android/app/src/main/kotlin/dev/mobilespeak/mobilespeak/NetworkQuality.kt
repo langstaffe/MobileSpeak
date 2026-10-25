@@ -64,20 +64,28 @@ internal fun NetworkQualityPanel(quality: NetworkQuality, modifier: Modifier = M
 
 @Composable
 private fun NetworkNumbers(quality: NetworkQuality, style: TextStyle, modifier: Modifier) {
+    val locale = androidx.compose.ui.platform.LocalResources.current.configuration.locales[0]
+    val latency = NetworkQuality.number(quality.rttMs, 0, 999.0, locale)
+    val deviation = NetworkQuality.number(quality.deviationMs, 1, 999.9, locale)
+    val loss = NetworkQuality.number(quality.packetLossPercent, 1, locale = locale)
+    val (unitPrefix, unitSuffix) = millisecondAffixes(locale)
+    val (percentPrefix, percentSuffix) = percentAffixes(locale)
     val description = if (quality.rttMs == null) stringResource(R.string.network_unavailable)
-        else stringResource(R.string.network_summary, quality.latencyText, quality.deviationText, quality.lossText)
+        else stringResource(R.string.network_summary, latency, deviation, loss)
     val lossLabel = stringResource(R.string.network_packet_loss)
     Column(modifier.clearAndSetSemantics { contentDescription = description }, verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(stringResource(R.string.network_latency), color = Palette.muted, fontSize = 12.sp)
         Text(buildAnnotatedString {
-            withStyle(SpanStyle(color = quality.rttGrade.networkColor())) { append(quality.latencyText) }
-            withStyle(SpanStyle(color = Palette.muted)) { append(" ms ± ") }
-            withStyle(SpanStyle(color = quality.deviationGrade.networkColor())) { append(quality.deviationText) }
+            withStyle(SpanStyle(color = Palette.muted)) { append(unitPrefix) }
+            withStyle(SpanStyle(color = quality.rttGrade.networkColor())) { append(latency) }
+            withStyle(SpanStyle(color = Palette.muted)) { append(unitSuffix); append(" ± ") }
+            withStyle(SpanStyle(color = quality.deviationGrade.networkColor())) { append(deviation) }
         }, style = style)
         Text(buildAnnotatedString {
             withStyle(SpanStyle(color = Palette.muted)) { append("$lossLabel ") }
-            withStyle(SpanStyle(color = quality.packetLossGrade.packetLossColor())) { append(quality.lossText) }
-            withStyle(SpanStyle(color = Palette.muted)) { append("%") }
+            withStyle(SpanStyle(color = Palette.muted)) { append(percentPrefix) }
+            withStyle(SpanStyle(color = quality.packetLossGrade.packetLossColor())) { append(loss) }
+            withStyle(SpanStyle(color = Palette.muted)) { append(percentSuffix) }
         }, fontSize = 12.sp, style = TextStyle(fontFeatureSettings = "tnum"))
     }
 }
@@ -88,13 +96,17 @@ internal fun NetworkChart(quality: NetworkQuality, modifier: Modifier) {
     val axisFontSize = with(density) { minOf(12.sp.toPx(), 16.dp.toPx()).toSp() }
     val measurer = rememberTextMeasurer()
     val style = TextStyle(fontSize = axisFontSize, color = Palette.muted, fontFeatureSettings = "tnum")
-    val upper = measurer.measure(AnnotatedString(quality.axisText + " ms"), style, softWrap = false)
-    val middle = measurer.measure(AnnotatedString(quality.midAxisText + " ms"), style, softWrap = false)
-    val description = stringResource(R.string.network_chart) + ", " + if (quality.samples.isEmpty()) stringResource(R.string.network_unavailable)
-        else stringResource(R.string.network_chart_summary, quality.samples.size, quality.axisText)
     val resources = androidx.compose.ui.platform.LocalResources.current
+    val locale = resources.configuration.locales[0]
+    val axis = NetworkQuality.axisNumber(quality.axisMaxMs, locale)
+    val midAxis = NetworkQuality.axisNumber(quality.axisMaxMs / 2, locale)
+    val (unitPrefix, unitSuffix) = millisecondAffixes(locale)
+    val upper = measurer.measure(AnnotatedString(unitPrefix + axis + unitSuffix), style, softWrap = false)
+    val middle = measurer.measure(AnnotatedString(unitPrefix + midAxis + unitSuffix), style, softWrap = false)
+    val description = stringResource(R.string.network_chart) + ", " + if (quality.samples.isEmpty()) stringResource(R.string.network_unavailable)
+        else stringResource(R.string.network_chart_summary, quality.samples.size, axis)
     val history = quality.samples.filter { quality.nowSecond - it.second in 0..29 && it.packetLossFraction != null }.map {
-        resources.getString(R.string.network_chart_sample_loss, quality.nowSecond - it.second, NetworkQuality.number(it.packetLossPercent, 1))
+        resources.getString(R.string.network_chart_sample_loss, quality.nowSecond - it.second, NetworkQuality.number(it.packetLossPercent, 1, locale = locale))
     }
     val historyDescription = (listOf(description) + history).joinToString("; ")
     Canvas(modifier.clearAndSetSemantics { contentDescription = historyDescription }) {

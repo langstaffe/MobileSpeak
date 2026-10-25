@@ -110,11 +110,16 @@ internal object AppUpdates {
     private var manualRequest = false
     var suitable = false
     private var initialized = false
+    private var languageRefresh: kotlinx.coroutines.Job? = null
 
     fun initialize(applicationContext: Context) {
         if (initialized) return
         context = applicationContext.applicationContext
         initialized = true
+        context.registerComponentCallbacks(object : android.content.ComponentCallbacks {
+            override fun onConfigurationChanged(newConfig: android.content.res.Configuration) { refreshLanguage() }
+            @Suppress("OVERRIDE_DEPRECATION") override fun onLowMemory() = Unit
+        })
         val saved = preferences.getString("download", null)
         if (saved != null) {
             record = runCatching {
@@ -225,8 +230,8 @@ internal object AppUpdates {
                     if (file.exists() && !file.delete()) throw UpdateFailure(R.string.update_storage_failed)
                     if (!file.parentFile!!.isDirectory && !file.parentFile!!.mkdirs()) throw UpdateFailure(R.string.update_storage_failed)
                     val request = DownloadManager.Request(asset.url.toUri())
-                        .setTitle(context.localized(R.string.update_download_title, release.version.toString()))
-                        .setDescription(context.localized(R.string.update_download_notice))
+                        // DownloadManager owns progress text and cannot update an enqueued description after a language change.
+                        .setTitle("MobileSpeak v${release.version}")
                         .setMimeType("application/vnd.android.package-archive")
                         .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE)
                         .setDestinationUri(Uri.fromFile(file))
@@ -350,13 +355,22 @@ internal object AppUpdates {
     }
 
     fun refreshLanguage() {
-        val value = record ?: return
-        if (mutable.value.download != DownloadStatus.READY || preferences.getLong("notified_download", -1) != value.id) return
+        if (!initialized) return
         val manager = context.getSystemService(NotificationManager::class.java)
-        val current = manager.activeNotifications.firstOrNull { it.id == 300 }?.notification ?: return
-        if (current.extras.getCharSequence(Notification.EXTRA_TITLE)?.toString() == context.localized(R.string.update_downloaded, value.tag.removePrefix("v")) &&
-            current.extras.getCharSequence(Notification.EXTRA_TEXT)?.toString() == context.localized(R.string.update_download_notice)) return
-        postReady(value, manager)
+        if (Build.VERSION.SDK_INT >= 26) manager.getNotificationChannel("updates")?.let { channel ->
+            channel.name = context.localized(R.string.update_notifications)
+            manager.createNotificationChannel(channel)
+        }
+        languageRefresh?.cancel()
+        languageRefresh = scope.launch {
+            kotlinx.coroutines.delay(250) // Coalesce locale/configuration callbacks before posting a notification.
+            val value = record ?: return@launch
+            if (mutable.value.download != DownloadStatus.READY || preferences.getLong("notified_download", -1) != value.id) return@launch
+            val current = manager.activeNotifications.firstOrNull { it.id == 300 }?.notification ?: return@launch
+            if (current.extras.getCharSequence(Notification.EXTRA_TITLE)?.toString() == context.localized(R.string.update_downloaded, value.tag.removePrefix("v")) &&
+                current.extras.getCharSequence(Notification.EXTRA_TEXT)?.toString() == context.localized(R.string.update_download_notice)) return@launch
+            postReady(value, manager)
+        }
     }
 
     private fun postReady(value: DownloadRecord, manager: NotificationManager) {

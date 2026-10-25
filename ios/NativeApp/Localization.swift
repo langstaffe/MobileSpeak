@@ -6,6 +6,13 @@ enum AppLanguage: String, CaseIterable, Identifiable {
     case simplifiedChinese = "zh-Hans"
     case traditionalChinese = "zh-Hant"
     case english = "en"
+    case german = "de"
+    case russian = "ru"
+    case polish = "pl"
+    case spanishMexico = "es-MX"
+    case french = "fr"
+    case portugueseBrazil = "pt-BR"
+    case spanish = "es"
 
     static let preferenceKey = "mobilespeak.language"
     var id: String { rawValue }
@@ -18,7 +25,16 @@ enum AppLanguage: String, CaseIterable, Identifiable {
         guard selection == .system else { return selection }
         for tag in systemLanguageTags {
             let locale = Locale(identifier: tag)
-            if locale.languageCode == "en" { return .english }
+            switch locale.languageCode {
+            case "en": return .english
+            case "de": return .german
+            case "ru": return .russian
+            case "pl": return .polish
+            case "fr": return .french
+            case "es": return locale.regionCode == "MX" ? .spanishMexico : .spanish
+            case "pt" where locale.regionCode == "BR": return .portugueseBrazil
+            default: break
+            }
             guard locale.languageCode == "zh" else { continue }
             if locale.scriptCode == "Hans" { return .simplifiedChinese }
             if locale.scriptCode == "Hant" { return .traditionalChinese }
@@ -33,13 +49,23 @@ enum AppLanguage: String, CaseIterable, Identifiable {
     }
 
     var resolvedIdentifier: String { Self.resolve(self).rawValue }
-    var locale: Locale { Locale(identifier: resolvedIdentifier) }
+    var locale: Locale {
+        let language = Self.resolve(self)
+        return Locale(identifier: language == .spanish ? "es-ES" : language.rawValue)
+    }
     var titleKey: String {
         switch self {
         case .system: "language_system"
         case .simplifiedChinese: "language_simplified_chinese"
         case .traditionalChinese: "language_traditional_chinese"
         case .english: "language_english"
+        case .german: "language_german"
+        case .russian: "language_russian"
+        case .polish: "language_polish"
+        case .spanishMexico: "language_spanish_mexico"
+        case .french: "language_french"
+        case .portugueseBrazil: "language_portuguese_brazil"
+        case .spanish: "language_spanish"
         }
     }
 }
@@ -68,7 +94,7 @@ enum AppLanguage: String, CaseIterable, Identifiable {
         if systemLanguage != current { systemLanguage = current }
     }
 
-    var locale: Locale { Locale(identifier: (selection == .system ? systemLanguage : selection).rawValue) }
+    var locale: Locale { (selection == .system ? systemLanguage : selection).locale }
 }
 
 enum L10n {
@@ -99,6 +125,29 @@ enum L10n {
 
     static func fileDate(_ timestamp: Int64) -> String {
         Date(timeIntervalSince1970: Double(timestamp)).formatted(Date.FormatStyle(date: .numeric, time: .shortened).locale(locale))
+    }
+
+    private static var percentFormatter: NumberFormatter {
+        let formatter = NumberFormatter()
+        formatter.locale = locale
+        formatter.numberStyle = .percent
+        formatter.usesGroupingSeparator = false
+        return formatter
+    }
+
+    static func percent(_ value: Double) -> String {
+        percentFormatter.string(from: NSNumber(value: value / 100)) ?? "—"
+    }
+
+    // Keep the numeric value separately colored while retaining the locale's percent spacing.
+    static var percentPrefix: String { percentFormatter.positivePrefix }
+    static var percentSuffix: String { percentFormatter.positiveSuffix }
+    static var millisecondsUnit: String {
+        let formatter = MeasurementFormatter()
+        formatter.locale = locale
+        formatter.unitStyle = .short
+        formatter.unitOptions = .providedUnit
+        return formatter.string(from: UnitDuration.milliseconds)
     }
 
     static func withDetail(_ key: String, _ detail: String?) -> String {

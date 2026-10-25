@@ -43,6 +43,7 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -57,8 +58,6 @@ import androidx.core.content.FileProvider
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 import java.io.File
-import java.text.DateFormat
-import java.util.Date
 
 data class FileCacheState(val bytes: Long? = null, val status: String = "idle", val busy: Boolean = false, val error: String? = null, val items: Long = 0) {
     val working get() = status == "loading" || status == "clearing"
@@ -154,11 +153,11 @@ internal fun fileErrorSource(value: String): LocalizedMessage? = when (value) {
 }
 internal fun android.content.Context.fileError(value: String): String =
     fileErrorSource(value)?.render(languageContext()) ?: value
-private fun fileDate(timestamp: Long, context: android.content.Context) = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT, context.languageContext().resources.configuration.locales[0]).format(Date(timestamp * 1000))
 
 @Composable private fun DrawerPageHeader(title: String, subtitle: String, onBack: () -> Unit,
                                         onUpload: (() -> Unit)? = null, canUpload: Boolean = false) {
     val density = LocalDensity.current
+    val stacked = density.fontScale >= 1.5f
     val titleSize = minOf(17f * density.fontScale, 22f)
     val subtitleSize = minOf(12f * density.fontScale, 16f)
     val actionSize = minOf(14f * density.fontScale, 20f)
@@ -196,13 +195,15 @@ private fun fileDate(timestamp: Long, context: android.content.Context) = DateFo
             val upload = children[2].measure(loose)
             val gap = 4.dp.roundToPx()
             val side = maxOf(back.width, upload.width)
-            val titleWidth = (constraints.maxWidth - 2 * (side + gap)).coerceAtLeast(0)
+            val titleWidth = if (stacked) constraints.maxWidth else (constraints.maxWidth - 2 * (side + gap)).coerceAtLeast(0)
             val heading = children[1].measure(loose.copy(minWidth = titleWidth, maxWidth = titleWidth))
-            val height = maxOf(back.height, upload.height, heading.height)
+            val actionsHeight = maxOf(back.height, upload.height)
+            val height = if (stacked) actionsHeight + gap + heading.height else maxOf(actionsHeight, heading.height)
+            val rowHeight = if (stacked) actionsHeight else height
             layout(constraints.maxWidth, height) {
-                back.placeRelative(0, (height - back.height) / 2)
-                heading.placeRelative(side + gap, (height - heading.height) / 2)
-                upload.placeRelative(constraints.maxWidth - upload.width, (height - upload.height) / 2)
+                back.placeRelative(0, (rowHeight - back.height) / 2)
+                heading.placeRelative(if (stacked) 0 else side + gap, if (stacked) actionsHeight + gap else (height - heading.height) / 2)
+                upload.placeRelative(constraints.maxWidth - upload.width, (rowHeight - upload.height) / 2)
             }
         }
     }
@@ -244,14 +245,20 @@ private enum class DrawerPage { Home, Volumes, Files }
                 DrawerPage.Volumes -> UserVolumesDrawer(contentUi, header, active)
                 DrawerPage.Files -> ChannelFilesDrawer(contentUi, header, active)
                 DrawerPage.Home -> {
-                    // Keep the network header draggable and tools scrollable at the current drawer height.
+                    // Small drawers scroll the whole body so long network labels cannot hide the tools.
                     BoxWithConstraints(Modifier.fillMaxSize()) {
                         val density = LocalDensity.current
                         val toolsHeight = (maxHeight - with(density) { networkHeight.toDp() }).coerceAtLeast(0.dp)
-                        Column(Modifier.wrapContentHeight(align = Alignment.Top, unbounded = true)) {
-                            NetworkQualityPanel(contentUi.snapshot.networkQuality ?: NetworkQuality(), header.onSizeChanged { networkHeight = it.height })
+                        val scrollAll = toolsHeight < 96.dp
+                        val body = if (scrollAll) Modifier.height(maxHeight).verticalScroll(homeScroll).testTag("drawer-home-scroll")
+                            else Modifier.wrapContentHeight(align = Alignment.Top, unbounded = true)
+                        Column(body) {
+                            if (scrollAll) Spacer(header.fillMaxWidth().height(0.dp))
+                            NetworkQualityPanel(contentUi.snapshot.networkQuality ?: NetworkQuality(),
+                                (if (scrollAll) Modifier else header).onSizeChanged { networkHeight = it.height })
                             CompositionLocalProvider(LocalDensity provides Density(density.density, minOf(density.fontScale, 1.4f))) {
-                                Column(Modifier.height(toolsHeight).verticalScroll(homeScroll).testTag("drawer-tools-list").padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                Column((if (scrollAll) Modifier else Modifier.height(toolsHeight).verticalScroll(homeScroll))
+                                    .testTag("drawer-tools-list").padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                                     Text(stringResource(R.string.volume_tools), color = Palette.muted, fontSize = 12.sp, lineHeight = 14.sp,
                                         fontWeight = FontWeight.Normal, letterSpacing = 0.sp)
                                     Row(Modifier.fillMaxWidth()
@@ -361,7 +368,7 @@ private enum class DrawerPage { Home, Volumes, Files }
                     Text(selected.name, color = Palette.text, style = MaterialTheme.typography.titleMedium)
                     FileMetadata(R.string.files_type, selected.name.substringAfterLast('.', "").takeIf { selected.name.lastIndexOf('.') > 0 && it.isNotEmpty() }?.uppercase() ?: context.localized(R.string.files_file))
                     FileMetadata(R.string.files_size, context.localizedFileSize(selected.size))
-                    FileMetadata(R.string.files_time, fileDate(selected.timestamp, context))
+                    FileMetadata(R.string.files_time, context.localizedFileDate(selected.timestamp))
                     FileMetadata(R.string.files_location, files.path)
                     TextButton(onClick = { if (active) target?.let { ClientSession.downloadChannelFile(selected.name, it) } }, enabled = files.transfer(selected.name)?.status != "running") {
                         Icon(UiIcons.Download, null, Modifier.size(20.dp)); Text(stringResource(R.string.files_download))
@@ -398,7 +405,7 @@ private enum class DrawerPage { Home, Volumes, Files }
                                 Icon(fileIcon(entry.icon), null, Modifier.size(24.dp), tint = Palette.muted)
                                 Column(Modifier.weight(1f).padding(vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                                     ChannelFileName(entry.name)
-                                    Text("${context.localizedFileSize(entry.size)} · ${fileDate(entry.timestamp, context)}", color = Palette.muted, style = MaterialTheme.typography.bodySmall)
+                                    Text("${context.localizedFileSize(entry.size)} · ${context.localizedFileDate(entry.timestamp)}", color = Palette.muted, style = MaterialTheme.typography.bodySmall)
                                 }
                                 if (entry.directory) Icon(UiIcons.ChevronRight, null, Modifier.size(18.dp), tint = Palette.muted)
                             }
@@ -454,7 +461,7 @@ private enum class DrawerPage { Home, Volumes, Files }
         runCatching {
             val file = File(path)
             val uri = FileProvider.getUriForFile(context, "${context.packageName}.files", file)
-            val mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(file.extension.lowercase()) ?: "application/octet-stream"
+            val mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(file.extension.lowercase(java.util.Locale.ROOT)) ?: "application/octet-stream"
             val intent = if (share) Intent(Intent.ACTION_SEND).setType(mime).putExtra(Intent.EXTRA_STREAM, uri) else Intent(Intent.ACTION_VIEW).setDataAndType(uri, mime)
             intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             intent.clipData = android.content.ClipData.newRawUri("", uri)
@@ -491,6 +498,7 @@ private enum class DrawerPage { Home, Volumes, Files }
     var editing by remember(snapshot.serverId, member.volumeToken) { mutableStateOf(false) }
     LaunchedEffect(member.volumePercent, editing) { if (!editing) value = member.volumePercent.toFloat() }
     val label = stringResource(R.string.volume_accessibility, member.name)
+    val percent = localizedPercent(value.toInt(), androidx.compose.ui.platform.LocalResources.current.configuration.locales[0])
     val enabled = snapshot.status == "connected" && member.volumeToken != null
     val interactions = remember { MutableInteractionSource() }
     val focused by interactions.collectIsFocusedAsState()
@@ -503,7 +511,7 @@ private enum class DrawerPage { Home, Volumes, Files }
             }
             val description = member.accessibilityLabel(LocalContext.current)
             Text(member.name, Modifier.weight(1f).clearAndSetSemantics { contentDescription = description }, color = Palette.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text("${value.toInt()}%", color = Palette.muted, maxLines = 1)
+            Text(percent, color = Palette.muted, maxLines = 1)
         }
         Slider(value, onValueChange = { next ->
             if (active) {
@@ -529,6 +537,6 @@ private enum class DrawerPage { Home, Volumes, Files }
                     drawLine(Palette.accent.copy(alpha = if (enabled) 1f else .38f), if (rtl) right else left, end, size.height, StrokeCap.Round)
                 }
             },
-            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("user-volume-${member.id}").semantics { contentDescription = label })
+            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("user-volume-${member.id}").semantics { contentDescription = label; stateDescription = percent })
     }
 }
