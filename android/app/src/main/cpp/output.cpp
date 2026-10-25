@@ -43,6 +43,7 @@ struct Callback final : oboe::AudioStreamDataCallback, oboe::AudioStreamErrorCal
         return oboe::DataCallbackResult::Continue;
     }
     bool onError(oboe::AudioStream *, oboe::Result) override {
+        // Only the serialized owner may change the shared gate; old error callbacks can outlive a stream.
         if (!failed.exchange(true, std::memory_order_acq_rel)) {
             AttachedEnv attached(vm);
             if (attached.env) {
@@ -106,7 +107,6 @@ Java_dev_mobilespeak_mobilespeak_NativeOutput_open(JNIEnv *env, jobject, jlong c
         result = oboe::Result::ErrorInvalidFormat;
     }
     if (result == oboe::Result::OK) {
-        ts_playback_active(output->callback->pcm, true);
         result = output->stream->requestStart();
     }
     if (result != oboe::Result::OK) {
@@ -114,6 +114,14 @@ Java_dev_mobilespeak_mobilespeak_NativeOutput_open(JNIEnv *env, jobject, jlong c
         return 0;
     }
     return reinterpret_cast<jlong>(output.release());
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_dev_mobilespeak_mobilespeak_NativeOutput_setPlaybackActive(JNIEnv *, jobject, jlong core, jboolean active) {
+    if (!core) return;
+    const void *pcm = ts_playback_acquire(reinterpret_cast<void *>(core));
+    ts_playback_active(pcm, active);
+    ts_playback_release(pcm);
 }
 
 extern "C" JNIEXPORT void JNICALL

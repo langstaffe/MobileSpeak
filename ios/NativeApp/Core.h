@@ -14,5 +14,8 @@ void ts_set_notifier(void *handle, void (*callback)(size_t), size_t context);
 const void *ts_playback_acquire(void *handle);
 void ts_playback_release(const void *playback);
 void ts_playback_active(const void *playback, bool active);
+// Internal graph change: reset voice preparation, retain the current bounded local cue.
+void ts_playback_reconfigure(const void *playback);
+bool ts_sound_pending(const void *playback);
 size_t ts_render(const void *playback, float *left, float *right, size_t frames, size_t stride);
 uint64_t ts_render_count(const void *playback);

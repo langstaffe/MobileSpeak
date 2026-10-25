@@ -10,6 +10,8 @@ import android.content.BroadcastReceiver
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.media.AudioAttributes
+import android.media.AudioFocusRequest
 import android.media.AudioDeviceCallback
 import android.media.AudioDeviceInfo
 import android.media.AudioFormat
@@ -41,7 +43,14 @@ internal class AudioEngine(private val context: Context) {
     private var signalSequence = 0L // Read/changed only under signal, including the wait predicate.
     private val capture = ShortArray(FRAME_SAMPLES)
 
-    @Volatile private var connected = false
+    @Volatile private var connected = false // Output session includes preparation and terminal sound drain.
+    @Volatile private var captureConnected = false
+    @Volatile private var connectionId: String? = null
+    @Volatile private var focusGranted = false
+    private var focusRequested = false
+    private var focusRequest: AudioFocusRequest? = null
+    private var focusListener: AudioManager.OnAudioFocusChangeListener? = null
+    private var focusGeneration = 0L
     @Volatile private var deafened = false
     @Volatile private var captureRequested = false
     @Volatile private var connectionVersion = 0L
@@ -50,6 +59,7 @@ internal class AudioEngine(private val context: Context) {
     @Volatile private var outputHandle = 0L // Only the playback management thread opens/closes it.
     @Volatile private var outputChannels = 0
     @Volatile private var outputRevision = 0L
+    private var deviceInventory = emptySet<Int>()
     @Volatile private var record: AudioRecord? = null
     @Volatile private var recordVersion = -1L
     private var playbackThread: Thread? = null
@@ -99,6 +109,8 @@ internal class AudioEngine(private val context: Context) {
 
     fun start() {
         if (!running.compareAndSet(false, true)) return
+        // Registration reports devices already used by initial route selection; that is not a route change.
+        deviceInventory = manager.getDevices(AudioManager.GET_DEVICES_INPUTS or AudioManager.GET_DEVICES_OUTPUTS).mapTo(mutableSetOf()) { it.id }
         manager.registerAudioDeviceCallback(deviceCallback, routeHandler)
         manager.registerAudioRecordingCallback(recordingCallback, routeHandler)
         if (Build.VERSION.SDK_INT >= 31) {
@@ -112,24 +124,32 @@ internal class AudioEngine(private val context: Context) {
     @Synchronized
     fun update(ui: SessionUiState, allowCapture: Boolean, reapplyRoute: Boolean = false) {
         if (!running.get()) return
-        val nextConnected = ui.snapshot.status == "connected"
+        val nextConnected = shouldKeepAudioOutput(ui.snapshot.status, ui.soundPending)
+        val nextCaptureConnected = ui.snapshot.status == "connected"
+        val identityChanged = connectionId != ui.snapshot.connectionId
         val nextDeafened = ui.deafened
         val nextCaptureRequested = allowCapture && ClientSession.microphonePermission && !ui.microphoneMuted
         val connectionChanged = connected != nextConnected
-        val policyChanged = connectionChanged || deafened != nextDeafened || captureRequested != nextCaptureRequested
-        if (connectionChanged) connectionVersion++
+        val policyChanged = identityChanged || connectionChanged || captureConnected != nextCaptureConnected || deafened != nextDeafened || captureRequested != nextCaptureRequested
+        if (identityChanged) connectionVersion++
         if (policyChanged) {
             Log.i(TAG, "Audio policy connected=$nextConnected listening=${!nextDeafened} capture=$nextCaptureRequested")
         }
         val captureStopped = captureRequested && !nextCaptureRequested
-        if (connectionChanged || captureRequested != nextCaptureRequested) {
+        if (identityChanged || captureConnected != nextCaptureConnected || captureRequested != nextCaptureRequested) {
             ClientSession.setCaptureReady(false)
             captureVersion++
         }
         connected = nextConnected
+        captureConnected = nextCaptureConnected
+        connectionId = ui.snapshot.connectionId
         deafened = nextDeafened
         captureRequested = nextCaptureRequested
+        if (!shouldPlay()) ClientSession.setPlaybackActive(false)
         if (captureStopped) ClientSession.captureStopped()
+        if (connectionChanged && nextConnected) requestAudioFocus()
+        if (connectionChanged && !nextConnected) abandonAudioFocus()
+        if (nextConnected && (!focusGranted || nextDeafened)) ClientSession.audioOutputPrepared(connectionId)
         if (connectionChanged && !nextConnected) restoreNormalMode()
         if (connectionChanged && nextConnected) {
             routeSession++
@@ -144,7 +164,9 @@ internal class AudioEngine(private val context: Context) {
 
     fun stop() {
         if (!running.getAndSet(false)) return
+        ClientSession.setPlaybackActive(false)
         ClientSession.captureStopped()
+        abandonAudioFocus()
         wakeWorkers()
         record?.runCatching { stop() }
         playbackThread?.interrupt()
@@ -177,6 +199,7 @@ internal class AudioEngine(private val context: Context) {
         }
         try {
             while (running.get()) {
+                var attemptedId: String? = null
                 try {
                     // Capture before checking state so a notification during open/check cannot be lost.
                     val observedSignal = synchronized(signal) { signalSequence }
@@ -197,11 +220,21 @@ internal class AudioEngine(private val context: Context) {
                     if (outputHandle == 0L) {
                         val channels = playbackChannels()
                         val communication = communicationMode
+                        val openedId = connectionId
+                        attemptedId = openedId
                         outputHandle = ClientSession.openOutput(channels, communication, errorNotification)
                         check(outputHandle != 0L) { "Oboe output unavailable" }
                         outputChannels = channels
                         outputCommunication = communication
                         Log.i(TAG, "Oboe started usage=${if (communication) "voice-communication" else "media"} channels=$channels sampleRate=$SAMPLE_RATE")
+                    }
+                    synchronized(this) {
+                        // Re-enable even when a fast interruption ended before this manager observed the pause.
+                        if (seenConnection == connectionVersion && seenRevision == outputRevision &&
+                            outputChannels == playbackChannels() && outputCommunication == communicationMode && shouldPlay()) {
+                            ClientSession.setPlaybackActive(true)
+                            ClientSession.audioOutputPrepared(connectionId)
+                        } else wakeWorkers()
                     }
                     outputDeviceId = NativeOutput.deviceId(outputHandle)
                     if (Build.VERSION.SDK_INT < 31) confirmLegacyStreams()
@@ -212,6 +245,7 @@ internal class AudioEngine(private val context: Context) {
                 } catch (error: Throwable) {
                     closeOutput()
                     if (running.get() && connected) {
+                        ClientSession.audioOutputPrepared(attemptedId)
                         Log.e(TAG, "Audio playback failed", error)
                         ClientSession.reportError(LocalizedMessage(R.string.error_audio_playback))
                         awaitRetry()
@@ -396,8 +430,54 @@ internal class AudioEngine(private val context: Context) {
         captureOffset = 0
     }
 
-    private fun shouldPlay() = shouldPlayAudio(connected, deafened)
-    private fun shouldCapture() = shouldCaptureAudio(connected, captureRequested)
+    @Suppress("DEPRECATION")
+    private fun requestAudioFocus() {
+        if (focusRequested) return
+        focusRequested = true
+        val generation = ++focusGeneration
+        val listener = AudioManager.OnAudioFocusChangeListener { change ->
+            synchronized(this) {
+                if (!running.get() || !focusRequested || generation != focusGeneration) return@synchronized
+                focusGranted = change == AudioManager.AUDIOFOCUS_GAIN
+                if (!focusGranted) {
+                    ClientSession.setPlaybackActive(false)
+                    ClientSession.setCaptureReady(false)
+                    captureVersion++
+                    ClientSession.captureStopped()
+                }
+                wakeWorkers()
+            }
+        }
+        focusListener = listener
+        val result = if (Build.VERSION.SDK_INT >= 26) {
+            val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+                .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
+                .setWillPauseWhenDucked(true)
+                .setAcceptsDelayedFocusGain(false)
+                .setOnAudioFocusChangeListener(listener, routeHandler)
+                .build()
+            focusRequest = request
+            manager.requestAudioFocus(request)
+        } else manager.requestAudioFocus(listener, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN)
+        focusGranted = result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+    }
+
+    @Suppress("DEPRECATION")
+    @Synchronized
+    private fun abandonAudioFocus() {
+        focusGranted = false
+        if (!focusRequested) return
+        focusRequested = false
+        focusGeneration++
+        if (Build.VERSION.SDK_INT >= 26) focusRequest?.let(manager::abandonAudioFocusRequest)
+        else focusListener?.let(manager::abandonAudioFocus)
+        focusRequest = null
+        focusListener = null
+    }
+
+    private fun shouldPlay() = shouldPlayAudio(connected, deafened) && focusGranted
+    private fun shouldCapture() = shouldCaptureAudio(captureConnected, captureRequested) && focusGranted
 
     @Throws(InterruptedException::class)
     private fun await(condition: () -> Boolean) {
@@ -416,7 +496,11 @@ internal class AudioEngine(private val context: Context) {
 
     @Synchronized
     private fun routeChanged(change: String, devices: Array<out AudioDeviceInfo>) {
-        if (!running.get() || !connected) return
+        if (!running.get()) return
+        val inventory = manager.getDevices(AudioManager.GET_DEVICES_INPUTS or AudioManager.GET_DEVICES_OUTPUTS).mapTo(mutableSetOf()) { it.id }
+        if (inventory == deviceInventory) return
+        deviceInventory = inventory
+        if (!connected) return
         Log.i(TAG, "Audio devices $change types=${devices.joinToString { deviceTypeName(it.type) }}")
         // Re-read current devices; a queued removal from the previous session is not a route instruction.
         applyCommunicationRoute("devices $change")
@@ -833,3 +917,7 @@ private fun deviceTypeName(type: Int?) = when (type) {
 internal fun shouldPlayAudio(connected: Boolean, deafened: Boolean) = connected && !deafened
 
 internal fun shouldCaptureAudio(connected: Boolean, captureRequested: Boolean) = connected && captureRequested
+
+// Preparation and terminal playback use the same output and route as the call; capture stays connected-only.
+internal fun shouldKeepAudioOutput(status: String, soundPending: Boolean) =
+    status in setOf("connecting", "connected", "reconnecting") || soundPending

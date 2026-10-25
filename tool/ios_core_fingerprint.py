@@ -19,7 +19,7 @@ def digest(path):
 def fingerprint(root=ROOT):
     files = set()
     for pattern in ('native/src/**/*', 'native/patched/**/*', 'native/.cargo/**/*',
-                    '.cargo/**/*', 'native/models/**/*', 'native/Cargo.*',
+                    '.cargo/**/*', 'native/models/**/*', 'native/assets/**/*', 'native/Cargo.*',
                     # Keep the tool inputs aligned with build_ios_core.sh and its helpers.
                     'tool/ios_core_fingerprint.py', 'tool/build_ios_core.sh',
                     'tool/prepare_audio_runtime.py', 'tool/build_sherpa_fft.py',

@@ -45,6 +45,8 @@ internal object ClientSession {
     private var fileCacheClearRequest: Long? = null
     private var activeBookmarkId: String? = null
     private val connectionGate = ConnectionGate()
+    private var pendingConnect: JSONObject? = null
+    private var tailPollScheduled = false
     private val serviceHandler = android.os.Handler(android.os.Looper.getMainLooper())
     private val bookmarks by lazy { BookmarkTransactions(store::bookmarks, store::saveBookmarks) { next ->
         mutableState.update { it.copy(bookmarks = next) }
@@ -187,12 +189,13 @@ internal object ClientSession {
             .put("address", bookmark.address)
             .put("password", bookmark.password)
             .put("identity", identity ?: JSONObject.NULL)
-        if (!send(command)) return@execute
+        pendingConnect = command
         activeBookmarkId = bookmark.id
         connectionGate.begin(connectionId)
         mutableState.update {
             it.copy(
                 snapshot = Snapshot(status = "connecting", connectionId = connectionId),
+                soundPending = false,
                 microphoneMuted = it.microphoneMuted || !microphonePermission,
                 error = null, errorSource = null,
             )
@@ -200,13 +203,29 @@ internal object ClientSession {
         updateService()
     }
 
+    // Output preparation runs without microphone authorization. Old HAL callbacks cannot submit a new request.
+    fun audioOutputPrepared(connectionId: String?) = coreExecutor.execute {
+        if (!connectionGate.accepts(connectionId) || state.value.snapshot.status != "connecting") return@execute
+        val command = pendingConnect ?: return@execute
+        pendingConnect = null
+        if (!send(command)) {
+            connectionGate.cancel()
+            mutableState.update { it.copy(snapshot = Snapshot(connectionId = connectionGate.id)) }
+            updateService()
+        }
+    }
+
     fun disconnect() = coreExecutor.execute(::disconnectCore)
 
     private fun disconnectCore() {
-        if (!send(JSONObject().put("type", "disconnect"))) { updateService(); return }
+        val submitted = pendingConnect == null
+        pendingConnect = null
+        if (submitted && !send(JSONObject().put("type", "disconnect"))) { updateService(); return }
         connectionGate.cancel()
         activeBookmarkId = null
-        mutableState.update { it.copy(snapshot = Snapshot(connectionId = connectionGate.id), messages = emptyList(), unread = Unread()) }
+        mutableState.update { it.copy(snapshot = Snapshot(connectionId = connectionGate.id),
+            soundPending = submitted && (it.snapshot.status == "connected" || it.soundPending),
+            messages = emptyList(), unread = Unread()) }
         updateService()
     }
 
@@ -224,6 +243,7 @@ internal object ClientSession {
     }
 
     fun setAudio(inputMuted: Boolean? = null, deafened: Boolean? = null) {
+        if (deafened == true) setPlaybackActive(false)
         if (inputMuted == true || deafened == true) cancelPushToTalk()
         coreExecutor.execute { setAudioCore(inputMuted, deafened) }
     }
@@ -237,6 +257,10 @@ internal object ClientSession {
             return
         }
         mutableState.update { it.copy(microphoneMuted = nextInput, deafened = nextOutput) }
+        // A rapid off/on can be conflated by StateFlow; still reapply the final output gate.
+        if (inputMuted != null || deafened != null) {
+            voiceService?.let { service -> serviceHandler.post { service.startCall() } }
+        }
         if (old.snapshot.canApplyAudioState()) {
             send(JSONObject().put("type", "mute").put("input", nextInput || nextOutput).put("output", nextOutput))
         }
@@ -508,6 +532,7 @@ internal object ClientSession {
         mutableState.update { latest ->
             latest.copy(
                 snapshot = nextSnapshot,
+                soundPending = envelope.optBoolean("soundPending", false),
                 receiveAgc = envelope.optJSONObject("receiveAudio")?.optBoolean("agc", true) ?: latest.receiveAgc,
                 userVolumesOpen = latest.userVolumesOpen && nextSnapshot.status == "connected",
                 channelFiles = envelope.optJSONObject("channelFiles")?.channelFiles() ?: latest.channelFiles,
@@ -525,6 +550,13 @@ internal object ClientSession {
             }
         }
         updateService()
+        // Poll only while a terminal clip drains; no extra service or background lifetime.
+        if (nextSnapshot.status == "disconnected" && state.value.soundPending && !tailPollScheduled) {
+            tailPollScheduled = true
+            serviceHandler.postDelayed({
+                coreExecutor.execute { tailPollScheduled = false; pollCore() }
+            }, 20)
+        }
     }
 
     fun fileLocalError(message: String?) { mutableState.update { it.copy(channelFilesLocalError = message, channelFilesLocalErrorSource = null) } }
@@ -616,7 +648,8 @@ internal object ClientSession {
     }
     fun openOutput(channels: Int, communication: Boolean, notification: Runnable): Long =
         NativeOutput.open(handle, channels, communication, notification)
-    fun shouldRunService() = state.value.snapshot.status in setOf("connected", "connecting", "reconnecting")
+    fun setPlaybackActive(active: Boolean) { if (initialized) NativeOutput.setPlaybackActive(handle, active) }
+    fun shouldRunService() = shouldKeepAudioOutput(state.value.snapshot.status, state.value.soundPending)
 
     // Intent/request bookkeeping is separate from the actual, instance-scoped lifecycle.
     private var serviceRequested = false

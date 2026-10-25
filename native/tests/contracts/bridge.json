@@ -44,6 +44,7 @@
       "networkQuality": null,
       "status": "connecting"
     },
+    "soundPending": false,
     "speech": {
       "available": false,
       "mode": "push_to_talk",
@@ -109,6 +110,7 @@
       "networkQuality": null,
       "status": "connected"
     },
+    "soundPending": false,
     "speech": {
       "available": true,
       "mode": "push_to_talk",
@@ -157,6 +159,7 @@
       "networkQuality": null,
       "status": "reconnecting"
     },
+    "soundPending": false,
     "speech": {
       "available": false,
       "mode": "push_to_talk",
@@ -211,6 +214,7 @@
       "networkQuality": null,
       "status": "disconnected"
     },
+    "soundPending": true,
     "speech": {
       "available": false,
       "mode": "push_to_talk",

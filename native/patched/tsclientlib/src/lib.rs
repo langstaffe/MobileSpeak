@@ -1635,7 +1635,17 @@ impl ConnectedConnection {
 			}
 		}
 
-		if !handled {
+		// Bookkeeping retains the reason code but drops the server's reason text.
+		// Reuse the already parsed standard message for our own kick explanation.
+		let own_kick = match &msg {
+			InMessage::ClientMoved(parts) => parts.iter().any(|part|
+				part.client_id == book.own_client && part.reason == Reason::KickChannel),
+			InMessage::ClientLeftView(parts) => parts.iter().any(|part|
+				part.client_id == book.own_client && matches!(part.reason,
+					Some(Reason::KickServer | Reason::KickServerBan | Reason::KickChannel))),
+			_ => false,
+		};
+		if !handled || own_kick {
 			stream_items.push_back(Ok(StreamItem::MessageEvent(msg)));
 		}
 		None

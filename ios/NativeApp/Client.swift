@@ -436,6 +436,7 @@ private func coreChanged(_ context: Int) {
     }
     private var acceptingConnection = false
     private var connectionId: String?
+    private var outputConnectionId: String?
     private var audioInterrupted = false
     private var intent = 0
     var connected: Bool { state.status == "connected" }
@@ -697,7 +698,6 @@ private func coreChanged(_ context: Int) {
                 if updated != channelFiles { channelFiles = updated }
             }
             let wasConnected = connected
-            let wasInSession = connected || reconnecting
             #if DEBUG
             if next.status != state.status || next.networkQuality != state.networkQuality {
                 let wallMs = Int64(Date().timeIntervalSince1970 * 1000)
@@ -719,29 +719,16 @@ private func coreChanged(_ context: Int) {
             if connected, let serverName = state.server { updateAutomaticBookmarkTitle(serverName) }
             if connected && !wasConnected {
                 let currentIntent = intent
-                let started = connectionStarted
                 Task {
                     guard connected && currentIntent == intent && !audioInterrupted else { return }
-                    do {
-                        try await audio.start()
-                        guard connected && currentIntent == intent && !audioInterrupted else { return }
-                        if let started {
-                            connectionLogger.info("Connection startup phase=audio_ready total_ms=\(Int((ProcessInfo.processInfo.systemUptime - started) * 1000))")
-                        }
-                        audio.setListening(!deafened)
-                        await setAudio()
-                    } catch {
-                        guard connected && currentIntent == intent && !audioInterrupted,
-                              !(error is CancellationError) else { return }
-                        self.error = localizedDetail("error_audio_start", error: error, for: .error)
-                        try? send(["type": "mute", "input": true, "output": deafened])
-                    }
+                    audio.setListening(!deafened)
+                    await setAudio()
                 }
                 connectionStarted = nil
-            } else if !connected && !reconnecting && wasInSession {
+            } else if state.status == "disconnected", let outputConnectionId, outputConnectionId == next.connectionId {
+                self.outputConnectionId = nil
                 intent += 1; audioBusy = false
-                audioInterrupted = false
-                audio.stop()
+                audio.finishSounds()
             }
         } catch { self.error = localizedDetail("error_generic", error: error, for: .error) }
     }
@@ -761,28 +748,55 @@ private func coreChanged(_ context: Int) {
             error = nil
             audioInterrupted = false
             let requestId = UUID().uuidString
-            try send(["type": "connect", "connectionId": requestId, "address": address, "password": password,
-                      "identity": try identity.map { try JSONSerialization.jsonObject(with: $0) } ?? NSNull()])
+            let command: [String: Any] = ["type": "connect", "connectionId": requestId, "address": address, "password": password,
+                                        "identity": try identity.map { try JSONSerialization.jsonObject(with: $0) } ?? NSNull()]
             connectionId = requestId
+            outputConnectionId = requestId
             activeBookmark = nil
             connectionStarted = started
-            connectionLogger.info("Connection startup phase=command_submitted total_ms=\(Int((ProcessInfo.processInfo.systemUptime - started) * 1000))")
+            connectionLogger.info("Connection startup phase=request_accepted total_ms=\(Int((ProcessInfo.processInfo.systemUptime - started) * 1000))")
             state.connectionId = requestId
             state.status = "connecting"
             acceptingConnection = true; intent += 1
+            let currentIntent = intent
+            Task {
+                guard acceptingConnection, connectionId == requestId, currentIntent == intent else { return }
+                do {
+                    try await audio.prepareConnection(listening: !deafened)
+                    connectionLogger.info("Connection startup phase=audio_ready total_ms=\(Int((ProcessInfo.processInfo.systemUptime - started) * 1000))")
+                }
+                catch {
+                    guard acceptingConnection, connectionId == requestId, currentIntent == intent else { return }
+                    if !audioInterrupted {
+                        if error is CancellationError { try? await audio.ensureRunning() }
+                        else { self.error = localizedDetail("error_audio_start", error: error, for: .error) }
+                    }
+                }
+                guard acceptingConnection, connectionId == requestId, currentIntent == intent else { return }
+                do {
+                    try send(command)
+                    connectionLogger.info("Connection startup phase=command_submitted total_ms=\(Int((ProcessInfo.processInfo.systemUptime - started) * 1000))")
+                }
+                catch {
+                    self.error = localized(error, for: .error)
+                    acceptingConnection = false; outputConnectionId = nil
+                    state = Snapshot(); audio.stop()
+                }
+            }
             UserDefaults.standard.set(address, forKey: "mobilespeak.server.address")
             return true
         } catch { self.error = localized(error, for: .error); return false }
     }
     func disconnect() {
         endPushToTalk()
+        let established = connected || reconnecting
         do { try send(["type": "disconnect"]) } catch { self.error = localized(error, for: .error); return }
         connectionStarted = nil
         activeBookmark = nil
         acceptingConnection = false; intent += 1
         audioBusy = false
-        audioInterrupted = false
-        audio.stop()
+        if established { audio.stopCapture() }
+        else { outputConnectionId = nil; audio.stop() }
         state = Snapshot()
         messages = []
         unread = UnreadSnapshot()
@@ -859,9 +873,11 @@ private func coreChanged(_ context: Int) {
     func setAudio(input: Bool? = nil, output: Bool? = nil) async {
         guard !audioBusy else { return }
         let next = Self.resolveAudioState(microphoneMuted: microphoneMuted, deafened: deafened, input: input, output: output)
+        if next.deafened { audio.setListening(false) }
         if next.inputMuted { endPushToTalk(); try? send(["type": "set_capture_ready", "ready": false]) }
         guard connected else {
             microphoneMuted = next.microphoneMuted; deafened = next.deafened
+            audio.setListening(!next.deafened)
             return
         }
         audioBusy = true
@@ -900,6 +916,7 @@ private func coreChanged(_ context: Int) {
             guard connected && currentIntent == intent && !audioInterrupted,
                   !(error is CancellationError) else { return }
             let failure = error
+            audio.setListening(!deafened)
             do {
                 if muted || speech.mode == .pushToTalk { audio.stopCapture() } else { try await audio.startCapture() }
             } catch {
@@ -961,42 +978,46 @@ private func coreChanged(_ context: Int) {
     }
     func audioInterruptionBegan() {
         endPushToTalk()
-        guard connected || reconnecting else { return }
         audioInterrupted = true
-        audio.pauseForInterruption()
+        if connected || busy { audio.pauseForInterruption() }
+        else { audio.stop() }
         if connected { try? send(["type": "mute", "input": true, "output": deafened]) }
     }
     func audioInterruptionEnded(shouldResume: Bool) {
-        guard connected || reconnecting else { return }
+        guard connected || busy else { return }
         guard shouldResume else { return }
         audioInterrupted = false
         recoverAudio()
     }
     func audioDidBecomeActive() {
         microphonePermission = AVAudioSession.sharedInstance().recordPermission
-        guard connected || reconnecting else { return }
+        guard connected || busy else { return }
         audioInterrupted = false
-        if connected { recoverAudio() }
-    }
-    func audioRouteChanged() {
-        guard connected || reconnecting else { return }
         recoverAudio()
     }
-    func audioConfigurationChanged() {
-        guard connected || reconnecting else { return }
+    func audioRouteChanged() {
+        guard connected || busy else { return }
+        recoverAudio()
+    }
+    func audioConfigurationChanged(_ source: AVAudioEngine) async {
+        guard connected || busy else { return }
+        let currentIntent = intent
+        guard await audio.isCurrentEngine(source), currentIntent == intent,
+              connected || busy else { return }
         recoverAudio()
     }
     private func recoverAudio() {
-        guard connected && !audioInterrupted else { return }
+        guard (connected || busy) && !audioInterrupted else { return }
         endPushToTalk()
         let currentIntent = intent
         audio.stopCapture()
         Task {
-            guard connected && currentIntent == intent && !audioInterrupted else { return }
+            guard (connected || busy) && currentIntent == intent && !audioInterrupted else { return }
             do {
                 try await audio.ensureRunning()
-                guard connected && currentIntent == intent && !audioInterrupted else { return }
+                guard (connected || busy) && currentIntent == intent && !audioInterrupted else { return }
                 audio.setListening(!deafened)
+                guard connected else { return }
                 if !muted && (speech.mode == .automatic || microphonePermission == .granted) {
                     let allowed = speech.mode == .automatic ? await audio.permission() : microphonePermission == .granted
                     microphonePermission = AVAudioSession.sharedInstance().recordPermission
@@ -1007,11 +1028,11 @@ private func coreChanged(_ context: Int) {
                 guard connected && currentIntent == intent && !audioInterrupted else { return }
                 try send(["type": "mute", "input": muted, "output": deafened])
             } catch {
-                guard connected && currentIntent == intent && !audioInterrupted,
+                guard (connected || busy) && currentIntent == intent && !audioInterrupted,
                       !(error is CancellationError) else { return }
                 audio.stopCapture()
                 self.error = localizedDetail("error_audio_recovery", error: error, for: .error)
-                try? send(["type": "mute", "input": true, "output": deafened])
+                if connected { try? send(["type": "mute", "input": true, "output": deafened]) }
             }
         }
     }

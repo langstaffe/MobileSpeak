@@ -8,6 +8,18 @@ import org.junit.Test
 
 class AudioLifecycleTest {
     @Test
+    fun outputPreparesBeforeHandshakeAndKeepsTerminalTailWithoutKeepingCapture() {
+        for (status in listOf("connecting", "connected", "reconnecting")) {
+            assertTrue(shouldKeepAudioOutput(status, false))
+        }
+        assertTrue(shouldKeepAudioOutput("disconnected", true))
+        assertFalse(shouldKeepAudioOutput("disconnected", false))
+        assertFalse(shouldCaptureAudio(connected = false, captureRequested = true))
+        assertTrue(shouldPlayAudio(connected = shouldKeepAudioOutput("disconnected", true), deafened = false))
+        assertFalse(shouldPlayAudio(connected = shouldKeepAudioOutput("disconnected", true), deafened = true))
+    }
+
+    @Test
     fun phoneAndWiredRoutesUseMediaWhileBluetoothCommunicationKeepsItsMode() {
         for ((type, expected) in listOf(
             AudioDeviceInfo.TYPE_BUILTIN_SPEAKER to false,

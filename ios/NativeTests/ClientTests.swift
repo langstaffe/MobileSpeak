@@ -2876,6 +2876,7 @@ final class BridgeContractTests: XCTestCase {
         let samples = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [[String: Any]])
         XCTAssertEqual(samples.count, 5)
         for (index, envelope) in samples.enumerated() {
+            XCTAssertEqual(envelope["soundPending"] as? Bool ?? false, index == 4)
             let snapshot = try XCTUnwrap(envelope["snapshot"] as? [String: Any])
             let decoded = try JSONDecoder().decode(Snapshot.self, from: JSONSerialization.data(withJSONObject: snapshot))
             XCTAssertEqual(decoded.status, ["disconnected", "connecting", "connected", "reconnecting", "disconnected"][index])
@@ -2910,6 +2911,139 @@ final class BridgeContractTests: XCTestCase {
                 }
             }
         }
+    }
+}
+
+final class SoundAudioLifecycleTests: XCTestCase {
+    @MainActor func testConfigurationRestartDoesNotEraseFreshSound() async throws {
+        let handle = try XCTUnwrap(ts_create())
+        defer { ts_destroy(handle) }
+        let playback = try XCTUnwrap(ts_playback_acquire(handle))
+        defer { ts_playback_release(playback) }
+        let audio = PhoneAudio(handle: handle)
+        defer { audio.stop() }
+        try await audio.prepareConnection(listening: true)
+        // Simulate a graph-only configuration stop, without a system interruption.
+        try await audio.perform {
+            let engine = try XCTUnwrap(Mirror(reflecting: audio).children.first { $0.label == "engine" }?.value as? AVAudioEngine)
+            engine.pause()
+        }
+        let command = #"{"type":"connect","connectionId":"configuration-sound","address":"127.0.0.1:1","identity":{}}"#
+        XCTAssertEqual(command.withCString { ts_command(handle, $0) }, 0)
+        let deadline = ProcessInfo.processInfo.systemUptime + 2
+        var failed = false
+        while !failed && ProcessInfo.processInfo.systemUptime < deadline {
+            let pointer = try XCTUnwrap(ts_poll(handle))
+            let envelope = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(String(cString: pointer).utf8)) as? [String: Any])
+            ts_free(pointer)
+            failed = (envelope["events"] as? [[String: Any]] ?? []).contains { $0["type"] as? String == "error" && $0["connectionId"] as? String == "configuration-sound" }
+            if !failed { try await Task.sleep(nanoseconds: 1_000_000) }
+        }
+        XCTAssertTrue(failed)
+        XCTAssertTrue(ts_sound_pending(playback))
+        try await audio.ensureRunning()
+        XCTAssertTrue(ts_sound_pending(playback), "A graph restart must not erase a fresh cue before its first output callback")
+        audio.pauseForInterruption()
+        XCTAssertFalse(ts_sound_pending(playback), "A real interruption must still discard the cue")
+        audio.stop()
+        _ = await audio.isRunning
+    }
+
+    @MainActor func testInterruptionRecoveryPreparesOutputDuringConnectingAndReconnecting() async throws {
+        let client = Client.shared
+        guard !client.connected, !client.busy else { throw XCTSkip("Requires an offline test profile") }
+        let previous = client.state, previousError = client.error
+        ts_set_notifier(client.handle, nil, 0)
+        defer {
+            client.state = previous; client.error = previousError; client.audio.stop()
+            ts_set_notifier(client.handle, { context in
+                DispatchQueue.main.async {
+                    Unmanaged<Client>.fromOpaque(UnsafeRawPointer(bitPattern: context)!).takeUnretainedValue().receive()
+                }
+            }, Int(bitPattern: Unmanaged.passUnretained(client).toOpaque()))
+        }
+        for status in ["connecting", "reconnecting"] {
+            for foregroundRecovery in [false, true] {
+                client.audio.stop()
+                _ = await client.audio.isRunning
+                client.state = Snapshot(status: status)
+                client.audioInterruptionBegan()
+                client.audioInterruptionEnded(shouldResume: !foregroundRecovery)
+                if foregroundRecovery { client.audioDidBecomeActive() }
+                let deadline = ProcessInfo.processInfo.systemUptime + 3
+                var running = false
+                while !running && ProcessInfo.processInfo.systemUptime < deadline {
+                    try await Task.sleep(nanoseconds: 20_000_000)
+                    running = await client.audio.isRunning
+                }
+                XCTAssertTrue(running, "Output must be ready before the restored channel event")
+                let capturing = await client.audio.isCapturing
+                XCTAssertFalse(capturing)
+            }
+        }
+        client.state = previous
+        client.audio.stop()
+        _ = await client.audio.isRunning
+    }
+
+    @MainActor func testConnectionFailureSoundDrainsWithoutMicrophoneCapture() async throws {
+        let handle = try XCTUnwrap(ts_create())
+        defer { ts_destroy(handle) }
+        let playback = try XCTUnwrap(ts_playback_acquire(handle))
+        defer { ts_playback_release(playback) }
+        let audio = PhoneAudio(handle: handle)
+        defer { audio.stop() }
+        let permission = AVAudioSession.sharedInstance().recordPermission
+        try await audio.prepareConnection(listening: true)
+        let capturing = await audio.isCapturing
+        XCTAssertFalse(capturing)
+        XCTAssertEqual(AVAudioSession.sharedInstance().recordPermission, permission)
+        // Invalid identity fails before any network operation, through the real connection path.
+        let command = #"{"type":"connect","connectionId":"sound-failure","address":"127.0.0.1:1","identity":{}}"#
+        XCTAssertEqual(command.withCString { ts_command(handle, $0) }, 0)
+        let deadline = ProcessInfo.processInfo.systemUptime + 2
+        var failed = false
+        while !failed && ProcessInfo.processInfo.systemUptime < deadline {
+            let pointer = try XCTUnwrap(ts_poll(handle))
+            let envelope = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(String(cString: pointer).utf8)) as? [String: Any])
+            ts_free(pointer)
+            failed = (envelope["events"] as? [[String: Any]] ?? []).contains { $0["type"] as? String == "error" && $0["connectionId"] as? String == "sound-failure" }
+            if !failed { try await Task.sleep(nanoseconds: 10_000_000) }
+        }
+        XCTAssertTrue(failed)
+        XCTAssertTrue(ts_sound_pending(playback))
+        audio.finishSounds()
+        let runningDuringTail = await audio.isRunning
+        XCTAssertTrue(runningDuringTail, "A terminal snapshot must retain the output for the alert tail")
+        var running = true
+        while running && ProcessInfo.processInfo.systemUptime < deadline + 1 {
+            try await Task.sleep(nanoseconds: 20_000_000)
+            running = await audio.isRunning
+        }
+        XCTAssertFalse(running)
+        XCTAssertFalse(ts_sound_pending(playback))
+        XCTAssertGreaterThan(audio.frameCounts.rendered, 0)
+        XCTAssertEqual(audio.frameCounts.captured, 0)
+        audio.stop()
+        _ = await audio.isRunning
+    }
+
+    @MainActor func testOldSoundDrainCannotStopANewConnectionOutput() async throws {
+        let handle = try XCTUnwrap(ts_create())
+        defer { ts_destroy(handle) }
+        let audio = PhoneAudio(handle: handle)
+        defer { audio.stop() }
+        try await audio.prepareConnection(listening: true)
+        audio.finishSounds()
+        _ = await audio.isRunning // Let the old drain schedule its hardware tail cleanup.
+        try await audio.prepareConnection(listening: true)
+        try await Task.sleep(nanoseconds: 700_000_000)
+        let running = await audio.isRunning
+        XCTAssertTrue(running)
+        let capturing = await audio.isCapturing
+        XCTAssertFalse(capturing)
+        audio.stop()
+        _ = await audio.isRunning
     }
 }
 

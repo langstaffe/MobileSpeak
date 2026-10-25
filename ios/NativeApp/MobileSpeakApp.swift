@@ -475,8 +475,10 @@ private extension View {
                         client.audioDidBecomeActive()
                     }
                 }
-                .onReceive(NotificationCenter.default.publisher(for: .AVAudioEngineConfigurationChange).receive(on: RunLoop.main)) { _ in
-                    client.audioConfigurationChanged()
+                .onReceive(NotificationCenter.default.publisher(for: .AVAudioEngineConfigurationChange).receive(on: RunLoop.main)) { note in
+                    if let source = note.object as? AVAudioEngine {
+                        Task { await client.audioConfigurationChanged(source) }
+                    }
                 }
                 .onReceive(NotificationCenter.default.publisher(for: AVAudioSession.interruptionNotification).receive(on: RunLoop.main)) { note in
                     guard let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,

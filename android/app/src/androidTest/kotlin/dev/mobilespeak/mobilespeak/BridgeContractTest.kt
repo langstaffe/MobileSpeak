@@ -15,6 +15,8 @@ class BridgeContractTest {
         for (i in 0 until samples.length()) {
             val envelope = samples.getJSONObject(i)
             val snapshot = envelope.getJSONObject("snapshot")
+            assertEquals(i == 4, envelope.optBoolean("soundPending", false))
+            if (i == 0) assertFalse(envelope.has("soundPending"))
             envelope.optJSONObject("speech")?.let {
                 val speech = it.speech()
                 assertEquals(it.getString("mode"), speech.mode)

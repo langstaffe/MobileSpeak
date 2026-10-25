@@ -16,5 +16,9 @@ Online renames still use the existing standard client_update setter and MessageR
 The core restores its saved reconnect intent after server name events; server/admin names
 remain visible without overwriting the profile or triggering repeated online renames.
 
+Own channel/server kick messages also pass through the existing typed MessageEvent after
+BookEvents, preserving the standard server reason text for the error UI. BookEvents remains
+the only source of sound classification; this forwarding adds no protocol commands.
+
 Cargo paths point to the fixed git revision. Upstream device/network test harness and dev
 dependencies are omitted; cancellation regressions live in src/lib.rs and core media tests.

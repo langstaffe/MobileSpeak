@@ -28,6 +28,8 @@ mod tsclientlib_audio;
 use tsclientlib_audio::AudioHandler;
 mod voice;
 mod speech;
+mod sounds;
+mod sound_events;
 
 use badges::{known_badges, BadgeMetadata};
 use futures::{FutureExt, StreamExt};
@@ -446,7 +448,7 @@ impl UnreadState {
             self.channel_count = 0;
         }
     }
-    fn record(&mut self, message: &ChatMessage) {
+    fn should_notify(&self, message: &ChatMessage) -> bool {
         if self.server.is_none()
             || message.own
             || message.status != ChatStatus::Received
@@ -456,8 +458,15 @@ impl UnreadState {
                     .as_ref()
                     .is_some_and(|(conversation, _)| conversation == &message.conversation))
         {
-            return;
+            return false;
         }
+        match message.kind {
+            ChatKind::Channel => self.channel.as_deref() == Some(message.conversation.as_str()),
+            ChatKind::Private => message.conversation == format!("client:{}", message.target_id),
+        }
+    }
+    fn record(&mut self, message: &ChatMessage) {
+        if !self.should_notify(message) { return; }
         match message.kind {
             ChatKind::Channel if self.channel.as_deref() == Some(message.conversation.as_str()) => {
                 self.channel_count = self.channel_count.saturating_add(1);
@@ -1214,7 +1223,7 @@ fn rejected_message(
         error: Some(error),
     }
 }
-fn received_messages(events: Vec<Event>, con: &Connection) -> Vec<ChatMessage> {
+fn received_messages(events: impl IntoIterator<Item = Event>, con: &Connection) -> Vec<ChatMessage> {
     let Ok(state) = con.get_state() else {
         return Vec::new();
     };
@@ -1376,6 +1385,7 @@ async fn session(
     files: &mut channel_files::Files,
     files_tx: &mpsc::UnboundedSender<channel_files::Update>,
     files_rx: &mut mpsc::UnboundedReceiver<channel_files::Update>,
+    sound_events: &mut sound_events::Session,
 ) -> Result<bool, Box<dyn std::error::Error>> {
     let Command::Connect {
         connection_id,
@@ -1387,6 +1397,7 @@ async fn session(
         return Ok(false);
     };
     let connection_started = Instant::now();
+    playback.stop_sound();
     diagnostic!("Connection startup phase=worker_begin");
     {
         let mut output = out.lock().unwrap();
@@ -1532,7 +1543,7 @@ async fn session(
                     audio.reset(); receive_traces.clear(); playback.clear();
                     snapshot(&con, out, &audio, voice.speaking(), storage.as_deref(), &receive);
                 }
-                if subscribed && !output_muted && playback.active.load(Ordering::Acquire) {
+                if subscribed && !output_muted && playback.is_active() {
                     let started = Instant::now();
                     max_refill_gap_ms = max_refill_gap_ms.max(started.duration_since(last_refill).as_millis());
                     last_refill = started;
@@ -1570,6 +1581,12 @@ async fn session(
                     for event in &events {
                         if let Event::PropertyRemoved { id: tsclientlib::events::PropertyId::Client(id), .. } = event {
                             receive.remove(*id); audio.get_mut_queues().remove(id);
+                        }
+                        if let Event::PropertyRemoved { id: tsclientlib::events::PropertyId::Client(id), extra, .. } = event {
+                            if con.get_state().is_ok_and(|state| *id == state.own_client)
+                                && !matches!(extra.reason, Some(tsclientlib::Reason::KickServer | tsclientlib::Reason::KickServerBan | tsclientlib::Reason::KickChannel)) {
+                                report(out, format!("Connection closed: {:?}", extra.reason));
+                            }
                         }
                     }
                     receive.sync(&con, receive_prefs, &mut audio);
@@ -1614,12 +1631,19 @@ async fn session(
                         chats.select(storage.clone(), current_server.clone());
                     }
                     unread.sync(current_server.clone(), current_channel_conversation(&con));
-                    let received = received_messages(events, &con);
-                    if !received.is_empty() {
-                        for message in &received { unread.record(message); }
-                        chats.add(received);
-
+                    let cues = if let Ok(state) = con.get_state() {
+                        sound_events.book(&events, state.own_client, |id| state.clients.get(&id).map(|client| client.channel))
+                    } else { vec![None; events.len()] };
+                    let mut received = Vec::new();
+                    for (event, cue) in events.into_iter().zip(cues) {
+                        if !output_muted { if let Some(cue) = cue { playback.play_sound(cue); } }
+                        for message in received_messages(std::iter::once(event), &con) {
+                            if !output_muted && unread.should_notify(&message) { playback.play_sound(sounds::Sound::Message); }
+                            unread.record(&message);
+                            received.push(message);
+                        }
                     }
+                    if !received.is_empty() { chats.add(received); }
                     out.lock().unwrap().set_unread(unread.snapshot());
                     snapshot(&con, out, &audio, voice.speaking(), storage.as_deref(), &receive);
                     if initial_connection {
@@ -1649,7 +1673,7 @@ async fn session(
                     snapshot(&con, out, &audio, voice.speaking(), storage.as_deref(), &receive);
                 },
                 Some(Ok(StreamItem::Audio(packet))) => {
-                    if !output_muted && playback.active.load(Ordering::Acquire) {
+                    if !output_muted && playback.is_active() {
                         let from = match packet.data().data() {
                             AudioData::S2C { from, .. } | AudioData::S2CWhisper { from, .. } => tsclientlib::ClientId(*from),
                             _ => continue,
@@ -1721,6 +1745,18 @@ async fn session(
                     None => {},
                 },
                 Some(Ok(StreamItem::MessageEvent(msg))) => {
+                    if let Ok(state) = con.get_state() {
+                        use tsclientlib::InMessage;
+                        let own = state.own_client;
+                        let detail = match &msg {
+                            InMessage::ClientMoved(parts) => parts.iter().find(|p| p.client_id == own && p.reason == tsclientlib::Reason::KickChannel)
+                                .map(|p| format!("{:?}: {}", p.reason, p.reason_message.as_deref().unwrap_or_default())),
+                            InMessage::ClientLeftView(parts) => parts.iter().find(|p| p.client_id == own && matches!(p.reason, Some(tsclientlib::Reason::KickServer | tsclientlib::Reason::KickServerBan | tsclientlib::Reason::KickChannel)))
+                                .map(|p| format!("{:?}: {}", p.reason.unwrap(), p.reason_message.as_deref().unwrap_or_default())),
+                            _ => None,
+                        };
+                        if let Some(detail) = detail { report(out, detail); }
+                    }
                     avatar.observe(avatar_store, out);
                     files.message(&msg, storage.as_deref(), out);
                     files.pump(&mut con, &mut operations);
@@ -1762,7 +1798,11 @@ async fn session(
                     let quality = network.update(stats, Instant::now());
                     out.lock().unwrap().set_network_quality(quality);
                 },
-                Some(Ok(StreamItem::DisconnectedTemporarily(_))) => {
+                Some(Ok(StreamItem::DisconnectedTemporarily(reason))) => {
+                    if let Some(cue) = sound_events.recovering() {
+                        if !output_muted { playback.play_sound(cue); }
+                        report(out, format!("Connection interrupted: {reason:?}"));
+                    }
                     con.set_connect_name(profile.nickname.clone());
                     nickname_application.disconnected();
                     #[cfg(feature = "network-diagnostics")]
@@ -1785,7 +1825,13 @@ async fn session(
                     out.lock().unwrap().status("reconnecting");
                 },
                 Some(Err(error)) => return Err(error.into()),
-                None => return Ok(false),
+                None => {
+                    if let Some(cue) = sound_events.unexpected() {
+                        if !output_muted { playback.play_sound(cue); }
+                        report(out, "Server connection closed");
+                    }
+                    return Ok(false);
+                },
             },
             Some(completion) = media_rx.recv() => {
                 if downloads.complete(completion) {
@@ -1815,7 +1861,10 @@ async fn session(
                 Some(command @ (Command::FilesOpen { .. } | Command::FilesBack { .. } | Command::FilesList { .. } | Command::FilesSort { .. } | Command::FilesDownload { .. } | Command::FilesUpload { .. } | Command::FilesRetry { .. })) => {
                     files.command(command, &mut con, storage.as_deref(), &mut operations, out);
                 },
-                Some(Command::Disconnect) | None => {
+                Some(Command::Disconnect) => {
+                    if sound_events.connected() && con.get_state().is_ok() && !output_muted {
+                        playback.play_sound(sounds::Sound::SelfDisconnect);
+                    }
                     for handle in downloads.cancel() { con.cancel_filetransfer(handle); }
                     avatar.disconnected();
                     invalidate_capture(processor, capture_epoch, speech); let _ = voice.interrupt(|codec, data| send_voice(&mut con, codec, data));
@@ -1824,12 +1873,14 @@ async fn session(
                     // Drop pending handshakes; stop draining on errors so a failed
                     // handshake's completed future is never polled again.
                     if con.get_state().is_ok() {
-                        con.disconnect(DisconnectOptions::new())?;
-                        let _ = tokio::time::timeout(Duration::from_secs(2), async { while let Some(Ok(_)) = con.events().next().await {} }).await;
+                        if con.disconnect(DisconnectOptions::new()).is_ok() {
+                            let _ = tokio::time::timeout(Duration::from_secs(2), async { while let Some(Ok(_)) = con.events().next().await {} }).await;
+                        }
                     }
                     return Ok(false);
                 },
-                Some(Command::Shutdown) => { for handle in downloads.cancel() { con.cancel_filetransfer(handle); } avatar.disconnected(); invalidate_capture(processor, capture_epoch, speech); let _ = voice.interrupt(|codec, data| send_voice(&mut con, codec, data)); playback.clear(); out.lock().unwrap().status("disconnected"); let _ = con.disconnect(DisconnectOptions::new()); return Ok(true); },
+                None => { playback.stop_sound(); return Ok(true); },
+                Some(Command::Shutdown) => { for handle in downloads.cancel() { con.cancel_filetransfer(handle); } avatar.disconnected(); invalidate_capture(processor, capture_epoch, speech); let _ = voice.interrupt(|codec, data| send_voice(&mut con, codec, data)); playback.stop_sound(); playback.clear(); out.lock().unwrap().status("disconnected"); let _ = con.disconnect(DisconnectOptions::new()); return Ok(true); },
                 #[cfg(test)]
                 Some(Command::PanicSession) => panic!("injected session failure"),
                 Some(Command::Connect { .. }) => report_code(out, "disconnect_before_connect", None),
@@ -1873,6 +1924,8 @@ async fn session(
                     operations.insert(handle, PendingOperation::Join);
                 },
                 Some(Command::Mute { input, output }) => {
+                    sound_events.output_muted = output;
+                    if output { playback.stop_sound(); }
                     if input || output { invalidate_capture(processor, capture_epoch, speech); let _ = voice.interrupt(|codec, data| send_voice(&mut con, codec, data)); }
                     if output_muted != output { audio.reset(); receive_traces.clear(); playback.clear(); playback.request(); }
                     input_muted = input; output_muted = output;
@@ -2163,6 +2216,7 @@ impl Bridge {
                             avatar::offline(&worker_avatar_store, &worker_output).await;
                         }
                         request @ Command::Connect { .. } => {
+                            let mut sound_events = sound_events::Session::default();
                             // A protocol panic ends this connection, not the command receiver.
                             match std::panic::AssertUnwindSafe(session(
                                 request,
@@ -2186,13 +2240,18 @@ impl Bridge {
                                 &mut files,
                                 &files_tx,
                                 &mut files_rx,
+                                &mut sound_events,
                             ))
                             .catch_unwind()
                             .await
                             {
                                 Ok(Ok(true)) => { receive_prefs.flush(storage.as_deref(), &persist_tx, &worker_output, true); break; },
-                                Ok(Err(error)) => report(&worker_output, error),
+                                Ok(Err(error)) => {
+                                    if let Some(cue) = sound_events.unexpected() { if !sound_events.output_muted { worker_playback.play_sound(cue); } }
+                                    report(&worker_output, error);
+                                },
                                 Err(panic) => {
+                                    if let Some(cue) = sound_events.unexpected() { if !sound_events.output_muted { worker_playback.play_sound(cue); } }
                                     let detail = panic.downcast_ref::<String>().map(String::as_str)
                                         .or_else(|| panic.downcast_ref::<&str>().copied())
                                         .unwrap_or("unknown panic");
@@ -2278,7 +2337,11 @@ impl Bridge {
             _ => self.tx.try_send(request).map_err(|error| error.to_string()),
         }
     }
-    pub fn poll(&self) -> Value { poll_output(&self.output) }
+    pub fn poll(&self) -> Value {
+        let mut envelope = poll_output(&self.output);
+        envelope["soundPending"] = json!(self.playback.sound_pending());
+        envelope
+    }
 
 }
 #[cfg(test)]
@@ -2843,27 +2906,39 @@ mod tests {
         let mut unread = UnreadState::default();
         unread.sync(Some("server-a".into()), Some("channel:a".into()));
         unread.set_app_active(true);
+        assert!(unread.should_notify(&message(ChatKind::Channel, "a")));
+        assert!(!unread.should_notify(&message(ChatKind::Channel, "other")));
         unread.record(&message(ChatKind::Channel, "a"));
         unread.record(&message(ChatKind::Channel, "other"));
         let mut own = message(ChatKind::Channel, "a");
         own.own = true;
+        assert!(!unread.should_notify(&own));
         unread.record(&own);
         assert_eq!(unread.channel_count, 1);
 
         unread.record(&message(ChatKind::Private, "alice"));
         unread.record(&message(ChatKind::Private, "bob"));
         unread.set_visible("server-a", "client:alice", "first", true);
+        assert!(!unread.should_notify(&message(ChatKind::Private, "alice")));
+        assert!(unread.should_notify(&message(ChatKind::Private, "bob")));
+        assert!(unread.should_notify(&message(ChatKind::Channel, "a")));
         assert_eq!(unread.private_counts.get("alice"), None);
         assert_eq!(unread.private_counts.get("bob"), Some(&1));
         unread.record(&message(ChatKind::Private, "alice"));
         assert_eq!(unread.private_counts.get("alice"), None);
         unread.set_app_active(false);
+        assert!(unread.should_notify(&message(ChatKind::Private, "alice")));
         unread.record(&message(ChatKind::Private, "alice"));
         assert_eq!(unread.private_counts.get("alice"), Some(&1));
         unread.set_app_active(true);
         assert_eq!(unread.private_counts.get("alice"), None);
         unread.set_visible("server-a", "client:alice", "stale", false);
         unread.set_visible("server-a", "channel:a", "current", true);
+        assert!(!unread.should_notify(&message(ChatKind::Channel, "a")));
+        assert!(unread.should_notify(&message(ChatKind::Private, "alice")));
+        let mut stored = message(ChatKind::Private, "bob");
+        stored.status = ChatStatus::Sent;
+        assert!(!unread.should_notify(&stored));
         assert_eq!(unread.channel_count, 0);
         unread.set_visible("server-a", "channel:a", "stale", false);
         unread.record(&message(ChatKind::Channel, "a"));
@@ -3084,6 +3159,16 @@ pub unsafe extern "C" fn ts_playback_active(handle: *const playback::Playback, a
     }
 }
 #[no_mangle]
+pub unsafe extern "C" fn ts_playback_reconfigure(handle: *const playback::Playback) {
+    if let Some(p) = handle.as_ref() {
+        p.reconfigure();
+    }
+}
+#[no_mangle]
+pub unsafe extern "C" fn ts_sound_pending(handle: *const playback::Playback) -> bool {
+    handle.as_ref().is_some_and(|p| p.sound_pending())
+}
+#[no_mangle]
 pub unsafe extern "C" fn ts_render(
     handle: *const playback::Playback,
     left: *mut f32,
@@ -3107,9 +3192,39 @@ pub unsafe extern "C" fn ts_render_count(handle: *const playback::Playback) -> u
 mod contract_regressions {
     use super::*;
     #[test]
+    fn terminal_failure_plays_without_capture_and_cancel_does_not_play() {
+        let bridge = Bridge::new();
+        bridge.playback.set_active(true);
+        bridge.send(r#"{"type":"connect","connectionId":"failure","address":"127.0.0.1:9987","identity":{}}"#).unwrap();
+        let until = Instant::now() + Duration::from_secs(5);
+        loop {
+            let value = bridge.poll();
+            if value["events"].as_array().unwrap().iter().any(|e| e["type"] == "error") { break; }
+            assert!(Instant::now() < until);
+            std::thread::yield_now();
+        }
+        assert!(bridge.playback.sound_pending());
+        bridge.playback.stop_sound();
+        let server = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+        bridge.send(&json!({"type":"connect","connectionId":"cancel","address":server.local_addr().unwrap().to_string()}).to_string()).unwrap();
+        bridge.send(r#"{"type":"disconnect"}"#).unwrap();
+        loop {
+            let value = bridge.poll();
+            if value["snapshot"]["connectionId"] == "cancel" && value["snapshot"]["status"] == "disconnected" { break; }
+            assert!(Instant::now() < until);
+            std::thread::yield_now();
+        }
+        assert!(!bridge.playback.sound_pending());
+        // Republishing stored chats and polling is not a live receive event.
+        bridge.output.lock().unwrap().set_chats(json!([{"id":"stored","status":"received"}]));
+        assert!(!bridge.poll()["soundPending"].as_bool().unwrap());
+    }
+    #[test]
     fn shared_bridge_samples_match_rust_output() {
         let mut samples = Vec::new();
         let output = Arc::new(Mutex::new(Output::default()));
+        let (playback, _) = playback::Playback::new().unwrap();
+        playback.set_active(true);
         let mut legacy = Output::default(); legacy.status("disconnected");
         let mut missing = legacy.snapshot.clone(); missing.as_object_mut().unwrap().remove("connectionId");
         samples.push(json!({"snapshot":missing,"events":[],"chats":null}));
@@ -3130,7 +3245,10 @@ mod contract_regressions {
             let mut processing = AudioProcessingState::default();
             processing.requested.noise = NoiseSuppressionMode::Dpdfnet2;
             processing.publish(&output, "switching", None);
-            samples.push(poll_output(&output));
+            if status == "disconnected" { playback.play_sound(sounds::Sound::Alert); }
+            let mut envelope = poll_output(&output);
+            envelope["soundPending"] = json!(playback.sound_pending());
+            samples.push(envelope);
         }
         let data = serde_json::to_string_pretty(&samples).unwrap() + "\n";
         let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/contracts/bridge.json");

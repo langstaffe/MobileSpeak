@@ -199,6 +199,7 @@ internal fun JSONObject.speech() = SpeechState(
 
 data class SessionUiState(
     val snapshot: Snapshot = Snapshot(),
+    val soundPending: Boolean = false,
     val channelFiles: ChannelFilesState = ChannelFilesState(),
     val channelFilesLocalError: String? = null,
     val channelFilesLocalErrorSource: LocalizedMessage? = null,

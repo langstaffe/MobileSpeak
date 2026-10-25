@@ -74,7 +74,8 @@ class VoiceServiceLifecycleTest {
             field("microphonePermission").setBoolean(ClientSession, false)
             gateField("id").set(gate, null)
             gateField("cancelled").setBoolean(gate, false)
-            state.value = savedState.copy(snapshot = Snapshot(), microphoneMuted = true)
+            field("pendingConnect").set(ClientSession, null)
+            state.value = savedState.copy(snapshot = Snapshot(), soundPending = false, microphoneMuted = true)
         }
     }
 
@@ -82,7 +83,7 @@ class VoiceServiceLifecycleTest {
         if (!::executor.isInitialized || !::originalHandler.isInitialized) return
         field("context").set(ClientSession, context.applicationContext)
         val service = actual()
-        core { state.value = state.value.copy(snapshot = Snapshot()); update.invoke(ClientSession) }
+        core { field("pendingConnect").set(ClientSession, null); state.value = state.value.copy(snapshot = Snapshot(), soundPending = false); update.invoke(ClientSession) }
         settle { actual() == null && !serviceExists() }
         service?.let(::assertReleased)
         core {
@@ -117,11 +118,103 @@ class VoiceServiceLifecycleTest {
         settle { actual() != null && serviceExists() }
         return requireNotNull(actual())
     }
-    private fun terminateByEnvelope(id: String = "service-test") = core {
+    private fun terminateByEnvelope(id: String = "service-test", soundPending: Boolean = false) = core {
         val apply = ClientSession::class.java.getDeclaredMethod("applyEnvelope", JSONObject::class.java).apply { isAccessible = true }
         apply.invoke(ClientSession, JSONObject("""{"snapshot":{"status":"disconnected","connectionId":"$id","channels":[],"clients":[]},
             "events":[{"type":"error","connectionId":"$id","code":"core_error","detail":"controlled failure"}],
-            "chats":[],"unread":{"serverId":null,"channel":null,"channelCount":0,"privateCounts":{}}}"""))
+            "soundPending":$soundPending,"chats":[],"unread":{"serverId":null,"channel":null,"channelCount":0,"privateCounts":{}}}"""))
+    }
+
+    @Test fun terminalSoundKeepsTheSameOutputSessionUntilTheTailCompletes() {
+        val service = running("connected")
+        val audio = property(service, "audio")!!
+        instrumentation.waitForIdleSync()
+        core { }
+        // A nonzero handle can still be replaced by the initial device callback during HAL setup.
+        await {
+            (property(audio, "outputHandle") as Long) != 0L &&
+                (property(audio, "outputChannels") as Int) > 0 &&
+                (property(audio, "playbackThread") as Thread).state == Thread.State.WAITING
+        }
+        val output = property(audio, "outputHandle")
+        terminateByEnvelope(soundPending = true)
+        instrumentation.waitForIdleSync()
+        assertSame(service, actual())
+        assertTrue(ClientSession.shouldRunService())
+        assertFalse(property(audio, "captureConnected") as Boolean)
+        assertEquals(output, property(audio, "outputHandle"))
+        terminateByEnvelope(soundPending = false)
+        settle { actual() == null && !serviceExists() }
+        assertReleased(service)
+    }
+
+    @Test fun initialDeviceInventoryDoesNotReplacePreparedOutputOrClearSound() {
+        val service = running("connecting")
+        val audio = property(service, "audio")!!
+        instrumentation.waitForIdleSync()
+        core { }
+        await {
+            (property(audio, "outputHandle") as Long) != 0L &&
+                (property(audio, "outputChannels") as Int) > 0 &&
+                (property(audio, "playbackThread") as Thread).state == Thread.State.WAITING
+        }
+        val output = property(audio, "outputHandle")
+        val revision = property(audio, "outputRevision")
+        // Use a real connection-failure cue in the same shared slot, without a network request.
+        core {
+            val command = """{"type":"connect","connectionId":"service-test","address":"127.0.0.1:1","identity":{}}"""
+            assertEquals(0, NativeCore.command(handle, command.toByteArray(Charsets.UTF_8)))
+        }
+        await { core { JSONObject(String(NativeCore.poll(handle), Charsets.UTF_8)).getBoolean("soundPending") } }
+        val devices = context.getSystemService(android.media.AudioManager::class.java)
+            .getDevices(android.media.AudioManager.GET_DEVICES_INPUTS or android.media.AudioManager.GET_DEVICES_OUTPUTS)
+        val callback = property(audio, "deviceCallback") as android.media.AudioDeviceCallback
+        main { callback.onAudioDevicesAdded(devices) }
+        assertEquals("Initial inventory must not invalidate the prepared stream", revision, property(audio, "outputRevision"))
+        assertEquals(output, property(audio, "outputHandle"))
+        assertTrue(core { JSONObject(String(NativeCore.poll(handle), Charsets.UTF_8)).getBoolean("soundPending") })
+        terminateByEnvelope()
+        settle { actual() == null && !serviceExists() }
+        assertReleased(service)
+    }
+
+    @Test fun audioFocusInterruptionStopsOnlyAudioAndResumesWithoutReplacingTheSession() {
+        val service = running("connected")
+        val audio = property(service, "audio")!!
+        await { (property(audio, "outputHandle") as Long) != 0L }
+        val listener = property(audio, "focusListener") as android.media.AudioManager.OnAudioFocusChangeListener
+        main { listener.onAudioFocusChange(android.media.AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK) }
+        await { (property(audio, "outputHandle") as Long) == 0L }
+        assertEquals("connected", ClientSession.state.value.snapshot.status)
+        assertSame(service, actual())
+        main { listener.onAudioFocusChange(android.media.AudioManager.AUDIOFOCUS_GAIN) }
+        await { (property(audio, "outputHandle") as Long) != 0L }
+        assertSame(service, actual())
+        main {
+            // Reuse the engine for another output session before Android destroys the Service.
+            (audio as AudioEngine).update(SessionUiState(), allowCapture = false)
+            audio.update(ClientSession.state.value, allowCapture = false)
+            listener.onAudioFocusChange(android.media.AudioManager.AUDIOFOCUS_LOSS_TRANSIENT)
+            assertTrue(property(audio, "focusGranted") as Boolean)
+        }
+        await { (property(audio, "outputHandle") as Long) != 0L }
+        terminateByEnvelope()
+        settle { actual() == null && !serviceExists() }
+        assertReleased(service)
+    }
+
+    @Test fun oldAndCancelledOutputPreparationCannotSubmitANewerHandshake() {
+        session("connecting", "next", reconcile = false)
+        val command = JSONObject().put("type", "connect").put("address", "not-submitted.invalid")
+        core { field("pendingConnect").set(ClientSession, command) }
+        ClientSession.audioOutputPrepared("old")
+        core { assertSame(command, field("pendingConnect").get(ClientSession)); gate.cancel() }
+        ClientSession.audioOutputPrepared("next")
+        core { assertSame(command, field("pendingConnect").get(ClientSession)) }
+        ClientSession.disconnect()
+        core { assertNull(field("pendingConnect").get(ClientSession)) }
+        assertEquals("disconnected", ClientSession.state.value.snapshot.status)
+        assertFalse(ClientSession.state.value.soundPending)
     }
 
     @Test fun coldNullIntentAndUnrecordedCreationReleaseActualResources() {

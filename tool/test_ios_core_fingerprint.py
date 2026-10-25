@@ -27,7 +27,8 @@ class FingerprintTests(unittest.TestCase):
             paths = ['native/src/lib.rs', 'native/patched/tsproto/src/lib.rs', 'native/patched/tsclientlib/src/lib.rs',
                      'native/.cargo/config.toml', 'native/Cargo.lock', 'native/Cargo.toml', 'native/build.rs',
                      'tool/ios_core_fingerprint.py', 'tool/build_ios_core.sh', 'tool/prepare_audio_runtime.py',
-                     'tool/build_sherpa_fft.py', 'tool/sherpa-onnx-fft.patch', 'native/models/manifest.json']
+                     'tool/build_sherpa_fft.py', 'tool/sherpa-onnx-fft.patch', 'native/models/manifest.json',
+                     'native/assets/sounds/message.wav']
             for name in paths:
                 path = root/name; path.parent.mkdir(parents=True, exist_ok=True); path.write_text('original')
             before = core.fingerprint(root)

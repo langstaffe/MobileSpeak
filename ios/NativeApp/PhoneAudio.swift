@@ -10,26 +10,35 @@ final class PhoneAudio: @unchecked Sendable {
     private var engine: AVAudioEngine?
     private var source: AVAudioSourceNode?
     private var capturing = false
+    private var voiceProcessing = false
     private let lock = NSLock()
     private var generation = 0
     private var captureSegment = 0
     private var captureBoundary: UInt64 = 0
-    private var enabled = true
+    private var listeningEnabled = true
+    private var enabled: Bool {
+        get { lock.lock(); defer { lock.unlock() }; return listeningEnabled }
+        set { lock.lock(); listeningEnabled = newValue; lock.unlock() }
+    }
     private let playback: UnsafeRawPointer
     private var capturedFrames = 0
+    private var draining = false
     var frameCounts: (rendered: Int, captured: Int) {
         lock.lock(); defer { lock.unlock() }
         return (Int(ts_render_count(playback)), capturedFrames)
     }
-    @MainActor var inputFormat: AVAudioFormat? { get async { await onQueue { self.engine?.inputNode.outputFormat(forBus: 0) } } }
-    @MainActor var isVoiceProcessingEnabled: Bool { get async { await onQueue { self.engine?.inputNode.isVoiceProcessingEnabled == true } } }
+    @MainActor var inputFormat: AVAudioFormat? { get async { await onQueue { self.voiceProcessing ? self.engine?.inputNode.outputFormat(forBus: 0) : nil } } }
+    @MainActor var isVoiceProcessingEnabled: Bool { get async { await onQueue { self.voiceProcessing && self.engine?.inputNode.isVoiceProcessingEnabled == true } } }
     @MainActor var isRunning: Bool { get async { await onQueue { self.engine?.isRunning == true } } }
     @MainActor var isCapturing: Bool { get async { await onQueue { self.capturing } } }
+    @MainActor func isCurrentEngine(_ candidate: AVAudioEngine) async -> Bool {
+        await onQueue { self.engine === candidate }
+    }
     func setListening(_ value: Bool) {
+        enabled = value
         if !value { ts_playback_active(playback, false) }
         queue.async {
-            self.enabled = value
-            ts_playback_active(self.playback, value && self.engine?.isRunning == true)
+            ts_playback_active(self.playback, self.enabled && self.engine?.isRunning == true)
         }
     }
     init(handle: UnsafeMutableRawPointer) {
@@ -54,6 +63,9 @@ final class PhoneAudio: @unchecked Sendable {
     private var currentGeneration: Int {
         lock.lock(); defer { lock.unlock() }
         return generation
+    }
+    private func advanceGeneration() {
+        lock.lock(); generation += 1; lock.unlock()
     }
     private var currentCaptureContext: (segment: Int, boundary: UInt64) {
         lock.lock(); defer { lock.unlock() }
@@ -101,6 +113,17 @@ final class PhoneAudio: @unchecked Sendable {
         }.get()
     }
     @MainActor func start() async throws { try await perform { try self.startEngine() } }
+    @MainActor func prepareConnection(listening: Bool) async throws {
+        enabled = listening
+        advanceGeneration()
+        ts_playback_active(playback, false)
+        try await perform {
+            self.draining = false
+            self.removeCaptureTap()
+            try self.ensureEngineRunning()
+            ts_playback_active(self.playback, self.enabled)
+        }
+    }
     @MainActor func startCapture() async throws { try await perform { try self.installCaptureTap() } }
     @MainActor func ensureRunning() async throws { try await perform { try self.ensureEngineRunning() } }
     func permission() async -> Bool {
@@ -124,7 +147,10 @@ final class PhoneAudio: @unchecked Sendable {
         defer { logger.info("Audio startup end total_ms=\(Int((ProcessInfo.processInfo.systemUptime - started) * 1000)) running=\(self.engine?.isRunning == true)") }
         let session = AVAudioSession.sharedInstance()
         defer {
-            if self.engine == nil { try? session.setActive(false, options: .notifyOthersOnDeactivation) }
+            if self.engine == nil {
+                ts_playback_active(playback, false)
+                try? session.setActive(false, options: .notifyOthersOnDeactivation)
+            }
         }
         try session.setCategory(.playAndRecord, mode: .voiceChat, options: [.defaultToSpeaker, .allowBluetoothHFP, .mixWithOthers])
         try session.setPreferredSampleRate(48_000)
@@ -133,10 +159,11 @@ final class PhoneAudio: @unchecked Sendable {
         try session.setActive(true)
         mark("session_active")
         let engine = AVAudioEngine()
-        // Materialize both sides of RemoteIO before starting it. Creating the input
-        // for the first time on an already running output-only engine can give 0 Hz.
-        let input = engine.inputNode
-        try input.setVoiceProcessingEnabled(true)
+        // Output and alerts must work before microphone permission is granted.
+        let inputEnabled = session.recordPermission == .granted
+        if inputEnabled {
+            try engine.inputNode.setVoiceProcessingEnabled(true)
+        }
         mark("voice_processing")
         let output = engine.outputNode
         let format = AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 2)!
@@ -165,14 +192,24 @@ final class PhoneAudio: @unchecked Sendable {
             ts_playback_active(playback, false)
             throw error
         }
-        self.engine = engine; self.source = source
+        self.engine = engine; self.source = source; self.voiceProcessing = inputEnabled
         mark("engine_start")
-        logger.info("Audio started: input \(engine.inputNode.outputFormat(forBus: 0).description, privacy: .public); output \(output.inputFormat(forBus: 0).description, privacy: .public)")
+        let inputDescription = inputEnabled ? engine.inputNode.outputFormat(forBus: 0).description : "not initialized (no microphone permission)"
+        logger.info("Audio started: input \(inputDescription, privacy: .public); output \(output.inputFormat(forBus: 0).description, privacy: .public)")
     }
     private func installCaptureTap() throws {
         guard !capturing else { return }
         let started = ProcessInfo.processInfo.systemUptime
         defer { logger.info("Audio capture startup elapsed_ms=\(Int((ProcessInfo.processInfo.systemUptime - started) * 1000)) capturing=\(self.capturing)") }
+        guard AVAudioSession.sharedInstance().recordPermission == .granted else {
+            throw audioError(.key("error_microphone_permission"))
+        }
+        if engine != nil, !voiceProcessing {
+            // Upgrade only the graph; this is not an interruption of the pending local cue.
+            logger.info("Audio graph upgrade for capture pending_local_sound=\(ts_sound_pending(self.playback))")
+            ts_playback_reconfigure(playback)
+            engine?.stop(); engine = nil; source = nil; voiceProcessing = false
+        }
         try ensureEngineRunning()
         guard let engine else { throw audioError(.key("error_audio_engine_not_started")) }
         let input = engine.inputNode
@@ -225,12 +262,15 @@ final class PhoneAudio: @unchecked Sendable {
         if !engine.isRunning {
             let started = ProcessInfo.processInfo.systemUptime
             defer { logger.info("Audio restart end total_ms=\(Int((ProcessInfo.processInfo.systemUptime - started) * 1000)) running=\(self.engine?.isRunning == true)") }
-            ts_playback_active(playback, false)
-            try AVAudioSession.sharedInstance().setActive(true)
-            logger.info("Audio restart session_active elapsed_ms=\(Int((ProcessInfo.processInfo.systemUptime - started) * 1000))")
-            engine.prepare()
-            ts_playback_active(playback, enabled)
-            do { try engine.start() } catch { ts_playback_active(playback, false); throw error }
+            logger.info("Audio graph restart pending_local_sound=\(ts_sound_pending(self.playback))")
+            ts_playback_reconfigure(playback)
+            do {
+                try AVAudioSession.sharedInstance().setActive(true)
+                logger.info("Audio restart session_active elapsed_ms=\(Int((ProcessInfo.processInfo.systemUptime - started) * 1000))")
+                engine.prepare()
+                ts_playback_active(playback, enabled)
+                try engine.start()
+            } catch { ts_playback_active(playback, false); throw error }
             logger.info("Audio engine restarted after configuration change")
         }
     }
@@ -251,26 +291,52 @@ final class PhoneAudio: @unchecked Sendable {
     func pauseForInterruption() {
         setCaptureReady(false)
         resetCaptureBuffer()
-        lock.lock(); generation += 1; lock.unlock()
+        advanceGeneration()
         ts_playback_active(playback, false)
         queue.async {
             self.removeCaptureTap()
             ts_playback_active(self.playback, false)
-            self.engine?.pause()
+            if self.draining { self.stopEngine() }
+            else { self.engine?.pause() }
         }
     }
     func stop() {
         setCaptureReady(false)
         resetCaptureBuffer()
-        lock.lock(); generation += 1; lock.unlock()
+        advanceGeneration()
         ts_playback_active(playback, false)
         queue.async { self.stopEngine() }
     }
+    func finishSounds() {
+        stopCapture()
+        let requested = currentGeneration
+        queue.async {
+            guard requested == self.currentGeneration, !self.draining else { return }
+            self.draining = true
+            self.drainSounds(generation: requested, deadline: ProcessInfo.processInfo.systemUptime + 1)
+        }
+    }
+    private func drainSounds(generation: Int, deadline: TimeInterval) {
+        guard generation == currentGeneration, draining else { return }
+        if ts_sound_pending(playback), engine?.isRunning == true, ProcessInfo.processInfo.systemUptime < deadline {
+            queue.asyncAfter(deadline: .now() + 0.02) { self.drainSounds(generation: generation, deadline: deadline) }
+        } else {
+            // Render completion precedes the hardware's presentation of its last buffer.
+            let session = AVAudioSession.sharedInstance()
+            let latency = max(0.02, session.outputLatency + session.ioBufferDuration)
+            queue.asyncAfter(deadline: .now() + latency) {
+                guard generation == self.currentGeneration, self.draining else { return }
+                self.draining = false
+                self.stopEngine()
+            }
+        }
+    }
     private func stopEngine() {
+        draining = false
         ts_playback_active(playback, false)
         removeCaptureTap()
         guard let engine else { return }
-        engine.stop(); self.engine = nil; source = nil
+        engine.stop(); self.engine = nil; source = nil; voiceProcessing = false
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }
 }

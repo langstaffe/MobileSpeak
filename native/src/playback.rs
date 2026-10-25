@@ -15,6 +15,7 @@ const CAPACITY: usize = 16384;
 const MAX_TARGET: usize = (CAPACITY / FRAME - 1) * FRAME;
 
 pub struct Playback {
+    sounds: crate::sounds::Slot,
     samples: Box<[AtomicU64]>, // one atomic stereo pair; reset never races non-atomic sample access
     read: AtomicUsize,
     write: AtomicUsize,
@@ -22,7 +23,6 @@ pub struct Playback {
     target: AtomicUsize,
     reserve: AtomicUsize,
     rendering: AtomicBool,
-    pub active: AtomicBool,
     pub revision: AtomicU64,
     pub renders: AtomicU64,
     underruns: AtomicU64,
@@ -41,6 +41,7 @@ impl Playback {
         receiver.set_nonblocking(true)?;
         Ok((
             Self {
+                sounds: crate::sounds::Slot::default(),
                 samples: (0..CAPACITY).map(|_| AtomicU64::new(0)).collect(),
                 read: AtomicUsize::new(0),
                 write: AtomicUsize::new(0),
@@ -48,7 +49,6 @@ impl Playback {
                 target: AtomicUsize::new(PREPARED),
                 reserve: AtomicUsize::new(PREPARED),
                 rendering: AtomicBool::new(false),
-                active: AtomicBool::new(false),
                 revision: AtomicU64::new(0),
                 renders: AtomicU64::new(0),
                 underruns: AtomicU64::new(0),
@@ -92,10 +92,27 @@ impl Playback {
     }
     // Called only on an ordinary platform lifecycle thread.
     pub fn set_active(&self, active: bool) {
-        if self.active.swap(active, AcqRel) != active {
+        if self.sounds.set_active(active) {
             self.revision.fetch_add(1, AcqRel);
             self.request();
         }
+    }
+    pub fn is_active(&self) -> bool {
+        self.sounds.is_active()
+    }
+    pub fn reconfigure(&self) {
+        crate::sounds::log(format_args!("Sound output reconfigure active={} pending={}", self.is_active(), self.sound_pending()));
+        self.revision.fetch_add(1, AcqRel);
+        self.request();
+    }
+    pub fn play_sound(&self, sound: crate::sounds::Sound) {
+        self.sounds.play(sound);
+    }
+    pub fn stop_sound(&self) {
+        self.sounds.stop();
+    }
+    pub fn sound_pending(&self) -> bool {
+        self.sounds.pending()
     }
     // Producer only. The consumer owns read; discard via a separately published floor.
     pub fn clear(&self) {
@@ -181,6 +198,16 @@ impl Playback {
         frames: usize,
         stride: usize,
     ) -> usize {
+        self.render_with_after_overlay(left, right, frames, stride, || {})
+    }
+    unsafe fn render_with_after_overlay(
+        &self,
+        left: *mut f32,
+        right: *mut f32,
+        frames: usize,
+        stride: usize,
+        after_overlay: impl FnOnce(),
+    ) -> usize {
         self.renders.fetch_add(1, Relaxed);
         self.max_callback.fetch_max(frames, Relaxed);
         let owns = self
@@ -188,9 +215,10 @@ impl Playback {
             .compare_exchange(false, true, Acquire, Relaxed)
             .is_ok();
         let revision = self.revision.load(Acquire);
+        let output = self.sounds.output_state();
         let read = self.read.load(Relaxed).max(self.floor.load(Acquire));
         let ready =
-            owns && self.active.load(Acquire) && self.ready_revision.load(Acquire) == revision;
+            owns && self.is_active() && self.ready_revision.load(Acquire) == revision;
         let count = if ready {
             frames.min(self.write.load(Acquire).saturating_sub(read))
         } else {
@@ -216,6 +244,28 @@ impl Playback {
         }
         // A concurrent pause/reset must not publish an old channel's samples.
         if revision != self.revision.load(Acquire) || read < self.floor.load(Acquire) {
+            for i in 0..frames {
+                *left.add(i * stride) = 0.;
+                if !right.is_null() {
+                    *right.add(i * stride) = 0.;
+                }
+            }
+        }
+        if owns {
+            // Local cues bypass receive AGC/user volume, voice prefill and microphone encoding.
+            for i in 0..frames {
+                let sound = self.sounds.sample_in_output(output);
+                if sound != 0. {
+                    *left.add(i * stride) = (*left.add(i * stride) + sound).clamp(-1., 1.);
+                    if !right.is_null() {
+                        *right.add(i * stride) = (*right.add(i * stride) + sound).clamp(-1., 1.);
+                    }
+                }
+            }
+        }
+        after_overlay();
+        // A voice-only rebuild preserves cues; a real pause invalidates the whole output batch.
+        if output != self.sounds.output_state() || !self.is_active() {
             for i in 0..frames {
                 *left.add(i * stride) = 0.;
                 if !right.is_null() {
@@ -287,6 +337,84 @@ impl ReceiveTrace {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn voice_reconfigure_during_render_keeps_the_initial_cue_and_its_cursor() {
+        use crate::sounds::{Slot, Sound};
+        let (p, _) = Playback::new().unwrap();
+        let expected = Slot::default();
+        p.set_active(true);
+        expected.set_active(true);
+        p.play_sound(Sound::SelfEnter);
+        expected.play(Sound::SelfEnter);
+        let mut output = [0.; 2048];
+        unsafe {
+            p.render_with_after_overlay(output.as_mut_ptr(), std::ptr::null_mut(), output.len(), 1,
+                || p.reconfigure());
+        }
+        assert!(output.iter().any(|&sample| sample != 0.));
+        for sample in output { assert_eq!(sample, expected.sample()); }
+        assert!(p.sound_pending());
+        unsafe { p.render(output.as_mut_ptr(), std::ptr::null_mut(), output.len(), 1); }
+        for sample in output { assert_eq!(sample, expected.sample()); }
+    }
+
+    #[test]
+    fn paused_render_is_discarded_without_consuming_a_new_output_cue() {
+        use crate::sounds::{Slot, Sound};
+        let (p, _) = Playback::new().unwrap();
+        p.set_active(true);
+        p.play_sound(Sound::SelfEnter);
+        let mut output = [0.; 2048];
+        unsafe {
+            p.render_with_after_overlay(output.as_mut_ptr(), std::ptr::null_mut(), output.len(), 1,
+                || { p.set_active(false); p.set_active(true); p.play_sound(Sound::Message); });
+        }
+        assert!(output.iter().all(|&sample| sample == 0.));
+        let expected = Slot::default();
+        expected.set_active(true);
+        expected.play(Sound::Message);
+        unsafe { p.render(output.as_mut_ptr(), std::ptr::null_mut(), output.len(), 1); }
+        for sample in output { assert_eq!(sample, expected.sample()); }
+    }
+
+    #[test]
+    fn local_sound_uses_one_slot_without_clearing_voice_and_survives_voice_clear() {
+        use crate::sounds::{Slot, Sound};
+        let (p, _) = Playback::new().unwrap();
+        let expected = Slot::default();
+        p.set_active(true);
+        expected.set_active(true);
+        p.push(&[0.25; FRAME * 2]);
+        p.prepared(p.revision.load(Acquire));
+        for sound in [Sound::MemberEnter, Sound::MemberEnter, Sound::Message] {
+            p.play_sound(sound);
+            expected.play(sound);
+            let mut output = [0.; 254];
+            unsafe {
+                p.render(output.as_mut_ptr(), output.as_mut_ptr().add(1), 127, 2);
+            }
+            for pair in output.chunks_exact(2) {
+                let sample = (0.25 + expected.sample()).clamp(-1., 1.);
+                assert_eq!(pair, [sample, sample]);
+            }
+        }
+        p.clear();
+        let mut mono = [0.; 127];
+        unsafe {
+            assert_eq!(p.render(mono.as_mut_ptr(), std::ptr::null_mut(), 127, 1), 0);
+        }
+        for sample in mono {
+            assert_eq!(sample, expected.sample());
+        }
+        assert!(p.sound_pending());
+        p.stop_sound();
+        assert!(!p.sound_pending());
+        unsafe {
+            p.render(mono.as_mut_ptr(), std::ptr::null_mut(), 127, 1);
+        }
+        assert!(mono.iter().all(|&sample| sample == 0.));
+    }
+
     #[test]
     fn arriving_music_packet_is_not_deleted_by_previous_loss_count() {
         use crate::tsclientlib_audio::AudioHandler;
@@ -629,7 +757,7 @@ mod tests {
             let mut next = 1u32;
             while socket.recv(&mut [0]).is_ok() {
                 producer.acknowledged();
-                if !producer.active.load(Acquire) {
+                if !producer.is_active() {
                     return;
                 }
                 let revision = producer.revision.load(Acquire);
