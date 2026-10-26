@@ -7,6 +7,140 @@ import Combine
 @testable import MobileSpeak
 
 final class ClientTests: XCTestCase {
+    @MainActor func testMembersShowSelfWithoutPrivateChatAndFollowLiveSnapshotAndLanguage() async throws {
+        #if targetEnvironment(simulator)
+        let library = try XCTUnwrap(dlopen("/usr/lib/libAccessibility.dylib", RTLD_NOW))
+        let automation = unsafeBitCast(try XCTUnwrap(dlsym(library, "_AXSSetAutomationEnabled")), to: (@convention(c) (Bool) -> Void).self)
+        let enabled = unsafeBitCast(try XCTUnwrap(dlsym(library, "_AXSAutomationEnabled")), to: (@convention(c) () -> Bool).self)()
+        automation(true)
+        defer { automation(enabled); dlclose(library) }
+        #endif
+        let client = Client.shared
+        guard !client.connected, !client.busy else { throw XCTSkip("Requires an offline test profile") }
+        // Keep pending offline-core publications from replacing the live UI fixture.
+        ts_set_notifier(client.handle, nil, 0)
+        defer {
+            ts_set_notifier(client.handle, { context in
+                DispatchQueue.main.async {
+                    Unmanaged<Client>.fromOpaque(UnsafeRawPointer(bitPattern: context)!).takeUnretainedValue().receive()
+                }
+            }, Int(bitPattern: Unmanaged.passUnretained(client).toOpaque()))
+        }
+        try await Task.sleep(nanoseconds: 300_000_000)
+        client.receive()
+        let saved = client.state, importing = client.fileImporting, error = client.error
+        let stored = UserDefaults.standard.object(forKey: AppLanguage.preferenceKey)
+        let language = LanguageSettings()
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let window = UIWindow(windowScene: scene)
+        let host = UIHostingController(rootView: AnyView(EmptyView()))
+        let container = UIViewController(); window.rootViewController = container
+        container.addChild(host); container.view.addSubview(host.view); host.didMove(toParent: container)
+        window.makeKeyAndVisible(); client.fileImporting = true
+        defer {
+            host.rootView = AnyView(EmptyView()); window.isHidden = true
+            client.state = saved; client.fileImporting = importing; client.error = error
+            if let stored { UserDefaults.standard.set(stored, forKey: AppLanguage.preferenceKey) }
+            else { UserDefaults.standard.removeObject(forKey: AppLanguage.preferenceKey) }
+        }
+        func member(_ id: UInt64, name: String, uid: String? = "same-uid", statuses: Bool = true) -> Member {
+            Member(id: id, channel: 9, uid: uid, name: name, avatarHash: "", avatarPath: nil, badges: [],
+                   serverGroupIcons: (1...4).map { GroupIcon(id: UInt64($0), name: "Server Group \($0)", iconId: $0 == 1 ? 300 : 100, iconPath: nil) },
+                   channelGroupIcon: GroupIcon(id: 3, name: "Channel Admin", iconId: 300, iconPath: nil),
+                   muted: statuses, deafened: statuses, speaking: statuses, away: statuses)
+        }
+        func elements(_ root: NSObject? = nil) -> [NSObject] {
+            var visited = Set<ObjectIdentifier>()
+            func collect(_ object: NSObject) -> [NSObject] {
+                guard visited.insert(ObjectIdentifier(object)).inserted, !object.accessibilityElementsHidden else { return [] }
+                if let view = object as? UIView, view.isHidden || view.alpha < 0.01 { return [] }
+                let explicit = object.accessibilityElements as? [NSObject]
+                let count = object.accessibilityElementCount()
+                let children = explicit ?? (count > 0 && count < 1_000 ? (0..<count).compactMap { object.accessibilityElement(at: $0) as? NSObject } : [])
+                if explicit == nil, count == NSNotFound, !object.isAccessibilityElement { return ((object as? UIView)?.subviews ?? []).flatMap(collect) }
+                return (object.isAccessibilityElement ? [object] : []) + children.flatMap(collect)
+            }
+            return collect(root ?? window)
+        }
+        func row(_ member: Member, own: Bool) throws -> NSObject {
+            let label = member.accessibilityLabel + (own ? L10n.string("member_self_suffix") : "")
+            return try XCTUnwrap(elements().first { $0.accessibilityLabel == label } ?? elements().first {
+                !own && $0.accessibilityTraits.contains(.button) && $0.accessibilityLabel?.hasPrefix(label) == true
+            }, label)
+        }
+        func settle() async throws { try await Task.sleep(nanoseconds: 200_000_000); host.view.layoutIfNeeded() }
+        func show(width: CGFloat = 390, category: ContentSizeCategory = .large) async throws {
+            host.view.frame = CGRect(x: 0, y: 0, width: width, height: 844)
+            host.rootView = AnyView(NavigationView { HomeView(client: client, tab: 1) }.navigationViewStyle(.stack)
+                .environmentObject(language).environment(\.sizeCategory, category).preferredColorScheme(.dark).tint(Palette.accent))
+            try await settle()
+        }
+        language.select(.english)
+        let own = member(7, name: "Solo User")
+        client.state = Snapshot(status: "connected", ownClient: 7, clients: [own])
+        try await show()
+        let selfRow = try row(own, own: true)
+        XCTAssertFalse(selfRow.accessibilityTraits.contains(.button))
+        XCTAssertFalse(selfRow.accessibilityTraits.contains(.notEnabled))
+        XCTAssertFalse(selfRow.accessibilityActivate())
+        XCTAssertFalse(elements().contains { $0.accessibilityLabel == L10n.string("action_send") })
+
+        let peer = member(3, name: "Peer User"), noUid = member(9, name: "No UID", uid: nil)
+        client.state.clients = [peer, own, noUid]; try await settle()
+        XCTAssertLessThan(try row(peer, own: false).accessibilityFrame.minY, try row(own, own: true).accessibilityFrame.minY)
+        XCTAssertLessThan(try row(own, own: true).accessibilityFrame.minY, try row(noUid, own: false).accessibilityFrame.minY)
+        XCTAssertFalse(try row(noUid, own: false).accessibilityTraits.contains(.button))
+        client.state.clients = [member(3, name: own.name), own]; try await settle()
+        XCTAssertTrue(try row(own, own: false).accessibilityTraits.contains(.button))
+        XCTAssertFalse(try row(own, own: true).accessibilityTraits.contains(.button))
+        client.state.clients = [peer, own, noUid]
+        client.state.ownClient = nil; try await settle()
+        _ = try row(own, own: false)
+        XCTAssertFalse(elements().contains { $0.accessibilityLabel?.contains(L10n.string("member_self_suffix")) == true })
+        client.state = Snapshot(status: "connected", serverId: "different-server", ownClient: 3, clients: [peer, own, noUid])
+        try await settle(); _ = try row(peer, own: true); _ = try row(own, own: false)
+        client.state.status = "reconnecting"; try await settle()
+        let renamed = member(7, name: String(repeating: "Very long nickname 用户👩🏽‍💻é ", count: 6), statuses: false)
+        client.state = Snapshot(status: "connected", ownClient: 7, clients: [renamed])
+        for (width, category) in [(CGFloat(390), ContentSizeCategory.large), (320, .large), (320, .accessibilityExtraExtraExtraLarge)] {
+            try await show(width: width, category: category)
+            for selection in AppLanguage.allCases where selection != .system {
+                language.select(selection); try await settle()
+                let name = try row(renamed, own: true)
+                XCTAssertFalse(name.accessibilityTraits.contains(.button))
+                XCTAssertGreaterThanOrEqual(name.accessibilityFrame.minX, 0)
+                XCTAssertLessThanOrEqual(name.accessibilityFrame.maxX, host.view.bounds.width)
+                let icons = elements().filter { $0.accessibilityLabel == "Server Group 1" && abs($0.accessibilityFrame.midY - name.accessibilityFrame.midY) < 30 }
+                XCTAssertLessThanOrEqual(name.accessibilityFrame.maxX, try XCTUnwrap(icons.first).accessibilityFrame.minX)
+                XCTAssertLessThanOrEqual(try XCTUnwrap(elements().first { $0.accessibilityLabel == "Channel Admin" }).accessibilityFrame.maxX, width)
+                let image = UIGraphicsImageRenderer(size: host.view.bounds.size).image { _ in host.view.drawHierarchy(in: host.view.bounds, afterScreenUpdates: true) }
+                let key = "members-self-\(selection.rawValue)-\(Int(width))-\(category)"
+                try image.pngData()?.write(to: FileManager.default.temporaryDirectory.appendingPathComponent(key + ".png"))
+                let attachment = XCTAttachment(image: image); attachment.name = key; attachment.lifetime = .keepAlways; add(attachment)
+                XCTAssertEqual(client.state.clients.map(\.name), [renamed.name])
+            }
+        }
+        language.select(.english); client.state = Snapshot(status: "connected", ownClient: 7, clients: [own, peer])
+        try await show()
+        let channel = Channel(id: 9, parent: 0, order: 0, name: "Lobby", password: false, permanent: true, key: "lobby", icon: nil, iconPath: nil)
+        client.state.channels = [channel]
+        let channelsTab = try XCTUnwrap(elements().first { $0.accessibilityTraits.contains(.button) && $0.accessibilityLabel == L10n.string("tab_channels") })
+        XCTAssertTrue(channelsTab.accessibilityActivate()); try await settle()
+        let channelButton = try XCTUnwrap(elements().first { $0.accessibilityTraits.contains(.button) && $0.accessibilityLabel?.hasPrefix(channel.name) == true })
+        XCTAssertTrue(channelButton.accessibilityActivate()); try await Task.sleep(nanoseconds: 500_000_000)
+        let sheet = try XCTUnwrap(container.presentedViewController ?? host.presentedViewController)
+        let sheetElements = elements(sheet.view)
+        XCTAssertTrue(sheetElements.contains { $0.accessibilityLabel == own.accessibilityLabel })
+        XCTAssertFalse(sheetElements.contains { $0.accessibilityLabel?.contains(L10n.string("member_self_suffix")) == true }, "Shared rows in channel details retain the real nickname")
+        let close = try XCTUnwrap(sheetElements.first { $0.accessibilityTraits.contains(.button) && $0.accessibilityLabel == L10n.string("action_close") })
+        XCTAssertTrue(close.accessibilityActivate()); try await Task.sleep(nanoseconds: 500_000_000)
+        let membersTab = try XCTUnwrap(elements().first { $0.accessibilityTraits.contains(.button) && $0.accessibilityLabel == L10n.string("tab_members") })
+        XCTAssertTrue(membersTab.accessibilityActivate()); try await settle()
+        let link = try XCTUnwrap(elements().first { $0.accessibilityTraits.contains(.button) && $0.accessibilityLabel?.contains(peer.name) == true })
+        XCTAssertTrue(link.accessibilityActivate()); try await settle()
+        XCTAssertTrue(elements().contains { $0.accessibilityLabel == L10n.string("action_send") }, "Other members still navigate to private chat")
+    }
+
     @MainActor func testSpeechModePreservesInFlightManualAudioIntent() async throws {
         let client = Client.shared
         guard !client.connected, !client.busy else { throw XCTSkip("Requires an offline test profile") }

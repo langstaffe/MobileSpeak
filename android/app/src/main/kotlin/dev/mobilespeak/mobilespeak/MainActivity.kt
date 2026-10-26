@@ -748,14 +748,19 @@ private fun ChannelDialog(channel: Channel, ui: SessionUiState, onDismiss: () ->
 internal fun MemberScreen(ui: SessionUiState, onChat: (Member) -> Unit) {
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = pageTitleInset, bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         item { PageTitle(stringResource(R.string.tab_members), Modifier.padding(horizontal = pageTitleInset)) }
-        items(ui.snapshot.clients.filter { it.id != ui.snapshot.ownClient }, key = { it.id }) { member ->
-            MemberRow(member, Modifier.padding(horizontal = 16.dp).clickable(enabled = member.uid != null, interactionSource = null, indication = RowPressFeedback) { onChat(member) }, ui.unread.privateCounts[member.uid] ?: 0)
+        items(ui.snapshot.clients, key = { it.id }) { member ->
+            val isSelf = member.id == ui.snapshot.ownClient
+            val row = Modifier.padding(horizontal = 16.dp)
+            MemberRow(member,
+                if (isSelf) row else row.clickable(enabled = member.uid != null, interactionSource = null, indication = RowPressFeedback) { onChat(member) },
+                unread = if (isSelf) 0 else ui.unread.privateCounts[member.uid] ?: 0,
+                isSelf = isSelf)
         }
     }
 }
 
 @Composable
-private fun MemberRow(member: Member, modifier: Modifier = Modifier, unread: Int = 0) {
+private fun MemberRow(member: Member, modifier: Modifier = Modifier, unread: Int = 0, isSelf: Boolean = false) {
     val badges = member.badges.filter { it.iconPath != null }.take(4)
     val group = member.channelGroupIcon?.takeIf { it.iconPath != null || it.iconId in listOf(100L, 300L) }
     val groups = member.serverGroupIcons.filter { it.iconPath != null || it.iconId in listOf(100L, 300L) }.take((5 - badges.size - if (group == null) 0 else 1).coerceAtLeast(0))
@@ -765,7 +770,15 @@ private fun MemberRow(member: Member, modifier: Modifier = Modifier, unread: Int
             UnreadBadge(unread, Modifier.align(Alignment.TopEnd).offset(x = 5.dp, y = (-5).dp))
         }
         val description = member.accessibilityLabel(LocalContext.current)
-        Text(member.name, Modifier.weight(1f).clearAndSetSemantics { contentDescription = description }, fontSize = 17.sp, lineHeight = 20.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        if (isSelf) {
+            val suffix = stringResource(R.string.member_self_suffix)
+            Row(Modifier.weight(1f).clearAndSetSemantics { contentDescription = description + suffix }) {
+                Text(member.name, Modifier.weight(1f, fill = false).alignByBaseline(), fontSize = 17.sp, lineHeight = 20.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(suffix, Modifier.alignByBaseline(), color = Palette.muted, fontSize = 17.sp, lineHeight = 20.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        } else {
+            Text(member.name, Modifier.weight(1f).clearAndSetSemantics { contentDescription = description }, fontSize = 17.sp, lineHeight = 20.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
         if (groups.isNotEmpty() || badges.isNotEmpty() || group != null) Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
             groups.forEach { GroupIconView(it) }
             badges.forEach { BadgeView(it) }

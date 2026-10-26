@@ -47,6 +47,7 @@
     <string name="member_listening_off">Wiedergabe aus</string>
     <string name="member_away">Abwesend</string>
     <string name="member_muted">Stummgeschaltet</string>
+    <string name="member_self_suffix">\u0020(du)</string>
     <string name="member_speaking">Spricht</string>
     <string name="member_microphone_on">Mikrofon an</string>
     <string name="settings_microphone">Mikrofon</string>

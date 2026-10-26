@@ -46,6 +46,7 @@
     <string name="member_listening_off">關閉收聽</string>
     <string name="member_away">離開</string>
     <string name="member_muted">已靜音</string>
+    <string name="member_self_suffix">（我）</string>
     <string name="member_speaking">正在發言</string>
     <string name="member_microphone_on">麥克風開啟</string>
     <string name="settings_microphone">麥克風</string>

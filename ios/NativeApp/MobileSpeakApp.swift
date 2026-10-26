@@ -1523,15 +1523,16 @@ struct HomeView: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 16) {
                 PageTitle(key: "tab_members").padding(.horizontal, PageTitle.inset)
-                ForEach(client.state.clients.filter { $0.id != client.state.ownClient }) { member in
-                    if member.uid != nil {
+                ForEach(client.state.clients) { member in
+                    let isSelf = member.id == client.state.ownClient
+                    if !isSelf && member.uid != nil {
                         NavigationLink(destination: PrivateChatView(client: client, member: member)) { memberRow(member, showUnread: true) }.buttonStyle(.plain).padding(.horizontal, 16)
-                    } else { memberRow(member).padding(.horizontal, 16) }
+                    } else { memberRow(member, isSelf: isSelf).padding(.horizontal, 16) }
                 }
             }.padding(.top, PageTitle.inset).padding(.bottom, 16)
         }
     }
-    private func memberRow(_ m: Member, showUnread: Bool = false) -> some View {
+    private func memberRow(_ m: Member, showUnread: Bool = false, isSelf: Bool = false) -> some View {
         // ponytail: show the first four; use a width-aware strip if people routinely select more.
         let visibleBadges = m.badges.filter { $0.iconPath != nil }.prefix(4)
         let channelGroupIcon = m.channelGroupIcon?.canDisplay == true ? m.channelGroupIcon : nil
@@ -1543,7 +1544,17 @@ struct HomeView: View {
                 .overlay(alignment: .topTrailing) {
                     if showUnread { UnreadBadge(count: client.privateUnread(m)).offset(x: 5, y: -5) }
                 }
-            Text(m.name).lineLimit(1).truncationMode(.tail).accessibilityLabel(m.accessibilityLabel)
+            if isSelf {
+                HStack(alignment: .firstTextBaseline, spacing: 0) {
+                    Text(m.name).lineLimit(1).truncationMode(.tail)
+                    Text(L10n.string("member_self_suffix")).foregroundStyle(Palette.muted)
+                        .lineLimit(1).truncationMode(.tail).layoutPriority(1)
+                }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(m.accessibilityLabel + L10n.string("member_self_suffix"))
+            } else {
+                Text(m.name).lineLimit(1).truncationMode(.tail).accessibilityLabel(m.accessibilityLabel)
+            }
             Spacer(minLength: 8)
             if !visibleBadges.isEmpty || !visibleGroupIcons.isEmpty || channelGroupIcon != nil {
                 HStack(spacing: 3) {

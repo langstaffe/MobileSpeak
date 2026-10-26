@@ -47,6 +47,7 @@
     <string name="member_listening_off">Listening Off</string>
     <string name="member_away">Away</string>
     <string name="member_muted">Muted</string>
+    <string name="member_self_suffix">\u0020(You)</string>
     <string name="member_speaking">Speaking</string>
     <string name="member_microphone_on">Microphone On</string>
     <string name="settings_microphone">Microphone</string>

@@ -48,6 +48,7 @@
     <string name="member_listening_off">Écoute désactivée</string>
     <string name="member_away">Absent</string>
     <string name="member_muted">Micro coupé</string>
+    <string name="member_self_suffix">\u0020(vous)</string>
     <string name="member_speaking">Parle</string>
     <string name="member_microphone_on">Micro activé</string>
     <string name="settings_microphone">Microphone</string>
