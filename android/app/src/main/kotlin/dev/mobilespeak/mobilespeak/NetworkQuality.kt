@@ -68,7 +68,6 @@ private fun NetworkNumbers(quality: NetworkQuality, style: TextStyle, modifier: 
     val latency = NetworkQuality.number(quality.rttMs, 0, 999.0, locale)
     val deviation = NetworkQuality.number(quality.deviationMs, 1, 999.9, locale)
     val loss = NetworkQuality.number(quality.packetLossPercent, 1, locale = locale)
-    val (unitPrefix, unitSuffix) = millisecondAffixes(locale)
     val (percentPrefix, percentSuffix) = percentAffixes(locale)
     val description = if (quality.rttMs == null) stringResource(R.string.network_unavailable)
         else stringResource(R.string.network_summary, latency, deviation, loss)
@@ -76,9 +75,8 @@ private fun NetworkNumbers(quality: NetworkQuality, style: TextStyle, modifier: 
     Column(modifier.clearAndSetSemantics { contentDescription = description }, verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(stringResource(R.string.network_latency), color = Palette.muted, fontSize = 12.sp)
         Text(buildAnnotatedString {
-            withStyle(SpanStyle(color = Palette.muted)) { append(unitPrefix) }
             withStyle(SpanStyle(color = quality.rttGrade.networkColor())) { append(latency) }
-            withStyle(SpanStyle(color = Palette.muted)) { append(unitSuffix); append(" ± ") }
+            withStyle(SpanStyle(color = Palette.muted)) { append(" ms ± ") }
             withStyle(SpanStyle(color = quality.deviationGrade.networkColor())) { append(deviation) }
         }, style = style)
         Text(buildAnnotatedString {
@@ -100,9 +98,8 @@ internal fun NetworkChart(quality: NetworkQuality, modifier: Modifier) {
     val locale = resources.configuration.locales[0]
     val axis = NetworkQuality.axisNumber(quality.axisMaxMs, locale)
     val midAxis = NetworkQuality.axisNumber(quality.axisMaxMs / 2, locale)
-    val (unitPrefix, unitSuffix) = millisecondAffixes(locale)
-    val upper = measurer.measure(AnnotatedString(unitPrefix + axis + unitSuffix), style, softWrap = false)
-    val middle = measurer.measure(AnnotatedString(unitPrefix + midAxis + unitSuffix), style, softWrap = false)
+    val upper = measurer.measure(AnnotatedString("$axis ms"), style, softWrap = false)
+    val middle = measurer.measure(AnnotatedString("$midAxis ms"), style, softWrap = false)
     val description = stringResource(R.string.network_chart) + ", " + if (quality.samples.isEmpty()) stringResource(R.string.network_unavailable)
         else stringResource(R.string.network_chart_summary, quality.samples.size, axis)
     val history = quality.samples.filter { quality.nowSecond - it.second in 0..29 && it.packetLossFraction != null }.map {

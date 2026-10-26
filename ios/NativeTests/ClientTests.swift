@@ -3396,7 +3396,7 @@ extension ClientTests {
             XCTAssertEqual(NetworkQuality.number(.infinity, decimals: 1), "—")
             XCTAssertEqual(L10n.percent(42), L10n.percentPrefix + "42" + L10n.percentSuffix)
             XCTAssertEqual(L10n.percent(300), L10n.percentPrefix + "300" + L10n.percentSuffix)
-            XCTAssertFalse(L10n.millisecondsUnit.isEmpty)
+            XCTAssertEqual(L10n.millisecondsUnit, "ms", language.rawValue)
             XCTAssertEqual(L10n.fileSize(1_500_000), Int64(1_500_000).formatted(.byteCount(style: .file).locale(settings.locale)))
             XCTAssertEqual(L10n.fileDate(1_700_000_000), Date(timeIntervalSince1970: 1_700_000_000)
                 .formatted(Date.FormatStyle(date: .numeric, time: .shortened).locale(settings.locale)))

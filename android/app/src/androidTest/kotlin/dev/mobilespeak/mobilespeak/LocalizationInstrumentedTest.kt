@@ -163,11 +163,6 @@ class LocalizationInstrumentedTest {
                     val (percentPrefix, percentSuffix) = percentAffixes(locale)
                     assertEquals(percentFormat.format(.061), percentPrefix + "6${decimal}1" + percentSuffix)
                     assertEquals(java.text.NumberFormat.getPercentInstance(locale).format(1.25), localizedPercent(125, locale))
-                    val (unitPrefix, unitSuffix) = millisecondAffixes(locale)
-                    val measureFormat = android.icu.text.MeasureFormat.getInstance(locale, android.icu.text.MeasureFormat.FormatWidth.SHORT,
-                        android.icu.text.NumberFormat.getInstance(locale).apply { minimumFractionDigits = 1; maximumFractionDigits = 1 })
-                    assertEquals(measureFormat.formatMeasures(android.icu.util.Measure(6.1, android.icu.util.MeasureUnit.MILLISECOND)),
-                        unitPrefix + "6${decimal}1" + unitSuffix)
                     assertEquals(android.text.format.Formatter.formatFileSize(localized, 1536000), context.localizedFileSize(1536000))
                     val timestamp = 1735689600L
                     assertEquals(java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.SHORT, java.text.DateFormat.SHORT, locale)

@@ -142,13 +142,7 @@ enum L10n {
     // Keep the numeric value separately colored while retaining the locale's percent spacing.
     static var percentPrefix: String { percentFormatter.positivePrefix }
     static var percentSuffix: String { percentFormatter.positiveSuffix }
-    static var millisecondsUnit: String {
-        let formatter = MeasurementFormatter()
-        formatter.locale = locale
-        formatter.unitStyle = .short
-        formatter.unitOptions = .providedUnit
-        return formatter.string(from: UnitDuration.milliseconds)
-    }
+    static let millisecondsUnit = "ms"
 
     static func withDetail(_ key: String, _ detail: String?) -> String {
         let message = string(key)

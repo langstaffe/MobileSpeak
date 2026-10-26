@@ -115,13 +115,6 @@ internal fun localizedPercent(percent: Int, locale: Locale): String = java.text.
 internal fun percentAffixes(locale: Locale): Pair<String, String> =
     (java.text.NumberFormat.getPercentInstance(locale) as java.text.DecimalFormat).let { it.positivePrefix to it.positiveSuffix }
 
-internal fun millisecondAffixes(locale: Locale): Pair<String, String> {
-    val position = java.text.FieldPosition(android.icu.text.NumberFormat.INTEGER_FIELD)
-    val text = android.icu.text.MeasureFormat.getInstance(locale, android.icu.text.MeasureFormat.FormatWidth.SHORT)
-        .formatMeasures(StringBuilder(), position, android.icu.util.Measure(0, android.icu.util.MeasureUnit.MILLISECOND)).toString()
-    return text.substring(0, position.beginIndex) to text.substring(position.endIndex)
-}
-
 data class LocalizedMessage(
     @param:StringRes val id: Int,
     val detail: String? = null,
