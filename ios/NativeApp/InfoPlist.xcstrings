@@ -64,6 +64,18 @@
             "state" : "translated",
             "value" : "MobileSpeak"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MobileSpeak"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MobileSpeak"
+          }
         }
       }
     },
@@ -126,6 +138,18 @@
           }
         },
         "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MobileSpeak"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MobileSpeak"
+          }
+        },
+        "ko" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "MobileSpeak"
@@ -195,6 +219,18 @@
             "state" : "translated",
             "value" : "Se connecter au serveur TeamSpeak local de votre choix."
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "選択したTeamSpeakサーバーにローカルネットワーク経由で接続します。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "선택한 TeamSpeak 서버에 로컬 네트워크를 통해 연결합니다."
+          }
         }
       }
     },
@@ -259,6 +295,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Transmettre votre voix aux membres d’un salon TeamSpeak lorsque vous activez le microphone."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "マイクをオンにすると、TeamSpeakチャンネルのメンバーにあなたの声を送信します。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "마이크를 켜면 TeamSpeak 채널의 멤버에게 내 음성을 전송합니다."
           }
         }
       }

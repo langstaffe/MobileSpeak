@@ -63,6 +63,18 @@
             "state" : "translated",
             "value" : " ms ± "
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : " ms ± "
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : " ms ± "
+          }
         }
       }
     },
@@ -124,6 +136,18 @@
           }
         },
         "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%"
+          }
+        },
+        "ko" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "%"
@@ -193,6 +217,18 @@
             "state" : "translated",
             "value" : "%1$@ · %2$@"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ · %2$@"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ · %2$@"
+          }
         }
       }
     },
@@ -254,6 +290,18 @@
           }
         },
         "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ · %2$@ / %3$@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ · %2$@ / %3$@"
+          }
+        },
+        "ko" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "%1$@ · %2$@ / %3$@"
@@ -323,6 +371,18 @@
             "state" : "translated",
             "value" : "%@%%"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@%%"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@%%"
+          }
         }
       }
     },
@@ -387,6 +447,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "使用瀏覽器開啟"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ブラウザで開く"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "브라우저에서 열기"
           }
         }
       }
@@ -453,6 +525,18 @@
             "state" : "translated",
             "value" : "專案位址"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "プロジェクト"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "프로젝트"
+          }
         }
       }
     },
@@ -517,6 +601,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "目前版本"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "現在のバージョン"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "현재 버전"
           }
         }
       }
@@ -583,6 +679,18 @@
             "state" : "translated",
             "value" : "選擇語言"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "言語を選択"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "언어 선택"
+          }
         }
       }
     },
@@ -647,6 +755,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "關閉錯誤提示"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "エラーを閉じる"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "오류 닫기"
           }
         }
       }
@@ -713,6 +833,18 @@
             "state" : "translated",
             "value" : "返回"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "戻る"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "뒤로"
+          }
         }
       }
     },
@@ -777,6 +909,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "取消"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "キャンセル"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "취소"
           }
         }
       }
@@ -843,6 +987,18 @@
             "state" : "translated",
             "value" : "關閉"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "閉じる"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "닫기"
+          }
         }
       }
     },
@@ -907,6 +1063,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "連線到伺服器"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "サーバーに接続"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "서버 연결"
           }
         }
       }
@@ -973,6 +1141,18 @@
             "state" : "translated",
             "value" : "刪除"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "削除"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "삭제"
+          }
         }
       }
     },
@@ -1037,6 +1217,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "中斷連線"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "切断"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "연결 해제"
           }
         }
       }
@@ -1103,6 +1295,18 @@
             "state" : "translated",
             "value" : "編輯"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "編集"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "편집"
+          }
         }
       }
     },
@@ -1167,6 +1371,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "加入"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "参加"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "참가"
           }
         }
       }
@@ -1233,6 +1449,18 @@
             "state" : "translated",
             "value" : "儲存"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "保存"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "저장"
+          }
         }
       }
     },
@@ -1297,6 +1525,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "儲存並連線"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "保存して接続"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "저장 후 연결"
           }
         }
       }
@@ -1363,6 +1603,18 @@
             "state" : "translated",
             "value" : "傳送"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "送信"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "보내기"
+          }
         }
       }
     },
@@ -1427,6 +1679,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "更換頭像"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "アバターを変更"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "아바타 변경"
           }
         }
       }
@@ -1493,6 +1757,18 @@
             "state" : "translated",
             "value" : "正在檢查頭像設定…"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "アバター設定を確認中…"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "아바타 설정 확인 중…"
+          }
         }
       }
     },
@@ -1557,6 +1833,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "選擇頭像"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "アバターを選択"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "아바타 선택"
           }
         }
       }
@@ -1623,6 +1911,18 @@
             "state" : "translated",
             "value" : "從照片圖庫中選擇圖片"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "写真ライブラリから画像を選択"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "사진 보관함에서 이미지 선택"
+          }
         }
       }
     },
@@ -1687,6 +1987,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "頭像設定已儲存，但舊本機檔案清理失敗。"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "アバター設定を保存しましたが、端末内の古いファイルを削除できませんでした。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "아바타 설정은 저장했지만 기기에 있는 이전 파일을 정리하지 못했습니다."
           }
         }
       }
@@ -1753,6 +2065,18 @@
             "state" : "translated",
             "value" : "清除本機頭像，並清除目前伺服器上的個人頭像。其他伺服器上的頭像將在下次連線時清除。"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "端末内とこのサーバー上の自分のアバターを削除します。他のサーバーのアバターは、それぞれ次回接続したときに削除されます。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "기기와 이 서버에 저장된 내 아바타를 삭제합니다. 다른 서버의 아바타는 해당 서버에 다음번에 연결할 때 삭제됩니다."
+          }
         }
       }
     },
@@ -1817,6 +2141,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "清除本機頭像。各伺服器上的個人頭像將在下次連線時清除。"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "端末内のアバターを削除します。各サーバー上の自分のアバターは、次回接続したときに削除されます。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "기기에 저장된 아바타를 삭제합니다. 각 서버의 내 아바타는 다음번에 연결할 때 삭제됩니다."
           }
         }
       }
@@ -1883,6 +2219,18 @@
             "state" : "translated",
             "value" : "未能確認此伺服器頭像已清除。清除設定仍然保留。"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このサーバーでアバターが削除されたことを確認できませんでした。削除設定は保持されています。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 서버의 아바타 삭제 여부를 확인하지 못했습니다. 삭제 설정은 유지됩니다."
+          }
         }
       }
     },
@@ -1947,6 +2295,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "本機已清除，等待連線伺服器。"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "端末内のアバターを削除しました。サーバーへの接続を待っています。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "기기에 저장된 아바타를 삭제했습니다. 서버 연결을 기다리고 있습니다."
           }
         }
       }
@@ -2013,6 +2373,18 @@
             "state" : "translated",
             "value" : "無法儲存清除設定，原頭像設定保持不變。"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "削除設定を保存できませんでした。以前のアバター設定は変更されていません。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "삭제 설정을 저장하지 못했습니다. 이전 아바타 설정은 그대로 유지됩니다."
+          }
         }
       }
     },
@@ -2077,6 +2449,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "此伺服器已無個人頭像。其他伺服器將在連線時同步。"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このサーバーに自分のアバターはありません。他のサーバーには接続時に反映されます。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 서버에 내 아바타가 없습니다. 다른 서버에는 연결 시 반영됩니다."
           }
         }
       }
@@ -2143,6 +2527,18 @@
             "state" : "translated",
             "value" : "本機頭像已清除"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "端末内のアバターを削除済み"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "기기에 저장된 아바타 삭제됨"
+          }
         }
       }
     },
@@ -2207,6 +2603,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "正在清除此伺服器的頭像…"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このサーバーのアバターを削除中…"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 서버의 내 아바타 삭제 중…"
           }
         }
       }
@@ -2273,6 +2681,18 @@
             "state" : "translated",
             "value" : "正方形裁切區域與圓形頭像預覽"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正方形の切り抜き範囲と円形のアバタープレビュー"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "정사각형 자르기 영역 및 원형 아바타 미리보기"
+          }
         }
       }
     },
@@ -2337,6 +2757,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "裁切區域向下移動"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "切り抜き範囲を下に移動"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "자르기 영역을 아래로 이동"
           }
         }
       }
@@ -2403,6 +2835,18 @@
             "state" : "translated",
             "value" : "無法處理或儲存此頭像，原頭像保持不變。"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "アバターを処理または保存できませんでした。以前のアバターは変更されていません。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "아바타를 처리하거나 저장하지 못했습니다. 이전 아바타는 그대로 유지됩니다."
+          }
         }
       }
     },
@@ -2467,6 +2911,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "拖曳或雙指縮放以調整構圖。上傳的是正方形圖片；圓形區域只用於預覽頭像。"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ドラッグとピンチで調整できます。正方形の範囲がアップロードされ、円形の範囲がアバターのプレビューです。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "드래그하거나 두 손가락으로 확대·축소해 조정하세요. 정사각형 영역이 업로드되며, 원형 영역은 아바타 미리보기입니다."
           }
         }
       }
@@ -2533,6 +2989,18 @@
             "state" : "translated",
             "value" : "裁切區域向左移動"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "切り抜き範囲を左に移動"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "자르기 영역을 왼쪽으로 이동"
+          }
         }
       }
     },
@@ -2597,6 +3065,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "裁切區域向右移動"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "切り抜き範囲を右に移動"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "자르기 영역을 오른쪽으로 이동"
           }
         }
       }
@@ -2663,6 +3143,18 @@
             "state" : "translated",
             "value" : "正在儲存頭像…"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "アバターを保存中…"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "아바타 저장 중…"
+          }
         }
       }
     },
@@ -2727,6 +3219,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "裁切頭像"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "アバターを切り抜く"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "아바타 자르기"
           }
         }
       }
@@ -2793,6 +3297,18 @@
             "state" : "translated",
             "value" : "裁切區域向上移動"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "切り抜き範囲を上に移動"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "자르기 영역을 위로 이동"
+          }
         }
       }
     },
@@ -2857,6 +3373,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "使用此頭像"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このアバターを使う"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 아바타 사용"
           }
         }
       }
@@ -2923,6 +3451,18 @@
             "state" : "translated",
             "value" : "縮放"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "拡大率"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "확대·축소"
+          }
         }
       }
     },
@@ -2987,6 +3527,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "頭像同步失敗"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "アバターの同期に失敗しました"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "아바타 동기화 실패"
           }
         }
       }
@@ -3053,6 +3605,18 @@
             "state" : "translated",
             "value" : "全域頭像設定會在連線各伺服器時逐個同步。清除後，其他伺服器上的頭像將在下次連線時清除。"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "共通のアバター設定は、接続時に各サーバーと同期されます。削除した場合も、他のサーバーには次回の接続時に反映されます。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "공통 아바타 설정은 각 서버에 연결할 때 동기화됩니다. 아바타 삭제도 다른 서버에 다음번에 연결할 때 반영됩니다."
+          }
         }
       }
     },
@@ -3117,6 +3681,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "無法處理或儲存此圖片，請選擇受支援的靜態圖片。"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "画像を処理または保存できませんでした。対応する形式の静止画を選んでください。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이미지를 처리하거나 저장하지 못했습니다. 지원되는 형식의 정지 이미지를 선택하세요."
           }
         }
       }
@@ -3183,6 +3759,18 @@
             "state" : "translated",
             "value" : "已儲存在本機"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "この端末に保存済み"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 기기에 저장됨"
+          }
         }
       }
     },
@@ -3247,6 +3835,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已儲存在本機；連線後同步。"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "端末に保存しました。接続時に同期されます。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "기기에 저장했습니다. 연결 시 동기화됩니다."
           }
         }
       }
@@ -3313,6 +3913,18 @@
             "state" : "translated",
             "value" : "尚未選擇本機頭像"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "アバターは選択されていません"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "선택한 아바타 없음"
+          }
         }
       }
     },
@@ -3377,6 +3989,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "本機個人頭像預覽"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "端末に保存したアバターのプレビュー"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "기기에 저장된 내 아바타 미리보기"
           }
         }
       }
@@ -3443,6 +4067,18 @@
             "state" : "translated",
             "value" : "清除頭像"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "アバターを削除"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "아바타 삭제"
+          }
         }
       }
     },
@@ -3507,6 +4143,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "伺服器無頭像狀態確認"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "サーバー上のアバターが未設定か確認"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "서버의 아바타가 비어 있는지 확인"
           }
         }
       }
@@ -3573,6 +4221,18 @@
             "state" : "translated",
             "value" : "伺服器頭像已清除"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "サーバー上のアバター削除後の処理"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "서버의 아바타 삭제 후 처리"
+          }
         }
       }
     },
@@ -3637,6 +4297,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "伺服器頭像刪除"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "サーバー上のアバターの削除"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "서버의 아바타 삭제"
           }
         }
       }
@@ -3703,6 +4375,18 @@
             "state" : "translated",
             "value" : "更新頭像雜湊值"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "アバターのハッシュの更新"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "아바타 해시 업데이트"
+          }
         }
       }
     },
@@ -3767,6 +4451,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "讀取本機頭像"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "保存済みアバターの読み込み"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "저장된 아바타 읽기"
           }
         }
       }
@@ -3833,6 +4529,18 @@
             "state" : "translated",
             "value" : "上一次頭像傳輸確認"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "前回のアバター転送の確認"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이전 아바타 전송 확인"
+          }
         }
       }
     },
@@ -3897,6 +4605,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "停止上一次頭像傳輸"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "前回のアバター転送の停止"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이전 아바타 전송 중지"
           }
         }
       }
@@ -3963,6 +4683,18 @@
             "state" : "translated",
             "value" : "確認伺服器頭像雜湊值"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "サーバー上のアバターハッシュの確認"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "서버의 아바타 해시 확인"
+          }
         }
       }
     },
@@ -4027,6 +4759,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "目前身分的伺服器頭像狀態"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "現在のアイデンティティのアバター状態の確認"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "현재 아이덴티티의 아바타 상태 확인"
           }
         }
       }
@@ -4093,6 +4837,18 @@
             "state" : "translated",
             "value" : "頭像驗證完成後"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "アバター検証後の処理"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "아바타 검증 후 처리"
+          }
         }
       }
     },
@@ -4157,6 +4913,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "建立頭像上傳連線"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "アバターアップロード用の接続"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "아바타 업로드 연결 열기"
           }
         }
       }
@@ -4223,6 +4991,18 @@
             "state" : "translated",
             "value" : "寫入頭像資料"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "アバターデータの書き込み"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "아바타 데이터 쓰기"
+          }
         }
       }
     },
@@ -4287,6 +5067,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "建立頭像驗證連線"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "アバター検証用の接続"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "아바타 검증 연결 열기"
           }
         }
       }
@@ -4353,6 +5145,18 @@
             "state" : "translated",
             "value" : "驗證伺服器頭像檔案"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "サーバー上のアバターファイルの検証"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "서버의 아바타 파일 검증"
+          }
         }
       }
     },
@@ -4417,6 +5221,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "頭像已同步到此伺服器。"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このサーバーとアバターを同期しました。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 서버와 아바타를 동기화했습니다."
           }
         }
       }
@@ -4483,6 +5299,18 @@
             "state" : "translated",
             "value" : "個人頭像"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自分のアバター"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "내 아바타"
+          }
         }
       }
     },
@@ -4547,6 +5375,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "此伺服器已有相同頭像。"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このサーバーには同じアバターが設定されています。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 서버에 이미 같은 아바타가 설정되어 있습니다."
           }
         }
       }
@@ -4613,6 +5453,18 @@
             "state" : "translated",
             "value" : "正在同步頭像…"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "アバターを同期中…"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "아바타 동기화 중…"
+          }
         }
       }
     },
@@ -4677,6 +5529,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "新增伺服器"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "サーバーを追加"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "서버 추가"
           }
         }
       }
@@ -4743,6 +5607,18 @@
             "state" : "translated",
             "value" : "確定刪除「%1$@」及其儲存的密碼嗎？"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "「%1$@」と保存済みのパスワードを削除しますか？"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "북마크 ‘%1$@’ 및 저장된 비밀번호를 삭제할까요?"
+          }
         }
       }
     },
@@ -4807,6 +5683,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "刪除書籤"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ブックマークを削除"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "북마크 삭제"
           }
         }
       }
@@ -4873,6 +5761,18 @@
             "state" : "translated",
             "value" : "中斷目前的連線後，才能連線到其他伺服器。"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "別のサーバーに接続するには、先に現在の接続を切断してください。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "다른 서버에 연결하려면 먼저 현재 연결을 해제하세요."
+          }
         }
       }
     },
@@ -4937,6 +5837,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "編輯伺服器"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "サーバーを編集"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "서버 편집"
           }
         }
       }
@@ -5003,6 +5915,18 @@
             "state" : "translated",
             "value" : "管理%1$@"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "「%1$@」を管理"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "북마크 관리: %1$@"
+          }
         }
       }
     },
@@ -5067,6 +5991,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "書籤名稱（選填）"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ブックマーク名（任意）"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "북마크 이름(선택 사항)"
           }
         }
       }
@@ -5133,6 +6069,18 @@
             "state" : "translated",
             "value" : "儲存書籤"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ブックマークを保存"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "북마크 저장"
+          }
         }
       }
     },
@@ -5197,6 +6145,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "伺服器書籤"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "サーバーブックマーク"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "서버 북마크"
           }
         }
       }
@@ -5263,6 +6223,18 @@
             "state" : "translated",
             "value" : "開啟%1$@的頻道聊天"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "「%1$@」のチャットを開く"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "채널 채팅 열기: %1$@"
+          }
         }
       }
     },
@@ -5327,6 +6299,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "加入頻道"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "チャンネルに参加"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "채널 참가"
           }
         }
       }
@@ -5549,6 +6533,30 @@
               }
             }
           }
+        },
+        "ja" : {
+          "variations" : {
+            "plural" : {
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "· %lld人がオンライン"
+                }
+              }
+            }
+          }
+        },
+        "ko" : {
+          "variations" : {
+            "plural" : {
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "· 온라인 %lld명"
+                }
+              }
+            }
+          }
         }
       }
     },
@@ -5613,6 +6621,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "暫時沒有成員"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "メンバーはいません"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "아직 멤버가 없습니다"
           }
         }
       }
@@ -5679,6 +6699,18 @@
             "state" : "translated",
             "value" : "頻道密碼"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "チャンネルパスワード"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "채널 비밀번호"
+          }
         }
       }
     },
@@ -5743,6 +6775,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "輸入訊息"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "メッセージ"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "메시지"
           }
         }
       }
@@ -5809,6 +6853,18 @@
             "state" : "translated",
             "value" : "訊息過長。"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "メッセージが長すぎます。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "메시지가 너무 깁니다."
+          }
         }
       }
     },
@@ -5874,6 +6930,18 @@
             "state" : "translated",
             "value" : "傳送失敗"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "送信失敗"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "전송 실패"
+          }
         }
       }
     },
@@ -5935,6 +7003,18 @@
           }
         },
         "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OFF"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OFF"
+          }
+        },
+        "ko" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "OFF"
@@ -6004,6 +7084,18 @@
             "state" : "translated",
             "value" : "連線到你的 TeamSpeak 伺服器，和朋友聊天"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "TeamSpeakサーバーに接続して、仲間と話しましょう"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "TeamSpeak 서버에 연결해 친구들과 대화하세요"
+          }
         }
       }
     },
@@ -6068,6 +7160,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "隨時加入對話"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "いつでも会話に参加しよう"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "언제든 대화에 참여하세요"
           }
         }
       }
@@ -6134,6 +7238,18 @@
             "state" : "translated",
             "value" : "音訊引擎未啟動。"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "オーディオエンジンが動作していません。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "오디오 엔진이 실행되고 있지 않습니다."
+          }
         }
       }
     },
@@ -6198,6 +7314,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "麥克風音訊格式無法使用（%1$.0f Hz，%2$lld 聲道）。"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "マイクの音声形式を利用できません（%1$.0f Hz、%2$lldチャンネル）。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "마이크 오디오 형식을 사용할 수 없습니다(%1$.0f Hz, %2$lld채널)."
           }
         }
       }
@@ -6264,6 +7392,18 @@
             "state" : "translated",
             "value" : "音訊恢復失敗。"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "音声の復旧に失敗しました。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "음성 복구에 실패했습니다."
+          }
         }
       }
     },
@@ -6328,6 +7468,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "音訊啟動失敗。"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "音声を開始できませんでした。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "음성을 시작하지 못했습니다."
           }
         }
       }
@@ -6394,6 +7546,18 @@
             "state" : "translated",
             "value" : "無法刪除書籤。"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ブックマークを削除できませんでした。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "북마크를 삭제하지 못했습니다."
+          }
         }
       }
     },
@@ -6458,6 +7622,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "相同位址和連接埠的書籤已存在。"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "同じアドレスとポートのブックマークがすでにあります。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "같은 주소와 포트의 북마크가 이미 있습니다."
           }
         }
       }
@@ -6524,6 +7700,18 @@
             "state" : "translated",
             "value" : "請輸入有效的位址、連接埠和密碼。"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "有効なアドレス、ポート、パスワードを入力してください。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "올바른 주소, 포트, 비밀번호를 입력하세요."
+          }
         }
       }
     },
@@ -6588,6 +7776,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "無法讀取或安全遷移已有書籤。"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "既存のブックマークの読み込み、または安全な移行に失敗しました。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "기존 북마크를 읽거나 안전하게 이전하지 못했습니다."
           }
         }
       }
@@ -6654,6 +7854,18 @@
             "state" : "translated",
             "value" : "書籤已刪除，但無法清理儲存的密碼。"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ブックマークは削除されましたが、保存済みのパスワードを削除できませんでした。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "북마크는 삭제했지만 저장된 비밀번호를 삭제하지 못했습니다."
+          }
         }
       }
     },
@@ -6718,6 +7930,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "無法讀取儲存的書籤密碼。"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ブックマークに保存されたパスワードを読み込めませんでした。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "북마크에 저장된 비밀번호를 읽지 못했습니다."
           }
         }
       }
@@ -6784,6 +8008,18 @@
             "state" : "translated",
             "value" : "無法安全儲存書籤密碼。"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ブックマークのパスワードを安全に保存できませんでした。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "북마크 비밀번호를 안전하게 저장하지 못했습니다."
+          }
         }
       }
     },
@@ -6848,6 +8084,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "無法讀取書籤資料，已停止寫入以保護原有資料。"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ブックマークのデータを読み込めないため、上書きは行いません。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "북마크 데이터를 읽지 못해 덮어쓰지 않습니다."
           }
         }
       }
@@ -6914,6 +8162,18 @@
             "state" : "translated",
             "value" : "無法準備本機頭像和聊天儲存空間。"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "端末内のアバターとチャット保存領域を準備できませんでした。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "기기의 아바타 및 채팅 저장 공간을 준비하지 못했습니다."
+          }
         }
       }
     },
@@ -6978,6 +8238,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "無法訂閱頻道。"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "チャンネルを購読できませんでした。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "채널을 구독하지 못했습니다."
           }
         }
       }
@@ -7044,6 +8316,18 @@
             "state" : "translated",
             "value" : "頻道不可用。"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このチャンネルは利用できません。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 채널은 사용할 수 없습니다."
+          }
         }
       }
     },
@@ -7108,6 +8392,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "無法讀取本機聊天記錄。"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "端末内のチャット履歴を読み込めませんでした。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "기기에 저장된 채팅 기록을 읽지 못했습니다."
           }
         }
       }
@@ -7174,6 +8470,18 @@
             "state" : "translated",
             "value" : "儲存聊天記錄失敗。"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "チャット履歴を保存できませんでした。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "채팅 기록을 저장하지 못했습니다."
+          }
         }
       }
     },
@@ -7238,6 +8546,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "客戶端狀態尚未準備好。"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "クライアントの準備がまだできていません。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "클라이언트가 아직 준비되지 않았습니다."
           }
         }
       }
@@ -7304,6 +8624,18 @@
             "state" : "translated",
             "value" : "連線恢復中，請稍後再加入頻道。"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "接続を復旧中です。少し待ってから、もう一度参加してください。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "연결을 복구하고 있습니다. 잠시 후 다시 참가하세요."
+          }
         }
       }
     },
@@ -7368,6 +8700,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "請先中斷目前伺服器的連線，再連線到其他伺服器。"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "別のサーバーに接続するには、先に現在の接続を切断してください。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "다른 서버에 연결하려면 먼저 현재 연결을 해제하세요."
           }
         }
       }
@@ -7434,6 +8778,18 @@
             "state" : "translated",
             "value" : "發生了錯誤。"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "エラーが発生しました。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "오류가 발생했습니다."
+          }
         }
       }
     },
@@ -7498,6 +8854,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "無法安全讀取或儲存 TeamSpeak 身分。"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "TeamSpeakのアイデンティティの読み込みまたは保存を安全に行えませんでした。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "TeamSpeak 아이덴티티를 안전하게 읽거나 저장하지 못했습니다."
           }
         }
       }
@@ -7564,6 +8932,18 @@
             "state" : "translated",
             "value" : "加入頻道失敗。"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "チャンネルに参加できませんでした。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "채널에 참가하지 못했습니다."
+          }
         }
       }
     },
@@ -7628,6 +9008,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "此頻道使用舊版編碼，僅支援 Opus。"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このチャンネルでは古いコーデックが使用されています。対応しているのはOpusのみです。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 채널은 오래된 코덱을 사용합니다. Opus만 지원됩니다."
           }
         }
       }
@@ -7694,6 +9086,18 @@
             "state" : "translated",
             "value" : "訊息傳送失敗。"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "メッセージを送信できませんでした。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "메시지를 보내지 못했습니다."
+          }
         }
       }
     },
@@ -7758,6 +9162,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "連線暫時中斷，伺服器未確認訊息。"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "サーバーからこのメッセージの受信確認が届く前に、接続が中断されました。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "서버에서 이 메시지의 수신 확인을 받기 전에 연결이 끊어졌습니다."
           }
         }
       }
@@ -7824,6 +9240,18 @@
             "state" : "translated",
             "value" : "應用程式上次關閉前，伺服器尚未確認這則訊息。"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "前回アプリが終了するまでに、サーバーからこのメッセージの受信確認が届きませんでした。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "지난번 앱이 종료되기 전까지 서버에서 이 메시지의 수신 확인을 받지 못했습니다."
+          }
         }
       }
     },
@@ -7888,6 +9316,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "你已不在這個頻道。"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "現在、このチャンネルには参加していません。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "현재 이 채널에 참가하고 있지 않습니다."
           }
         }
       }
@@ -7954,6 +9394,18 @@
             "state" : "translated",
             "value" : "請在設定中允許麥克風權限。"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "システムの設定でマイクの使用を許可してください。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "시스템 설정에서 마이크 접근을 허용하세요."
+          }
         }
       }
     },
@@ -8018,6 +9470,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "暱稱須為 1 至 128 個 UTF-8 位元組。"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ニックネームはUTF-8で1～128バイトにしてください。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "닉네임은 UTF-8 기준 1~128바이트로 입력하세요."
           }
         }
       }
@@ -8084,6 +9548,18 @@
             "state" : "translated",
             "value" : "音訊處理切換失敗，已保留原本的選項。"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "音声処理を切り替えられませんでした。以前の設定を保持しています。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "음성 처리를 전환하지 못했습니다. 이전 설정은 유지됩니다."
+          }
         }
       }
     },
@@ -8148,6 +9624,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "無法提交操作。"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "操作を送信できませんでした。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "작업 요청을 보내지 못했습니다."
           }
         }
       }
@@ -8214,6 +9702,18 @@
             "state" : "translated",
             "value" : "無法讀取個人資料，已保留原有資料。"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "プロフィールを読み込めませんでした。既存のデータは保持されています。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "프로필을 읽지 못했습니다. 기존 데이터는 유지됩니다."
+          }
         }
       }
     },
@@ -8278,6 +9778,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "伺服器未能修改你的暱稱。"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "サーバーでニックネームを変更できませんでした。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "서버에서 닉네임을 변경하지 못했습니다."
           }
         }
       }
@@ -8344,6 +9856,18 @@
             "state" : "translated",
             "value" : "無法儲存暱稱，請重試。"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ニックネームを保存できませんでした。もう一度お試しください。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "닉네임을 저장하지 못했습니다. 다시 시도하세요."
+          }
         }
       }
     },
@@ -8408,6 +9932,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "此使用者的連線已改變，請重新調整音量。"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このユーザーの接続が変わりました。音量をもう一度調整してください。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 사용자의 연결이 변경되었습니다. 음량을 다시 조절하세요."
           }
         }
       }
@@ -8474,6 +10010,18 @@
             "state" : "translated",
             "value" : "無法讀取已儲存的音訊設定，已保留原檔案。"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "保存済みの音声設定を読み込めませんでした。既存のファイルは保持されています。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "저장된 음성 설정을 읽지 못했습니다. 기존 파일은 유지됩니다."
+          }
         }
       }
     },
@@ -8538,6 +10086,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "無法儲存音訊設定，重新啟動後可能無法恢復本次更改。"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "音声設定を保存できませんでした。再起動すると変更が失われる場合があります。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "음성 설정을 저장하지 못했습니다. 다시 시작하면 변경 사항이 사라질 수 있습니다."
           }
         }
       }
@@ -8604,6 +10164,18 @@
             "state" : "translated",
             "value" : "請輸入有效的伺服器位址和連接埠。"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "有効なサーバーアドレスとポートを入力してください。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "올바른 서버 주소와 포트를 입력하세요."
+          }
         }
       }
     },
@@ -8668,6 +10240,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "無法儲存發言方式，請重試。"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "発言モードを保存できませんでした。もう一度お試しください。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "발언 모드를 저장하지 못했습니다. 다시 시도하세요."
           }
         }
       }
@@ -8734,6 +10318,18 @@
             "state" : "translated",
             "value" : "連線期間不能更改儲存位置。"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "接続中は保存領域を変更できません。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "연결 중에는 저장소를 변경할 수 없습니다."
+          }
         }
       }
     },
@@ -8798,6 +10394,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "不支援此訊息目標。"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このメッセージの送信先には対応していません。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "지원되지 않는 메시지 수신 대상입니다."
           }
         }
       }
@@ -8864,6 +10472,18 @@
             "state" : "translated",
             "value" : "更新音訊狀態失敗。"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "音声の状態を更新できませんでした。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "음성 상태를 업데이트하지 못했습니다."
+          }
         }
       }
     },
@@ -8928,6 +10548,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "使用者連線已變化，請重新開啟對話。"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このユーザーの接続が変わりました。会話を開き直してください。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 사용자의 연결이 변경되었습니다. 대화를 다시 여세요."
           }
         }
       }
@@ -8994,6 +10626,18 @@
             "state" : "translated",
             "value" : "該使用者沒有可用的 TeamSpeak UID。"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このユーザーのアイデンティティを取得できません。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 사용자의 아이덴티티를 확인할 수 없습니다."
+          }
         }
       }
     },
@@ -9059,6 +10703,18 @@
             "state" : "translated",
             "value" : "該使用者已離線。"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このユーザーはすでにオフラインです。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 사용자는 더 이상 온라인 상태가 아닙니다."
+          }
         }
       }
     },
@@ -9120,6 +10776,18 @@
           }
         },
         "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ %2$@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ %2$@"
+          }
+        },
+        "ko" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "%1$@ %2$@"
@@ -9189,6 +10857,18 @@
             "state" : "translated",
             "value" : "此檔案正在傳輸中。"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このファイルはすでに転送中です。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이미 전송 중인 파일입니다."
+          }
         }
       }
     },
@@ -9253,6 +10933,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "檔案操作進行中，請稍後重試。"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ファイル操作中です。しばらくしてからお試しください。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "파일 작업이 진행 중입니다. 잠시 후 다시 시도하세요."
           }
         }
       }
@@ -9319,6 +11011,18 @@
             "state" : "translated",
             "value" : "清除檔案快取"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ファイルキャッシュを削除"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "파일 캐시 삭제"
+          }
         }
       }
     },
@@ -9383,6 +11087,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "未能完整清理檔案快取，請重試。"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "一部のファイルキャッシュを削除できませんでした。もう一度お試しください。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "일부 파일 캐시를 삭제하지 못했습니다. 다시 시도하세요."
           }
         }
       }
@@ -9449,6 +11165,18 @@
             "state" : "translated",
             "value" : "已清理 %@"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@を削除しました"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 삭제됨"
+          }
         }
       }
     },
@@ -9513,6 +11241,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "清除"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "削除"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "삭제"
           }
         }
       }
@@ -9579,6 +11319,18 @@
             "state" : "translated",
             "value" : "清除 MobileSpeak 中所有伺服器和頻道的本機下載檔案與上傳暫存檔。伺服器檔案、原始檔案及已匯出的副本不受影響。上傳失敗的檔案需要重新選擇。"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MobileSpeak内のすべてのサーバーとチャンネルのダウンロード済みファイルと、アップロード用の一時ファイルを端末から削除します。サーバー上のファイル、元のファイル、書き出したコピーは削除されません。失敗したアップロードをやり直すには、ファイルを選び直す必要があります。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MobileSpeak의 모든 서버와 채널에서 다운로드한 파일 및 업로드용 임시 파일을 기기에서 삭제합니다. 서버의 파일, 원본 파일, 내보낸 사본에는 영향이 없습니다. 실패한 업로드를 다시 시도하려면 파일을 새로 선택해야 합니다."
+          }
         }
       }
     },
@@ -9643,6 +11395,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "清除檔案快取？"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ファイルキャッシュを削除しますか？"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "파일 캐시를 삭제할까요?"
           }
         }
       }
@@ -9709,6 +11473,18 @@
             "state" : "translated",
             "value" : "無法計算檔案快取大小。"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ファイルキャッシュのサイズを計算できませんでした。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "파일 캐시 크기를 계산하지 못했습니다."
+          }
         }
       }
     },
@@ -9773,6 +11549,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "重新計算"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "再計算"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "다시 계산"
           }
         }
       }
@@ -9839,6 +11627,18 @@
             "state" : "translated",
             "value" : "儲存"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ストレージ"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "저장 공간"
+          }
         }
       }
     },
@@ -9903,6 +11703,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "頻道下載檔案與上傳暫存檔"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "チャンネルからのダウンロードとアップロード用の一時ファイル"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "채널 다운로드 및 업로드용 임시 파일"
           }
         }
       }
@@ -9969,6 +11781,18 @@
             "state" : "translated",
             "value" : "檔案傳輸完成後可清理"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ファイル転送が完了すると利用できます"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "파일 전송이 끝나면 사용할 수 있습니다"
+          }
         }
       }
     },
@@ -10033,6 +11857,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "遠端檔案已改變，請重新整理目錄後重試。"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "サーバー上のファイルが変更されました。フォルダを再読み込みして、もう一度お試しください。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "서버의 파일이 변경되었습니다. 폴더를 새로고침한 후 다시 시도하세요."
           }
         }
       }
@@ -10099,6 +11935,18 @@
             "state" : "translated",
             "value" : "目前頻道已改變，請重新開啟頻道檔案。"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "参加中のチャンネルが変わりました。チャンネルのファイルを開き直してください。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "현재 채널이 변경되었습니다. 채널 파일을 다시 여세요."
+          }
         }
       }
     },
@@ -10163,6 +12011,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "無法選擇或開啟此檔案。"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このファイルを選択または開くことができませんでした。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 파일을 선택하거나 열지 못했습니다."
           }
         }
       }
@@ -10229,6 +12089,18 @@
             "state" : "translated",
             "value" : "完成"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "完了"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "완료"
+          }
         }
       }
     },
@@ -10293,6 +12165,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "連線已中斷，傳輸失敗；重新連線後可重試。"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "接続が切れ、転送に失敗しました。再接続して、もう一度お試しください。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "연결이 끊어져 전송에 실패했습니다. 다시 연결한 후 시도하세요."
           }
         }
       }
@@ -10359,6 +12243,18 @@
             "state" : "translated",
             "value" : "下載"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ダウンロード"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "다운로드"
+          }
         }
       }
     },
@@ -10423,6 +12319,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已下載"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ダウンロード済み"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "다운로드됨"
           }
         }
       }
@@ -10489,6 +12397,18 @@
             "state" : "translated",
             "value" : "目前沒有檔案"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ファイルはありません"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "파일 없음"
+          }
         }
       }
     },
@@ -10553,6 +12473,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已存在同名檔案。請選擇其他檔案，不會自動覆蓋。"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "同じ名前のファイルがすでにあります。別のファイルを選んでください。既存のファイルは上書きされません。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "같은 이름의 파일이 이미 있습니다. 다른 파일을 선택하세요. 기존 파일은 덮어쓰지 않습니다."
           }
         }
       }
@@ -10619,6 +12551,18 @@
             "state" : "translated",
             "value" : "失敗"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "失敗"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "실패"
+          }
         }
       }
     },
@@ -10683,6 +12627,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "檔案"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ファイル"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "파일"
           }
         }
       }
@@ -10749,6 +12705,18 @@
             "state" : "translated",
             "value" : "資料夾"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "フォルダ"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "폴더"
+          }
         }
       }
     },
@@ -10813,6 +12781,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "傳輸提前結束，檔案不完整。"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "すべてのデータを受信する前に転送が終了しました。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "모든 데이터를 받기 전에 전송이 종료되었습니다."
           }
         }
       }
@@ -10879,6 +12859,18 @@
             "state" : "translated",
             "value" : "檔案資訊"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ファイル情報"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "파일 정보"
+          }
         }
       }
     },
@@ -10943,6 +12935,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "伺服器傳回無效的傳輸位移，請重試。"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "サーバーから無効な転送位置が返されました。もう一度お試しください。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "서버에서 잘못된 전송 위치를 반환했습니다. 다시 시도하세요."
           }
         }
       }
@@ -11009,6 +13013,18 @@
             "state" : "translated",
             "value" : "檔案名稱或路徑無效。"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ファイル名またはパスが無効です。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "파일 이름 또는 경로가 올바르지 않습니다."
+          }
         }
       }
     },
@@ -11073,6 +13089,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "無法載入目錄"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このフォルダを読み込めませんでした"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 폴더를 불러오지 못했습니다"
           }
         }
       }
@@ -11139,6 +13167,18 @@
             "state" : "translated",
             "value" : "請先載入目錄再上傳。"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "アップロードする前にフォルダを読み込んでください。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "업로드하기 전에 폴더를 불러오세요."
+          }
         }
       }
     },
@@ -11203,6 +13243,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "載入中…"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "読み込み中…"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "불러오는 중…"
           }
         }
       }
@@ -11269,6 +13321,18 @@
             "state" : "translated",
             "value" : "位置"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "場所"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "위치"
+          }
         }
       }
     },
@@ -11333,6 +13397,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "開啟"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "開く"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "열기"
           }
         }
       }
@@ -11399,6 +13475,18 @@
             "state" : "translated",
             "value" : "伺服器拒絕了此檔案操作的權限。"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このファイル操作はサーバーで許可されていません。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "서버에서 이 파일 작업을 허용하지 않았습니다."
+          }
         }
       }
     },
@@ -11463,6 +13551,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "重新整理"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更新"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "새로고침"
           }
         }
       }
@@ -11529,6 +13629,18 @@
             "state" : "translated",
             "value" : "重試"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "再試行"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "다시 시도"
+          }
         }
       }
     },
@@ -11593,6 +13705,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "傳輸中"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "転送中"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "전송 중"
           }
         }
       }
@@ -11659,6 +13783,18 @@
             "state" : "translated",
             "value" : "分享"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "共有"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "공유"
+          }
         }
       }
     },
@@ -11723,6 +13859,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "大小"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "サイズ"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "크기"
           }
         }
       }
@@ -11789,6 +13937,18 @@
             "state" : "translated",
             "value" : "名稱"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "名前"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이름"
+          }
         }
       }
     },
@@ -11853,6 +14013,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "時間"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "日時"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "시간"
           }
         }
       }
@@ -11919,6 +14091,18 @@
             "state" : "translated",
             "value" : "正在準備上傳…"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "アップロードを準備中…"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "업로드 준비 중…"
+          }
         }
       }
     },
@@ -11983,6 +14167,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "無法讀取或儲存本機檔案。"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "端末内のファイルの読み込みまたは保存に失敗しました。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "기기의 파일을 읽거나 저장하지 못했습니다."
           }
         }
       }
@@ -12049,6 +14245,18 @@
             "state" : "translated",
             "value" : "瀏覽與上傳"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "閲覧とアップロード"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "탐색 및 업로드"
+          }
         }
       }
     },
@@ -12113,6 +14321,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "伺服器時間"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "サーバー上の日時"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "서버 시간"
           }
         }
       }
@@ -12179,6 +14399,18 @@
             "state" : "translated",
             "value" : "請求逾時。可重試；若伺服器沒有回應，請重新連線。"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "リクエストがタイムアウトしました。もう一度お試しください。サーバーが応答しない場合は再接続してください。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "요청 시간이 초과되었습니다. 다시 시도하세요. 서버가 응답하지 않으면 다시 연결하세요."
+          }
         }
       }
     },
@@ -12243,6 +14475,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "頻道檔案"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "チャンネルのファイル"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "채널 파일"
           }
         }
       }
@@ -12309,6 +14553,18 @@
             "state" : "translated",
             "value" : "頻道工具"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "チャンネルツール"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "채널 도구"
+          }
         }
       }
     },
@@ -12373,6 +14629,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "類型"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "種類"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "유형"
           }
         }
       }
@@ -12439,6 +14707,18 @@
             "state" : "translated",
             "value" : "伺服器傳回非預期的傳輸回應，請重試。"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ファイル転送に対し、サーバーから想定外の応答がありました。もう一度お試しください。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "파일 전송 중 서버에서 예상하지 못한 응답을 받았습니다. 다시 시도하세요."
+          }
         }
       }
     },
@@ -12504,6 +14784,18 @@
             "state" : "translated",
             "value" : "上傳"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "アップロード"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "업로드"
+          }
         }
       }
     },
@@ -12565,6 +14857,18 @@
           }
         },
         "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "English"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "English"
+          }
+        },
+        "ko" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "English"
@@ -12634,6 +14938,18 @@
             "state" : "translated",
             "value" : "Français"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Français"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Français"
+          }
         }
       }
     },
@@ -12699,6 +15015,172 @@
             "state" : "translated",
             "value" : "Deutsch"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Deutsch"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Deutsch"
+          }
+        }
+      }
+    },
+    "language_japanese" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "日本語"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "日本語"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "日本語"
+          }
+        },
+        "es-MX" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "日本語"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "日本語"
+          }
+        },
+        "pl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "日本語"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "日本語"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "日本語"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "日本語"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "日本語"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "日本語"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "日本語"
+          }
+        }
+      }
+    },
+    "language_korean" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "한국어"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "한국어"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "한국어"
+          }
+        },
+        "es-MX" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "한국어"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "한국어"
+          }
+        },
+        "pl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "한국어"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "한국어"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "한국어"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "한국어"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "한국어"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "한국어"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "한국어"
+          }
         }
       }
     },
@@ -12760,6 +15242,18 @@
           }
         },
         "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Polski"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Polski"
+          }
+        },
+        "ko" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Polski"
@@ -12829,6 +15323,18 @@
             "state" : "translated",
             "value" : "Português (Brasil)"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Português (Brasil)"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Português (Brasil)"
+          }
         }
       }
     },
@@ -12890,6 +15396,18 @@
           }
         },
         "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Русский"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Русский"
+          }
+        },
+        "ko" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Русский"
@@ -12959,6 +15477,18 @@
             "state" : "translated",
             "value" : "中文（简体）"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "中文（简体）"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "中文（简体）"
+          }
         }
       }
     },
@@ -13020,6 +15550,18 @@
           }
         },
         "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Español"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Español"
+          }
+        },
+        "ko" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Español"
@@ -13089,6 +15631,18 @@
             "state" : "translated",
             "value" : "Español (México)"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Español (México)"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Español (México)"
+          }
         }
       }
     },
@@ -13154,6 +15708,18 @@
             "state" : "translated",
             "value" : "跟隨系統"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "システム設定に従う"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "시스템 설정 따르기"
+          }
         }
       }
     },
@@ -13215,6 +15781,18 @@
           }
         },
         "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "中文（繁體）"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "中文（繁體）"
+          }
+        },
+        "ko" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "中文（繁體）"
@@ -13284,6 +15862,18 @@
             "state" : "translated",
             "value" : "離開"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "離席中"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "자리 비움"
+          }
         }
       }
     },
@@ -13348,6 +15938,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "關閉收聽"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "受信音声オフ"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "수신 음성 꺼짐"
           }
         }
       }
@@ -13414,6 +16016,18 @@
             "state" : "translated",
             "value" : "麥克風已開啟"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "マイクオン"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "마이크 켜짐"
+          }
         }
       }
     },
@@ -13478,6 +16092,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已靜音"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "マイクミュート"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "마이크 음소거"
           }
         }
       }
@@ -13544,6 +16170,18 @@
             "state" : "translated",
             "value" : "（我）"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "（自分）"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : " (나)"
+          }
         }
       }
     },
@@ -13608,6 +16246,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "正在發言"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "発言中"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "말하는 중"
           }
         }
       }
@@ -13674,6 +16324,18 @@
             "state" : "translated",
             "value" : "最近 30 秒延遲"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "過去30秒間の遅延"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "최근 30초간 지연 시간"
+          }
         }
       }
     },
@@ -13738,6 +16400,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%d 秒前，封包遺失率為百分之 %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%d秒前、パケット損失%@パーセント"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%d초 전, 패킷 손실 %@퍼센트"
           }
         }
       }
@@ -13804,6 +16478,18 @@
             "state" : "translated",
             "value" : "%d 個取樣，縱軸 0 至 %@ 毫秒"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "サンプル数%d、目盛りは0～%@ミリ秒"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "표본 %d개, 눈금 범위 0~%@밀리초"
+          }
         }
       }
     },
@@ -13868,6 +16554,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "延遲"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "遅延"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "지연 시간"
           }
         }
       }
@@ -13934,6 +16632,18 @@
             "state" : "translated",
             "value" : "封包遺失率"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "パケット損失"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "패킷 손실"
+          }
         }
       }
     },
@@ -13998,6 +16708,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "延遲 %@ 毫秒，RTT 波動 %@ 毫秒，封包遺失率為百分之 %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "遅延%@ミリ秒、RTT変動%@ミリ秒、パケット損失%@パーセント"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "지연 시간 %@밀리초, RTT 변동 %@밀리초, 패킷 손실 %@퍼센트"
           }
         }
       }
@@ -14064,6 +16786,18 @@
             "state" : "translated",
             "value" : "目前沒有網路統計"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ネットワーク統計を取得できません"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "네트워크 통계를 사용할 수 없습니다"
+          }
         }
       }
     },
@@ -14128,6 +16862,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "暱稱"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ニックネーム"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "닉네임"
           }
         }
       }
@@ -14194,6 +16940,18 @@
             "state" : "translated",
             "value" : "密碼"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "パスワード"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "비밀번호"
+          }
         }
       }
     },
@@ -14258,6 +17016,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "修改暱稱，%@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ニックネームを編集、現在の名前は「%@」"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "닉네임 편집, 현재 이름: %@"
           }
         }
       }
@@ -14324,6 +17094,18 @@
             "state" : "translated",
             "value" : "修改暱稱"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ニックネームを編集"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "닉네임 편집"
+          }
         }
       }
     },
@@ -14388,6 +17170,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "個人資料"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "プロフィール"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "프로필"
           }
         }
       }
@@ -14454,6 +17248,18 @@
             "state" : "translated",
             "value" : "未選擇"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未選択"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "선택 안 됨"
+          }
         }
       }
     },
@@ -14518,6 +17324,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已選擇"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "選択中"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "선택됨"
           }
         }
       }
@@ -14584,6 +17402,18 @@
             "state" : "translated",
             "value" : "位址 / 域名"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "アドレス／ドメイン"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "주소 / 도메인"
+          }
         }
       }
     },
@@ -14648,6 +17478,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "伺服器密碼（選填）"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "サーバーパスワード（任意）"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "서버 비밀번호(선택 사항)"
           }
         }
       }
@@ -14714,6 +17556,18 @@
             "state" : "translated",
             "value" : "連接埠"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ポート"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "포트"
+          }
         }
       }
     },
@@ -14778,6 +17632,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "伺服器"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "サーバー"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "서버"
           }
         }
       }
@@ -14844,6 +17710,18 @@
             "state" : "translated",
             "value" : "關於 MobileSpeak"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MobileSpeakについて"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MobileSpeak 정보"
+          }
         }
       }
     },
@@ -14908,6 +17786,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "目前生效：%@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用中：%@"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "사용 중: %@"
           }
         }
       }
@@ -14974,6 +17864,18 @@
             "state" : "translated",
             "value" : "正在切換…"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "切り替え中…"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "전환 중…"
+          }
         }
       }
     },
@@ -15038,6 +17940,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "DPDFNet2 會消耗較多處理器資源和電量。效能較低的裝置可能出現語音斷續，尤其是在背景執行時。"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "DPDFNet2はCPUとバッテリーの消費が増えます。処理性能が低い端末では、特にバックグラウンドで音声が途切れる場合があります。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "DPDFNet2는 CPU와 배터리를 더 많이 사용합니다. 성능이 낮은 기기에서는 특히 백그라운드에서 음성이 끊길 수 있습니다."
           }
         }
       }
@@ -15104,6 +18018,18 @@
             "state" : "translated",
             "value" : "語言"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "言語"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "언어"
+          }
         }
       }
     },
@@ -15168,6 +18094,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "收聽"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "受信音声"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "수신 음성"
           }
         }
       }
@@ -15234,6 +18172,18 @@
             "state" : "translated",
             "value" : "麥克風"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "マイク"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "마이크"
+          }
         }
       }
     },
@@ -15298,6 +18248,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "預設開啟，關閉收聽時麥克風也會靜音。"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "初期設定ではオンです。受信音声をオフにすると、マイクもミュートになります。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "기본적으로 켜져 있습니다. 수신 음성을 끄면 마이크도 음소거됩니다."
           }
         }
       }
@@ -15364,6 +18326,18 @@
             "state" : "translated",
             "value" : "無"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "なし"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "없음"
+          }
         }
       }
     },
@@ -15428,6 +18402,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "降噪"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ノイズ抑制"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "소음 억제"
           }
         }
       }
@@ -15494,6 +18480,18 @@
             "state" : "translated",
             "value" : "「無」會關閉 MobileSpeak 降噪；系統語音處理仍可能生效。"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "「なし」を選ぶとMobileSpeakのノイズ抑制を無効にします。システムによる音声処理は適用される場合があります。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "‘없음’을 선택하면 MobileSpeak의 소음 억제가 꺼집니다. 시스템의 음성 처리는 계속 적용될 수 있습니다."
+          }
         }
       }
     },
@@ -15558,6 +18556,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "自動增益控制"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自動音量調整"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "자동 음량 조절"
           }
         }
       }
@@ -15624,6 +18634,18 @@
             "state" : "translated",
             "value" : "自動調整其他使用者的音量"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "他のユーザーの音量を自動で調整します"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "다른 사용자의 음량을 자동으로 조절합니다"
+          }
         }
       }
     },
@@ -15688,6 +18710,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "自動發言"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自動"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "자동"
           }
         }
       }
@@ -15754,6 +18788,18 @@
             "state" : "translated",
             "value" : "發言方式"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "発言モード"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "발언 모드"
+          }
         }
       }
     },
@@ -15818,6 +18864,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "按鍵說話"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "押して話す"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "눌러서 말하기"
           }
         }
       }
@@ -15884,6 +18942,18 @@
             "state" : "translated",
             "value" : "已連線到 #%1$@"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "参加中：#%1$@"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "연결된 채널: #%1$@"
+          }
         }
       }
     },
@@ -15948,6 +19018,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "正在連線…"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "接続中…"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "연결 중…"
           }
         }
       }
@@ -16014,6 +19096,18 @@
             "state" : "translated",
             "value" : "正在連線到伺服器…"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "サーバーに接続中…"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "서버에 연결 중…"
+          }
         }
       }
     },
@@ -16078,6 +19172,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "未連線"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未接続"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "연결 안 됨"
           }
         }
       }
@@ -16144,6 +19250,18 @@
             "state" : "translated",
             "value" : "正在重新連線…"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "再接続中…"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "다시 연결 중…"
+          }
         }
       }
     },
@@ -16208,6 +19326,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "頻道"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "チャンネル"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "채널"
           }
         }
       }
@@ -16274,6 +19404,18 @@
             "state" : "translated",
             "value" : "成員"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "メンバー"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "멤버"
+          }
         }
       }
     },
@@ -16338,6 +19480,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "設定"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "設定"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "설정"
           }
         }
       }
@@ -16404,6 +19558,18 @@
             "state" : "translated",
             "value" : "關閉收聽"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "受信音声をオフ"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "수신 음성 끄기"
+          }
         }
       }
     },
@@ -16468,6 +19634,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "收起連線狀態抽屜"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "接続パネルを閉じる"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "연결 패널 접기"
           }
         }
       }
@@ -16534,6 +19712,18 @@
             "state" : "translated",
             "value" : "已收起"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "閉じています"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "접힘"
+          }
         }
       }
     },
@@ -16598,6 +19788,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "展開連線狀態抽屜"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "接続パネルを開く"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "연결 패널 펼치기"
           }
         }
       }
@@ -16664,6 +19866,18 @@
             "state" : "translated",
             "value" : "已展開"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "開いています"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "펼쳐짐"
+          }
         }
       }
     },
@@ -16728,6 +19942,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "開啟收聽"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "受信音声をオン"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "수신 음성 켜기"
           }
         }
       }
@@ -16794,6 +20020,18 @@
             "state" : "translated",
             "value" : "開啟麥克風"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "マイクをオン"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "마이크 켜기"
+          }
         }
       }
     },
@@ -16858,6 +20096,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "按住說話"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "押し続ける"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "누르고 있기"
           }
         }
       }
@@ -16924,6 +20174,18 @@
             "state" : "translated",
             "value" : "允許使用麥克風"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "マイクの使用を許可"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "마이크 접근 허용"
+          }
         }
       }
     },
@@ -16988,6 +20250,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "前往系統設定啟用麥克風"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "マイクの設定を開く"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "마이크 설정 열기"
           }
         }
       }
@@ -17054,6 +20328,18 @@
             "state" : "translated",
             "value" : "靜音"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "マイクをミュート"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "마이크 음소거"
+          }
         }
       }
     },
@@ -17118,6 +20404,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "正在發言"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "発言中"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "말하는 중"
           }
         }
       }
@@ -17184,6 +20482,18 @@
             "state" : "translated",
             "value" : "語音發言頻道：%@"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "音声チャンネル：%@"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "음성 채널: %@"
+          }
         }
       }
     },
@@ -17248,6 +20558,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "按住以說話；放開或移出按鈕即可停止。"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ボタンを押している間、音声を送信します。指を離すかボタンの外に動かすと、送信を停止します。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "버튼을 누르고 있는 동안 음성이 전송됩니다. 손을 떼거나 버튼 밖으로 이동하면 전송이 멈춥니다."
           }
         }
       }
@@ -17314,6 +20636,18 @@
             "state" : "translated",
             "value" : "按住說話"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "押して話す"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "눌러서 말하기"
+          }
         }
       }
     },
@@ -17378,6 +20712,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%@ 的音量"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "「%@」の音量"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "사용자 음량: %@"
           }
         }
       }
@@ -17444,6 +20790,18 @@
             "state" : "translated",
             "value" : "目前沒有其他線上使用者"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "他にオンラインのユーザーはいません"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "온라인 상태인 다른 사용자가 없습니다"
+          }
         }
       }
     },
@@ -17509,6 +20867,18 @@
             "state" : "translated",
             "value" : "調整使用者音量"
           }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ユーザーの音量調整"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "사용자 음량 조절"
+          }
         }
       }
     },
@@ -17573,6 +20943,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "伺服器工具"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "サーバーツール"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "서버 도구"
           }
         }
       }

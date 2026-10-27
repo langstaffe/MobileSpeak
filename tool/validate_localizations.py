@@ -7,13 +7,14 @@ from pathlib import Path
 import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[1]
-LANGUAGES = ('en', 'zh-Hans', 'zh-Hant', 'de', 'ru', 'pl', 'es-MX', 'fr', 'pt-BR', 'es')
+LANGUAGES = ('en', 'zh-Hans', 'zh-Hant', 'de', 'ru', 'pl', 'es-MX', 'fr', 'pt-BR', 'es', 'ja', 'ko')
 AUTONYMS = {
     'language_english': 'English', 'language_simplified_chinese': '中文（简体）',
     'language_traditional_chinese': '中文（繁體）', 'language_german': 'Deutsch',
     'language_russian': 'Русский', 'language_polish': 'Polski',
     'language_spanish_mexico': 'Español (México)', 'language_french': 'Français',
     'language_portuguese_brazil': 'Português (Brasil)', 'language_spanish': 'Español',
+    'language_japanese': '日本語', 'language_korean': '한국어',
 }
 # A numeric argument must keep its width and precision, even if reordered.
 FORMAT = re.compile(r'%(?:(\d+)\$)?([-+ #0]*)(\d+)?(\.\d+)?(ll|l)?([@sdfiu])')
@@ -50,6 +51,8 @@ def validate():
 
     for filename in ('Localizable.xcstrings', 'InfoPlist.xcstrings'):
         catalog = json.loads((ROOT / 'ios/NativeApp' / filename).read_text())['strings']
+        if filename == 'Localizable.xcstrings':
+            check(AUTONYMS.keys() <= catalog.keys(), f'{filename}: missing language title key')
         for key, entry in catalog.items():
             localizations = entry.get('localizations', {})
             baseline = units(localizations['en']) if 'en' in localizations else {'value': key}
@@ -71,6 +74,7 @@ def validate():
 
     resources = ROOT / 'android/app/src/main/res'
     base = {e.attrib['name']: e for e in ET.parse(resources / 'values/strings.xml').getroot()}
+    check(AUTONYMS.keys() <= base.keys(), 'Android: missing language title key')
     for language in LANGUAGES:
         candidates = ['values' if language == 'en' else 'values-b+' + language.replace('-', '+')]
         if language not in ('en', 'zh-Hans', 'zh-Hant'):

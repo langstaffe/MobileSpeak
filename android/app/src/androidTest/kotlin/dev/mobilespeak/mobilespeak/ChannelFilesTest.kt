@@ -68,6 +68,8 @@ class ChannelFilesTest {
             try {
                 instrumentation.runOnMainSync { AppLanguage.select(AppLanguage.fromCode(language)) }
                 instrumentation.waitForIdleSync()
+                scenario.recreate()
+                instrumentation.waitForIdleSync()
                 assertEquals(AppLanguage.fromCode(language), AppLanguage.selected())
                 lateinit var activity: MainActivity
                 val configuration = android.content.res.Configuration(context.resources.configuration).apply { setLocale(java.util.Locale.forLanguageTag(language)) }
@@ -97,7 +99,15 @@ class ChannelFilesTest {
                     node.config.getOrNull(SemanticsProperties.ContentDescription).orEmpty()
                 fun buttons(label: String) = semantics().filter { it.config.getOrNull(SemanticsActions.OnClick)?.action != null && label in texts(it) }
                 fun enabled(node: SemanticsNode) = !node.config.contains(SemanticsProperties.Disabled)
-                fun button(label: String) = requireNotNull(buttons(label).firstOrNull()) { "Missing $label" }
+                fun button(label: String): SemanticsNode {
+                    val deadline = android.os.SystemClock.uptimeMillis() + 5_000
+                    var found = buttons(label).firstOrNull()
+                    while (found == null && android.os.SystemClock.uptimeMillis() < deadline) {
+                        android.os.SystemClock.sleep(20)
+                        found = buttons(label).firstOrNull()
+                    }
+                    return requireNotNull(found) { "Missing $label at $language/$font" }
+                }
                 val refresh = button(localized.getString(R.string.files_reload))
                 val sorting = button(localized.getString(R.string.files_sort_name))
                 val refreshBounds = refresh.boundsInRoot
@@ -111,7 +121,10 @@ class ChannelFilesTest {
                 fun tagged(value: String) = semantics().single { it.config.getOrNull(SemanticsProperties.TestTag) == value }.boundsInRoot
                 val heading = tagged("drawer-page-title")
                 val subtitle = tagged("drawer-page-subtitle")
-                assertEquals(160 * density, heading.center.x, density)
+                val backBounds = tagged("drawer-page-back")
+                val uploadBounds = tagged("files-upload")
+                val titleCenter = if (font >= 1.5f) 160 * density else (backBounds.right + uploadBounds.left) / 2
+                assertEquals(titleCenter, heading.center.x, density)
                 assertEquals(heading.center.x, subtitle.center.x, density)
                 assertEquals(2 * density, subtitle.top - heading.bottom, density / 2)
                 if (font >= 1.5f) {
@@ -120,6 +133,7 @@ class ChannelFilesTest {
                 } else {
                     assertTrue(tagged("drawer-page-back").right <= heading.left)
                     assertTrue(heading.right <= tagged("files-upload").left)
+                    assertEquals(uploadBounds.left - backBounds.right - 8 * density, heading.width, density)
                 }
                 assertTrue(semantics().any { texts(it).any { text -> text.contains(".pdf") } })
                 val locale = java.util.Locale.forLanguageTag(language)

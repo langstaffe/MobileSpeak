@@ -30,6 +30,79 @@ class UserStatusTest {
     private fun member(path: String? = null, muted: Boolean = false, deafened: Boolean = false, away: Boolean = false) =
         Member(7, 9, "uid-7", "User 7", path, emptyList(), emptyList(), null, muted, deafened, false, volumeToken = "token-7", away = away)
 
+    @Test fun japaneseAndKoreanChatEditorAcceptsCommittedTextAndUsesUtf8ByteLimit() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val context = instrumentation.targetContext
+        ClientSession.initialize(context)
+        org.junit.Assume.assumeTrue("Use an offline fixture", !ClientSession.shouldRunService())
+        val channel = Channel(9, 0, 0, "日本語・한국어", false, true, "ja-ko", null)
+        val fixture = SessionUiState(snapshot = Snapshot(status = "connected", ownClient = 7,
+            channels = listOf(channel), clients = listOf(member())))
+        val original = AppCompatDelegate.getApplicationLocales()
+        val previousError = ClientSession.state.value.errorSource
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            try {
+                for ((language, text, character) in listOf(
+                    Triple(AppLanguage.JAPANESE, "日本語でチャットを送信します。", "あ"),
+                    Triple(AppLanguage.KOREAN, "한국어 채팅 메시지를 보냅니다.", "한"),
+                )) {
+                    instrumentation.runOnMainSync { AppLanguage.select(language) }
+                    instrumentation.waitForIdleSync()
+                    scenario.recreate()
+                    instrumentation.waitForIdleSync()
+                    lateinit var activity: MainActivity
+                    scenario.onActivity { current ->
+                        activity = current
+                        current.setContent { ChatScreen(ChatTarget(channel.conversation, channel.name, channel = channel), fixture, true) {} }
+                    }
+                    fun <T> onMain(block: () -> T): T {
+                        var result: T? = null
+                        instrumentation.runOnMainSync { result = block() }
+                        @Suppress("UNCHECKED_CAST") return result as T
+                    }
+                    fun nodes(): List<SemanticsNode> = onMain {
+                        fun root(view: View): androidx.compose.ui.node.RootForTest? = (view as? androidx.compose.ui.node.RootForTest)
+                            ?: (view as? ViewGroup)?.let { group -> (0 until group.childCount).firstNotNullOfOrNull { root(group.getChildAt(it)) } }
+                        fun collect(node: SemanticsNode): List<SemanticsNode> = listOf(node) + node.children.flatMap(::collect)
+                        collect(requireNotNull(root(activity.window.decorView)).semanticsOwner.unmergedRootSemanticsNode)
+                    }
+                    fun input() = nodes().single { it.config.contains(SemanticsActions.SetText) }
+                    fun setCommitted(value: String) {
+                        val action = requireNotNull(input().config[SemanticsActions.SetText].action)
+                        onMain { assertTrue(action.invoke(androidx.compose.ui.text.AnnotatedString(value))) }
+                        val deadline = SystemClock.elapsedRealtime() + 5_000
+                        while (input().config[SemanticsProperties.EditableText].text != value && SystemClock.elapsedRealtime() < deadline) SystemClock.sleep(20)
+                        assertEquals(value, input().config[SemanticsProperties.EditableText].text)
+                    }
+                    fun sendButton(): SemanticsNode {
+                        val label = context.contextForLanguage(language).getString(R.string.action_send)
+                        val icon = nodes().single { it.config.getOrNull(SemanticsProperties.ContentDescription)?.contains(label) == true }
+                        return generateSequence(icon) { it.parent }.first { it.config.contains(SemanticsActions.OnClick) }
+                    }
+                    val deadline = SystemClock.elapsedRealtime() + 5_000
+                    while (nodes().none { it.config.contains(SemanticsActions.SetText) } && SystemClock.elapsedRealtime() < deadline) SystemClock.sleep(50)
+                    setCommitted(text)
+                    assertFalse(sendButton().config.contains(SemanticsProperties.Disabled))
+                    // This submits to the real controller; an offline fixture does not prove server delivery or IME composition.
+                    val submit = requireNotNull(sendButton().config[SemanticsActions.OnClick].action)
+                    onMain { assertTrue(submit.invoke()) }
+                    val submitted = SystemClock.elapsedRealtime() + 5_000
+                    while (input().config[SemanticsProperties.EditableText].text.isNotEmpty() && SystemClock.elapsedRealtime() < submitted) SystemClock.sleep(20)
+                    assertEquals("", input().config[SemanticsProperties.EditableText].text)
+                    val boundary = character.repeat(2730) + "ab"
+                    assertEquals(8192, boundary.toByteArray(Charsets.UTF_8).size)
+                    setCommitted(boundary)
+                    assertFalse(sendButton().config.contains(SemanticsProperties.Disabled))
+                    setCommitted(boundary + "a")
+                    assertTrue(sendButton().config.contains(SemanticsProperties.Disabled))
+                }
+            } finally {
+                if (previousError == null) ClientSession.clearError() else ClientSession.reportError(previousError)
+                instrumentation.runOnMainSync { AppCompatDelegate.setApplicationLocales(original) }
+            }
+        }
+    }
+
     @Test fun bridgeDecodesOptionalAwayAndExistingMessageUid() {
         val json = JSONObject("""{"id":7,"channel":9,"uid":"uid-7","name":"User 7","avatarPath":null,"badges":[],"serverGroupIcons":[],"channelGroupIcon":null,"muted":false,"deafened":false,"speaking":false}""")
         fun decode() = JSONObject().put("status", "connected").put("channels", org.json.JSONArray()).put("clients", org.json.JSONArray().put(json)).snapshot().clients.single()

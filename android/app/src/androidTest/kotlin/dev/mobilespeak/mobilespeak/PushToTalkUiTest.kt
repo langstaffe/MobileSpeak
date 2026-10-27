@@ -287,7 +287,7 @@ class PushToTalkUiTest {
                         androidx.compose.ui.platform.LocalResources provides localized.resources,
                         androidx.compose.ui.platform.LocalDensity provides androidx.compose.ui.unit.Density(context.resources.displayMetrics.density, 2f),
                     ) {
-                        MaterialTheme(colorScheme = darkColorScheme()) {
+                        MaterialTheme(colorScheme = darkColorScheme(primary = Palette.accent, onSurface = Palette.text)) {
                             Column(Modifier.width(320.dp).fillMaxHeight().background(Palette.bottom).systemBarsPadding().padding(horizontal = 20.dp),
                                 verticalArrangement = Arrangement.Center) {
                                 PushToTalkButton(fixture(), onTransmit = { _, _ -> })
@@ -295,6 +295,8 @@ class PushToTalkUiTest {
                                 PushToTalkButton(fixture().copy(speech = fixture().speech.copy(transmitting = true)), onTransmit = { _, _ -> })
                                 Spacer(Modifier.height(20.dp))
                                 PushToTalkButton(fixture().copy(microphoneMuted = true), onTransmit = { _, _ -> })
+                                Spacer(Modifier.height(20.dp))
+                                PushToTalkBar(fixture().copy(microphonePermission = false), requestPermission = {})
                             }
                         }
                     }
@@ -307,6 +309,15 @@ class PushToTalkUiTest {
                 assertTrue(bounds.width() <= 280 * context.resources.displayMetrics.density + 1)
                 assertTrue(bounds.height() >= 68 * context.resources.displayMetrics.density - 1)
                 if (android.os.Build.VERSION.SDK_INT >= 30) assertEquals(localized.getString(R.string.voice_hold_help), button.stateDescription?.toString())
+                val permissionLabel = localized.getString(R.string.voice_grant_microphone)
+                waitFor { find { it.text?.toString() == permissionLabel || it.contentDescription?.toString() == permissionLabel } != null }
+                val permission = requireNotNull(find { it.text?.toString() == permissionLabel || it.contentDescription?.toString() == permissionLabel })
+                var permissionButton = permission
+                while (!permissionButton.isClickable && permissionButton.parent != null) permissionButton = permissionButton.parent
+                assertTrue(permissionButton.isEnabled)
+                val permissionBounds = Rect().also(permissionButton::getBoundsInScreen)
+                assertTrue(permissionBounds.width() <= 240 * context.resources.displayMetrics.density + 1)
+                assertTrue(permissionBounds.height() >= 48 * context.resources.displayMetrics.density - 1)
                 SystemClock.sleep(150)
                 screenshot("push-to-talk-large-${language.code}.png")
             }

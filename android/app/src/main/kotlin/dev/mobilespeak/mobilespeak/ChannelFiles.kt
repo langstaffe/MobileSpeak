@@ -194,15 +194,16 @@ internal fun android.content.Context.fileError(value: String): String =
             val back = children[0].measure(loose)
             val upload = children[2].measure(loose)
             val gap = 4.dp.roundToPx()
-            val side = maxOf(back.width, upload.width)
-            val titleWidth = if (stacked) constraints.maxWidth else (constraints.maxWidth - 2 * (side + gap)).coerceAtLeast(0)
+            val leading = if (onUpload == null) maxOf(back.width, upload.width) else back.width
+            val trailing = if (onUpload == null) leading else upload.width
+            val titleWidth = if (stacked) constraints.maxWidth else (constraints.maxWidth - leading - trailing - 2 * gap).coerceAtLeast(0)
             val heading = children[1].measure(loose.copy(minWidth = titleWidth, maxWidth = titleWidth))
             val actionsHeight = maxOf(back.height, upload.height)
             val height = if (stacked) actionsHeight + gap + heading.height else maxOf(actionsHeight, heading.height)
             val rowHeight = if (stacked) actionsHeight else height
             layout(constraints.maxWidth, height) {
                 back.placeRelative(0, (rowHeight - back.height) / 2)
-                heading.placeRelative(if (stacked) 0 else side + gap, if (stacked) actionsHeight + gap else (height - heading.height) / 2)
+                heading.placeRelative(if (stacked) 0 else leading + gap, if (stacked) actionsHeight + gap else (height - heading.height) / 2)
                 upload.placeRelative(constraints.maxWidth - upload.width, (rowHeight - upload.height) / 2)
             }
         }

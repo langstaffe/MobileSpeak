@@ -19,7 +19,9 @@ internal enum class AppLanguage(val code: String, val tag: String?, @param:Strin
     SPANISH_MEXICO("es-MX", "es-MX", R.string.language_spanish_mexico),
     FRENCH("fr", "fr", R.string.language_french),
     PORTUGUESE_BRAZIL("pt-BR", "pt-BR", R.string.language_portuguese_brazil),
-    SPANISH("es", "es", R.string.language_spanish);
+    SPANISH("es", "es", R.string.language_spanish),
+    JAPANESE("ja", "ja", R.string.language_japanese),
+    KOREAN("ko", "ko", R.string.language_korean);
 
     companion object {
         fun fromCode(code: String?) = entries.firstOrNull { it.code == code } ?: SYSTEM
@@ -58,6 +60,8 @@ internal enum class AppLanguage(val code: String, val tag: String?, @param:Strin
             locale.language == "ru" -> RUSSIAN
             locale.language == "pl" -> POLISH
             locale.language == "fr" -> FRENCH
+            locale.language == "ja" -> JAPANESE
+            locale.language == "ko" -> KOREAN
             locale.language == "es" && locale.country == "MX" -> SPANISH_MEXICO
             locale.language == "es" -> SPANISH
             locale.language == "pt" && locale.country == "BR" -> PORTUGUESE_BRAZIL

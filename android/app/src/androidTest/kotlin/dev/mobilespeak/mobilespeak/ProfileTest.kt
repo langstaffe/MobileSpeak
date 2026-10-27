@@ -71,6 +71,39 @@ class ProfileTest {
         assertEquals("MobileSpeakUser", ProfileState().nickname)
     }
 
+    @Test fun japaneseAndKoreanNicknamesPersistWithExistingUtf8ByteLimit() {
+        val root = File(context.cacheDir, "profile-ja-ko-${UUID.randomUUID()}").apply { check(mkdirs()) }
+        var handle = 0L
+        fun create() = NativeCore.create(context).also {
+            handle = it
+            command(it, JSONObject().put("type", "configure").put("storage", root.path))
+        }
+        try {
+            create()
+            for ((index, name) in listOf("日本語のニックネーム", "한국어 닉네임").withIndex()) {
+                val request = index * 3 + 1
+                command(handle, JSONObject().put("type", "set_nickname").put("nickname", "  $name  ").put("request_id", request))
+                assertEquals(name, waitProfile(handle) { it.requestId == request.toLong() }.nickname)
+                NativeCore.destroy(handle); handle = 0
+                create()
+                assertEquals(name, waitProfile(handle) { it.nickname == name }.nickname)
+
+                // Both scripts use three UTF-8 bytes per character; composition is left to the platform IME.
+                val boundary = (if (index == 0) "あ" else "한").repeat(42) + "ab"
+                assertEquals(128, boundary.toByteArray(Charsets.UTF_8).size)
+                command(handle, JSONObject().put("type", "set_nickname").put("nickname", boundary).put("request_id", request + 1))
+                val saved = waitProfile(handle) { it.requestId == (request + 1).toLong() }
+                assertEquals(boundary, saved.nickname); assertNull(saved.error)
+                command(handle, JSONObject().put("type", "set_nickname").put("nickname", boundary + "a").put("request_id", request + 2))
+                val rejected = waitProfile(handle) { it.requestId == (request + 2).toLong() }
+                assertEquals("nickname_invalid", rejected.error); assertEquals(boundary, rejected.nickname)
+            }
+        } finally {
+            if (handle != 0L) NativeCore.destroy(handle)
+            root.deleteRecursively()
+        }
+    }
+
     @Test fun controllerPreservesDuplicateEditsAndUsesConnectionIdForAutomaticTitle() {
         org.junit.Assume.assumeTrue("Use an isolated installation", InstrumentationRegistry.getArguments().getString("profileIsolated") == "1")
         ClientSession.initialize(context)

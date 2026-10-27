@@ -8,7 +8,7 @@ import org.junit.Test
 class LocalizationTest {
     @Test
     fun stableCodesAndInvalidValuesResolveCorrectly() {
-        assertEquals(listOf("system", "zh-Hans", "zh-Hant", "en", "de", "ru", "pl", "es-MX", "fr", "pt-BR", "es"), AppLanguage.entries.map(AppLanguage::code))
+        assertEquals(listOf("system", "zh-Hans", "zh-Hant", "en", "de", "ru", "pl", "es-MX", "fr", "pt-BR", "es", "ja", "ko"), AppLanguage.entries.map(AppLanguage::code))
         assertEquals(AppLanguage.SYSTEM, AppLanguage.fromCode(null))
         assertEquals(AppLanguage.SYSTEM, AppLanguage.fromCode("legacy-value"))
         assertEquals(AppLanguage.SIMPLIFIED_CHINESE, AppLanguage.fromCode("zh-Hans"))
@@ -28,12 +28,12 @@ class LocalizationTest {
         for (region in listOf("TW", "HK", "MO")) {
             assertEquals(AppLanguage.TRADITIONAL_CHINESE, AppLanguage.resolve(AppLanguage.SYSTEM, listOf("zh-$region")))
         }
-        assertEquals(AppLanguage.TRADITIONAL_CHINESE, AppLanguage.resolve(AppLanguage.SYSTEM, listOf("ja-JP", "zh-HK", "en-US")))
-        assertEquals(AppLanguage.ENGLISH, AppLanguage.resolve(AppLanguage.SYSTEM, listOf("ja-JP", "en-US", "zh-TW")))
+        assertEquals(AppLanguage.TRADITIONAL_CHINESE, AppLanguage.resolve(AppLanguage.SYSTEM, listOf("it-IT", "zh-HK", "en-US")))
+        assertEquals(AppLanguage.ENGLISH, AppLanguage.resolve(AppLanguage.SYSTEM, listOf("it-IT", "en-US", "zh-TW")))
         assertEquals(AppLanguage.TRADITIONAL_CHINESE, AppLanguage.resolve(AppLanguage.SYSTEM, listOf("zh-MY", "zh-MO")))
         assertEquals(AppLanguage.ENGLISH, AppLanguage.resolve(AppLanguage.SYSTEM, listOf("zh-MY")))
         assertEquals(AppLanguage.ENGLISH, AppLanguage.resolve(AppLanguage.SYSTEM, listOf("en-US")))
-        assertEquals(AppLanguage.ENGLISH, AppLanguage.resolve(AppLanguage.SYSTEM, listOf("ja-JP")))
+        assertEquals(AppLanguage.ENGLISH, AppLanguage.resolve(AppLanguage.SYSTEM, listOf("it-IT")))
     }
 
     @Test fun regionalMatchingPreferenceOrderAndPerAppSelection() {
@@ -41,15 +41,20 @@ class LocalizationTest {
             "es-ES" to AppLanguage.SPANISH, "es-AR" to AppLanguage.SPANISH,
             "pt-BR" to AppLanguage.PORTUGUESE_BRAZIL, "pt-PT" to AppLanguage.ENGLISH,
             "pt" to AppLanguage.ENGLISH, "de-AT" to AppLanguage.GERMAN,
-            "fr-CA" to AppLanguage.FRENCH, "ru-BY" to AppLanguage.RUSSIAN, "pl-PL" to AppLanguage.POLISH)) {
+            "fr-CA" to AppLanguage.FRENCH, "ru-BY" to AppLanguage.RUSSIAN, "pl-PL" to AppLanguage.POLISH,
+            "ja" to AppLanguage.JAPANESE, "ja-JP" to AppLanguage.JAPANESE,
+            "ko" to AppLanguage.KOREAN, "ko-KR" to AppLanguage.KOREAN)) {
             assertEquals(tag, expected, AppLanguage.resolve(AppLanguage.SYSTEM, listOf(tag)))
             assertEquals(tag, expected, AppLanguage.selected(listOf(tag)))
         }
         assertEquals(AppLanguage.SYSTEM, AppLanguage.selected(emptyList()))
-        assertEquals(AppLanguage.ENGLISH, AppLanguage.selected(listOf("ja-JP")))
+        assertEquals(AppLanguage.ENGLISH, AppLanguage.selected(listOf("it-IT")))
         assertEquals(AppLanguage.GERMAN, AppLanguage.resolve(AppLanguage.SYSTEM, listOf("pt-PT", "de-AT", "fr-CA")))
-        assertEquals(AppLanguage.FRENCH, AppLanguage.resolve(AppLanguage.SYSTEM, listOf("ja-JP", "fr-CA", "de-AT")))
+        assertEquals(AppLanguage.FRENCH, AppLanguage.resolve(AppLanguage.SYSTEM, listOf("it-IT", "fr-CA", "de-AT")))
         assertEquals(AppLanguage.SPANISH, AppLanguage.resolve(AppLanguage.SYSTEM, listOf("es-AR", "es-MX")))
+        assertEquals(AppLanguage.JAPANESE, AppLanguage.resolve(AppLanguage.SYSTEM, listOf("it-IT", "ja-JP", "ko-KR", "en-US")))
+        assertEquals(AppLanguage.KOREAN, AppLanguage.resolve(AppLanguage.SYSTEM, listOf("ko-KR", "ja-JP")))
+        assertEquals(AppLanguage.FRENCH, AppLanguage.resolve(AppLanguage.SYSTEM, listOf("fr-CA", "ja-JP", "ko-KR")))
         assertEquals(AppLanguage.ENGLISH, AppLanguage.resolve(AppLanguage.SYSTEM, emptyList()))
         for (language in AppLanguage.entries.filter { it != AppLanguage.SYSTEM }) {
             assertEquals(language, AppLanguage.resolve(language, listOf("en-US")))
@@ -58,7 +63,7 @@ class LocalizationTest {
     }
 
     @Test fun displayNumbersUseRequestedLocaleWithoutChangingPrecisionOrRawValues() {
-        for (tag in listOf("en", "zh-Hans", "zh-Hant", "de", "ru", "pl", "es-MX", "fr", "pt-BR", "es")) {
+        for (tag in listOf("en", "zh-Hans", "zh-Hant", "de", "ru", "pl", "es-MX", "fr", "pt-BR", "es", "ja", "ko")) {
             val locale = java.util.Locale.forLanguageTag(tag)
             val decimal = java.text.DecimalFormatSymbols.getInstance(locale).decimalSeparator
             assertEquals("6${decimal}1", NetworkQuality.number(6.05, 1, locale = locale))

@@ -302,8 +302,9 @@ class VoiceServiceLifecycleTest {
                     assertEquals(before.noiseSuppression, ClientSession.state.value.noiseSuppression)
                     assertEquals(before.audioProcessingStatus, ClientSession.state.value.audioProcessingStatus)
                 }
-                main { for (language in listOf(AppLanguage.RUSSIAN, AppLanguage.POLISH, AppLanguage.GERMAN)) AppLanguage.select(language) }
-                val finalTitle = context.contextForLanguage(AppLanguage.GERMAN).getString(R.string.notification_call_title)
+                main { for (language in listOf(AppLanguage.RUSSIAN, AppLanguage.POLISH, AppLanguage.GERMAN,
+                    AppLanguage.JAPANESE, AppLanguage.KOREAN, AppLanguage.JAPANESE)) AppLanguage.select(language) }
+                val finalTitle = context.contextForLanguage(AppLanguage.JAPANESE).getString(R.string.notification_call_title)
                 settle { notifications.activeNotifications.firstOrNull { it.id == 7 }?.notification?.extras
                     ?.getCharSequence(Notification.EXTRA_TITLE)?.toString() == finalTitle }
                 assertSame(service, actual())

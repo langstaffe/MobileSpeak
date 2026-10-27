@@ -83,7 +83,7 @@ class ChannelMemberPreviewInstrumentedTest {
                 fun collect(node: SemanticsNode): List<SemanticsNode> = listOf(node) + node.children.flatMap(::collect)
                 return collect(requireNotNull(root(activity.window.decorView)).semanticsOwner.unmergedRootSemanticsNode)
             }
-            for (lang in listOf("en", "zh-Hans")) for ((screen, scale) in listOf(320 to 1f, 280 to 1f, 390 to 1.4f, 220 to 2f)) {
+            for (lang in listOf("en", "zh-Hans", "ja", "ko")) for ((screen, scale) in listOf(320 to 1f, 280 to 1f, 390 to 1.4f, 220 to 2f)) {
                 val cases = listOf(5 to "A0 User", 9 to "A0 User", 10 to "A0 User", 100 to "A0 User",
                     0 to "A0 User", 1 to "Solo User", 2 to "Solo User", 1 to "王小明",
                     1 to ("👩🏽‍💻é用户 " + "long nickname ".repeat(12)), 1 to "", 1 to "Server renamed user",
@@ -99,7 +99,13 @@ class ChannelMemberPreviewInstrumentedTest {
                         for (summary in summaries) {
                             val column = generateSequence(summary.parent) { it.parent }.first { it.config.contains(SemanticsActions.OnClick) }
                             fun descendants(node: SemanticsNode): List<SemanticsNode> = listOf(node) + node.children.flatMap(::descendants)
-                            val totalHere = summary.config[SemanticsProperties.Text].single().text.split(' ')[1].toInt()
+                            val title = descendants(column).mapNotNull { it.config.getOrNull(SemanticsProperties.Text)?.singleOrNull()?.text }
+                            val totalHere = when {
+                                "Current channel" in title -> 1
+                                "Ordinary channel" in title -> count
+                                "Deep channel" in title -> 10
+                                else -> error("Unexpected fixture channel: $title")
+                            }
                             val available = column.size.width - with(Density(density)) { 30.dp.roundToPx() }
                             val stride = with(Density(density)) { 24.dp.roundToPx() + 5.dp.roundToPx() }
                             assertTrue(summary.boundsInRoot.right <= column.boundsInRoot.right + 1)

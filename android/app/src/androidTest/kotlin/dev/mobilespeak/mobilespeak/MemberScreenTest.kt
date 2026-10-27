@@ -43,7 +43,8 @@ class MemberScreenTest {
         var language by mutableStateOf("en")
         val chats = mutableListOf<Long>()
         val suffixes = mapOf("en" to " (You)", "zh-Hans" to "（我）", "zh-Hant" to "（我）", "de" to " (du)",
-            "ru" to " (вы)", "pl" to " (ty)", "es-MX" to " (tú)", "fr" to " (vous)", "pt-BR" to " (você)", "es" to " (tú)")
+            "ru" to " (вы)", "pl" to " (ty)", "es-MX" to " (tú)", "fr" to " (vous)", "pt-BR" to " (você)", "es" to " (tú)", "ja" to "（自分）", "ko" to " (나)")
+        assertEquals(AppLanguage.entries.filter { it != AppLanguage.SYSTEM }.map { it.code }.toSet(), suffixes.keys)
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             lateinit var activity: MainActivity
             scenario.onActivity { current ->

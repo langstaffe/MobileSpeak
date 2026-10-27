@@ -101,6 +101,36 @@ class SettingsUpdatesTest {
         }
     }
 
+    @Test fun japaneseAndKoreanCanBeSelectedFromLanguagePageAndSurviveRecreation() {
+        unlocked()
+        val original = AppCompatDelegate.getApplicationLocales()
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            try {
+                instrumentation.waitForIdleSync()
+                val core = ClientSession.javaClass.getDeclaredField("handle\$delegate").apply { isAccessible = true }.get(ClientSession)
+                click(context.localized(R.string.tab_settings))
+                scrollTo(context.localized(R.string.settings_language))
+                click(context.localized(R.string.settings_language))
+                for ((language, title) in listOf(AppLanguage.JAPANESE to "日本語", AppLanguage.KOREAN to "한국어")) {
+                    scrollTo(title)
+                    click(title)
+                    waitFor { AppLanguage.selected() == language }
+                    scenario.recreate()
+                    instrumentation.waitForIdleSync()
+                    scrollTo(title)
+                    waitFor { node(title)?.let { it.isSelected || it.isChecked } == true }
+                    assertEquals(language, AppLanguage.selected(context))
+                    assertSame(core, ClientSession.javaClass.getDeclaredField("handle\$delegate").apply { isAccessible = true }.get(ClientSession))
+                    val shot = requireNotNull(instrumentation.uiAutomation.takeScreenshot())
+                    java.io.File(context.getExternalFilesDir(null), "language-selected-${language.code}.png").outputStream().use {
+                        shot.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
+                    }
+                    shot.recycle()
+                }
+            } finally { instrumentation.runOnMainSync { AppCompatDelegate.setApplicationLocales(original) } }
+        }
+    }
+
     @Test fun largeTextPagesRetainAccessibleControlsInAllLanguages() {
         unlocked()
         val original = AppCompatDelegate.getApplicationLocales()

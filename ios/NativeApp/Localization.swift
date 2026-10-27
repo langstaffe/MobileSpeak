@@ -13,6 +13,8 @@ enum AppLanguage: String, CaseIterable, Identifiable {
     case french = "fr"
     case portugueseBrazil = "pt-BR"
     case spanish = "es"
+    case japanese = "ja"
+    case korean = "ko"
 
     static let preferenceKey = "mobilespeak.language"
     var id: String { rawValue }
@@ -31,6 +33,8 @@ enum AppLanguage: String, CaseIterable, Identifiable {
             case "ru": return .russian
             case "pl": return .polish
             case "fr": return .french
+            case "ja": return .japanese
+            case "ko": return .korean
             case "es": return locale.regionCode == "MX" ? .spanishMexico : .spanish
             case "pt" where locale.regionCode == "BR": return .portugueseBrazil
             default: break
@@ -66,6 +70,8 @@ enum AppLanguage: String, CaseIterable, Identifiable {
         case .french: "language_french"
         case .portugueseBrazil: "language_portuguese_brazil"
         case .spanish: "language_spanish"
+        case .japanese: "language_japanese"
+        case .korean: "language_korean"
         }
     }
 }

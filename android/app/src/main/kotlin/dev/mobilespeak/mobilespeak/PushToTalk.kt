@@ -55,7 +55,8 @@ internal fun PushToTalkBar(
 ) {
     if (ui.speech.mode != "push_to_talk") return
     Column(Modifier.fillMaxWidth().background(Palette.bottom).padding(horizontal = 20.dp).padding(top = 12.dp, bottom = 8.dp),
-        horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(if (androidx.compose.ui.platform.LocalDensity.current.fontScale >= 1.5f) 4.dp else 8.dp)) {
         if (showTarget) {
             val own = ui.snapshot.clients.firstOrNull { it.id == ui.snapshot.ownClient }
             val channel = ui.snapshot.channels.firstOrNull { it.id == own?.channel }?.name
@@ -66,7 +67,7 @@ internal fun PushToTalkBar(
         PushToTalkButton(ui, active, onTransmit)
         if (!ui.microphonePermission && ui.snapshot.status == "connected" && !ui.microphoneMuted && !ui.deafened) TextButton(enabled = active, onClick = requestPermission,
             modifier = Modifier.heightIn(min = 48.dp), contentPadding = PaddingValues(horizontal = 8.dp)) {
-            Text(stringResource(R.string.voice_grant_microphone), fontSize = 13.sp)
+            Text(stringResource(R.string.voice_grant_microphone), fontSize = 13.sp, textAlign = TextAlign.Center)
         }
     }
 }

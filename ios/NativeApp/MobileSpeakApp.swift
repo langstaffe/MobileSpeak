@@ -76,6 +76,8 @@ private struct NetworkPanelHeightKey: PreferenceKey {
 // Shared core owns all sampling, grades and scale; this view only draws its snapshot.
 struct NetworkQualityPanel: View {
     var quality: NetworkQuality = NetworkQuality()
+    // Include language in the view's inputs even when the network snapshot stays unchanged.
+    var language: AppLanguage = AppLanguage.resolve(L10n.language)
     @ScaledMetric(relativeTo: .body) private var valueSize: CGFloat = 16
     @ScaledMetric(relativeTo: .caption) private var labelSize: CGFloat = 12
     @State private var width: CGFloat = 0
@@ -160,6 +162,7 @@ struct NetworkQualityPanel: View {
                 .fixedSize(horizontal: false, vertical: true)
             }
         }.padding(.horizontal, 12).padding(.vertical, 12)
+            .environment(\.locale, language.locale)
             .background(GeometryReader { proxy in
                 Color.clear.onAppear { width = proxy.size.width - 24 }.onChange(of: proxy.size.width) { width = $0 - 24 }
                     .preference(key: NetworkPanelHeightKey.self,
@@ -1161,11 +1164,12 @@ final class PushToTalkTouchRecognizer: UIGestureRecognizer, UIGestureRecognizerD
 }
 
 struct PushToTalkBar: View {
+    @Environment(\.sizeCategory) private var sizeCategory
     @ObservedObject var client: Client
     var showsTarget = false
     var body: some View {
         if client.speech.mode == .pushToTalk {
-            VStack(spacing: 8) {
+            VStack(spacing: sizeCategory.isAccessibilityCategory ? 4 : 8) {
                 if showsTarget {
                     Text(L10n.format("voice_push_to_talk_channel", client.state.channels.first { $0.id == client.currentChannel }?.name ?? L10n.string("status_disconnected")))
                         .font(.caption).foregroundStyle(Palette.muted).frame(maxWidth: .infinity, alignment: .leading)
@@ -1175,14 +1179,18 @@ struct PushToTalkBar: View {
                     transmitting: client.speech.transmitting, token: client.speech.token,
                     begin: client.beginPushToTalk, end: { client.endPushToTalk(token: $0) })
                 if client.connected && !client.muted && client.needsMicrophonePermission {
-                    Button(L10n.string(client.microphonePermission == .denied ? "voice_microphone_settings" : "voice_microphone_allow")) {
+                    Button {
                         Task { await client.requestPushToTalkPermission() }
+                    } label: {
+                        Text(L10n.string(client.microphonePermission == .denied ? "voice_microphone_settings" : "voice_microphone_allow"))
+                            .fixedSize(horizontal: false, vertical: true).multilineTextAlignment(.center)
                     }
                     .font(.footnote).frame(minHeight: 44).disabled(client.audioBusy)
                     .accessibilityIdentifier("push-to-talk-permission")
                 }
             }
             .padding(.horizontal, 20).padding(.top, 12).padding(.bottom, 8)
+            .fixedSize(horizontal: false, vertical: true)
             .background(Palette.bottom)
         }
     }
@@ -1804,7 +1812,8 @@ struct HomeView: View {
         drawerExpanded = expanded
     }
     static func drawerTravel(availableHeight: CGFloat) -> CGFloat {
-        max(0, min(availableHeight, availableHeight * 7 / 10) - 64)
+        // Reserve a usable scroll area below the header, including native container insets.
+        max(0, min(availableHeight, max(availableHeight * 7 / 10, 64 + 48)) - 64)
     }
     static func drawerShouldExpand(height: CGFloat, travel: CGFloat, velocity: CGFloat) -> Bool {
         travel > 0 && min(travel, max(0, height)) - velocity * 0.2 > travel / 2

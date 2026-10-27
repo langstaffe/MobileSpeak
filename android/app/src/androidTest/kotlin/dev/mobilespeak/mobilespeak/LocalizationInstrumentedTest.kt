@@ -19,7 +19,9 @@ class LocalizationInstrumentedTest {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         for ((language, expected) in listOf("en" to listOf("· 1 member online", "· 5 members online", "· 100 members online"),
             "zh-Hans" to listOf("· 1 人在线", "· 5 人在线", "· 100 人在线"),
-            "zh-Hant" to listOf("· 1 人線上", "· 5 人線上", "· 100 人線上"))) {
+            "zh-Hant" to listOf("· 1 人線上", "· 5 人線上", "· 100 人線上"),
+            "ja" to listOf("· 1人がオンライン", "· 5人がオンライン", "· 100人がオンライン"),
+            "ko" to listOf("· 온라인 1명", "· 온라인 5명", "· 온라인 100명"))) {
             val resources = context.createConfigurationContext(Configuration(context.resources.configuration).apply {
                 setLocale(Locale.forLanguageTag(language))
             }).resources
@@ -69,6 +71,22 @@ class LocalizationInstrumentedTest {
                 assertEquals("English", context.localized(R.string.language_english))
                 assertEquals("中文（繁體）", context.languageContext().getString(R.string.language_traditional_chinese))
                 assertFalse(select(AppLanguage.TRADITIONAL_CHINESE))
+
+                for ((language, title, suffix) in listOf(
+                    Triple(AppLanguage.JAPANESE, "設定", "（自分）"),
+                    Triple(AppLanguage.KOREAN, "설정", " (나)"),
+                )) {
+                    assertTrue(select(language))
+                    assertEquals(language, AppLanguage.selected())
+                    assertEquals(title, context.localized(R.string.tab_settings))
+                    assertEquals(suffix, context.localized(R.string.member_self_suffix))
+                    assertFalse(select(language))
+                }
+                for (language in AppLanguage.entries.filter { it != AppLanguage.SYSTEM }) {
+                    val localized = context.contextForLanguage(language)
+                    assertEquals("日本語", localized.getString(R.string.language_japanese))
+                    assertEquals("한국어", localized.getString(R.string.language_korean))
+                }
             } finally {
                 instrumentation.runOnMainSync { AppCompatDelegate.setApplicationLocales(original) }
                 instrumentation.waitForIdleSync()
@@ -78,7 +96,7 @@ class LocalizationInstrumentedTest {
 
     @Test fun previouslyRenderedErrorChangesLanguageButKeepsDiagnosticDetail() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
-        val rawDetail = "server_name_测试_測試"
+        val rawDetail = "server_name_测试_測試_日本語_한국어"
         val source = LocalizedMessage(R.string.error_bookmark_save, detail = rawDetail)
         val english = source.render(context.contextForLanguage(AppLanguage.ENGLISH))
         assertEquals("Couldn’t securely save the bookmark. $rawDetail", english)
@@ -138,11 +156,65 @@ class LocalizationInstrumentedTest {
         }
     }
 
+    @Test fun japaneseAndKoreanSwitchRerendersFileResultsAndKeepsNonemptyBusinessState() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val context = instrumentation.targetContext
+        ClientSession.initialize(context)
+        org.junit.Assume.assumeTrue("Do not replace a live session", !ClientSession.shouldRunService())
+        fun field(name: String) = ClientSession::class.java.getDeclaredField(name).apply { isAccessible = true }
+        @Suppress("UNCHECKED_CAST")
+        val state = field("mutableState").get(ClientSession) as kotlinx.coroutines.flow.MutableStateFlow<SessionUiState>
+        val executor = field("coreExecutor").get(ClientSession) as java.util.concurrent.ExecutorService
+        val original = AppCompatDelegate.getApplicationLocales()
+        ActivityScenario.launch(MainActivity::class.java).use {
+            val saved = executor.submit<SessionUiState> { state.value }.get()
+            val raw = "日本語_한국어_診断.txt"
+            val error = LocalizedMessage(R.string.error_bookmark_save, raw)
+            val fileError = LocalizedMessage(R.string.files_cache_clear_failed,
+                detailSource = LocalizedMessage(R.string.files_cache_busy))
+            val cacheResult = LocalizedMessage(R.string.files_cache_cleared, sizeBytes = 1_536_000)
+            val fixture = saved.copy(
+                snapshot = saved.snapshot.copy(server = raw),
+                profile = saved.profile.copy(nickname = "日本語 한국어"),
+                messages = listOf(ChatMessage("retained", "channel:fixture", raw, null, true, "こんにちは 안녕하세요", 1, "pending", null)),
+                unread = Unread(channel = "channel:fixture", channelCount = 3),
+                errorSource = error, channelFilesLocalErrorSource = fileError, fileCacheMessageSource = cacheResult,
+            )
+            try {
+                instrumentation.runOnMainSync { AppLanguage.select(AppLanguage.ENGLISH) }
+                ClientSession.refreshLanguage(AppLanguage.ENGLISH)
+                executor.submit { state.value = fixture }.get()
+                for (language in listOf(AppLanguage.JAPANESE, AppLanguage.KOREAN, AppLanguage.ENGLISH)) {
+                    instrumentation.runOnMainSync { AppLanguage.select(language) }
+                    ClientSession.refreshLanguage(language)
+                    val current = executor.submit<SessionUiState> { state.value }.get(5, java.util.concurrent.TimeUnit.SECONDS)
+                    val localized = context.contextForLanguage(language)
+                    assertEquals(error.render(localized), current.error)
+                    assertEquals(fileError.render(localized), current.channelFilesLocalError)
+                    assertEquals(cacheResult.render(localized), current.fileCacheMessage)
+                    assertEquals(fixture.snapshot, current.snapshot)
+                    assertEquals(fixture.messages, current.messages)
+                    assertEquals(fixture.unread, current.unread)
+                    assertEquals(fixture.profile, current.profile)
+                    assertEquals(fixture.speech, current.speech)
+                    assertEquals(fixture.microphoneMuted, current.microphoneMuted)
+                    assertEquals(fixture.deafened, current.deafened)
+                    assertEquals(fixture.channelFiles, current.channelFiles)
+                    assertEquals(fixture.fileCache, current.fileCache)
+                }
+            } finally {
+                executor.submit { state.value = saved }.get()
+                instrumentation.runOnMainSync { AppCompatDelegate.setApplicationLocales(original) }
+                ClientSession.refreshLanguage()
+            }
+        }
+    }
+
     @Test fun everyLanguageFormatsDisplayDataVariablesAndRetainedErrorsAfterSwitchAndRecreation() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext
         val original = AppCompatDelegate.getApplicationLocales()
-        val rawName = "Server_Тест_測試_á"
+        val rawName = "Server_Тест_測試_á_日本語_한국어"
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             try {
                 val before = ClientSession.state.value
@@ -219,17 +291,17 @@ class LocalizationInstrumentedTest {
         val manager = context.getSystemService(android.app.LocaleManager::class.java)
         val original = manager.applicationLocales
         try {
-            for (tag in listOf("de", "fr", "es-MX", "es", "pt-BR")) {
+            for (tag in listOf("de", "fr", "es-MX", "es", "pt-BR", "ja-JP", "ko-KR")) {
                 instrumentation.runOnMainSync { manager.applicationLocales = android.os.LocaleList.forLanguageTags(tag) }
                 instrumentation.waitForIdleSync()
                 ActivityScenario.launch(MainActivity::class.java).use { scenario ->
-                    assertEquals(AppLanguage.fromCode(tag), AppLanguage.selected(context))
+                    assertEquals(AppLanguage.selected(listOf(tag)), AppLanguage.selected(context))
                     scenario.onActivity { activity -> assertEquals(context.localized(R.string.tab_settings), activity.getString(R.string.tab_settings)) }
                 }
-                assertEquals(AppLanguage.fromCode(tag), AppLanguage.selected(context))
+                assertEquals(AppLanguage.selected(listOf(tag)), AppLanguage.selected(context))
             }
-            assertEquals(AppLanguage.PORTUGUESE_BRAZIL, AppLanguage.selected(context))
-            assertEquals("pt-BR", context.languageContext().resources.configuration.locales[0].toLanguageTag())
+            assertEquals(AppLanguage.KOREAN, AppLanguage.selected(context))
+            assertEquals("ko", context.languageContext().resources.configuration.locales[0].toLanguageTag())
         } finally { instrumentation.runOnMainSync { manager.applicationLocales = original } }
     }
 

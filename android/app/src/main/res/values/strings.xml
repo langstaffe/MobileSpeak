@@ -301,4 +301,6 @@
     <string name="language_portuguese_brazil">Português (Brasil)</string>
     <string name="language_spanish">Español</string>
     <string name="voice_hold_compact">Hold</string>
+    <string name="language_japanese">日本語</string>
+    <string name="language_korean">한국어</string>
 </resources>
