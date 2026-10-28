@@ -216,4 +216,29 @@ mod tests {
         assert_eq!(s.recovering(), None);
         assert_eq!(s.book(&[added(3,Reason::Subscription)], own, |_| Some(ChannelId(2))), vec![None]);
     }
+    #[test]
+    fn real_disconnect_reasons_leave_only_the_current_channel_in_event_order() {
+        let own = ClientId(1);
+        for reason in [Reason::None, Reason::Clientdisconnect, Reason::LostConnection,
+            Reason::KickChannel, Reason::KickServer, Reason::KickServerBan,
+            Reason::Serverstop, Reason::ClientdisconnectServerShutdown] {
+            let mut s = Session::default();
+            s.book(&[enter()], own, |_| Some(ChannelId(2)));
+            // The transport maps a reasonless server departure to Reason::None,
+            // retaining the distinction from unattributed visibility cleanup.
+            let events = [removed(2,2,reason), removed(3,3,reason), removed(4,2,reason)];
+            assert_eq!(s.book(&events, own, |_| None),
+                vec![Some(Sound::MemberLeave),None,Some(Sound::MemberLeave)], "{reason:?}");
+        }
+    }
+    #[test]
+    fn unattributed_and_subscription_removals_stay_silent() {
+        let own = ClientId(1);
+        let mut s = Session::default();
+        s.book(&[enter()], own, |_| Some(ChannelId(2)));
+        let mut unattributed = removed(2,2,Reason::None);
+        if let Event::PropertyRemoved { extra, .. } = &mut unattributed { extra.reason = None; }
+        assert_eq!(s.book(&[unattributed,removed(3,2,Reason::Subscription)], own, |_| None), vec![None,None]);
+        assert!(s.connected());
+    }
 }

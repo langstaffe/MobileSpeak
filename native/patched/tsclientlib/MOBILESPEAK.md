@@ -20,5 +20,12 @@ Own channel/server kick messages also pass through the existing typed MessageEve
 BookEvents, preserving the standard server reason text for the error UI. BookEvents remains
 the only source of sound classification; this forwarding adds no protocol commands.
 
+Standard ClientLeftView notifications may omit reasonid when a client disconnects.
+For these parsed notifications only, a zero target channel and omitted reason are
+exposed as Some(Reason::None) on the existing Client removal event. Explicit reasons,
+typed messages, and synthetic removals from channel unsubscription remain unchanged;
+this preserves the distinction needed for member-leave sounds without treating a
+visibility refresh as a real departure. Wire parsing and commands are unchanged.
+
 Cargo paths point to the fixed git revision. Upstream device/network test harness and dev
 dependencies are omitted; cancellation regressions live in src/lib.rs and core media tests.

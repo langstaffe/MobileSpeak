@@ -1358,6 +1358,28 @@ impl<'a> Stream for EventStream<'a> {
 	}
 }
 
+fn handle_book_command(
+	book: &mut data::Connection, msg: &InMessage,
+) -> std::result::Result<(Vec<events::Event>, bool), ts_bookkeeping::Error> {
+	let (mut events, handled) = book.handle_command(msg)?;
+	if let InMessage::ClientLeftView(parts) = msg {
+		// A standard disconnect may omit reasonid; subscription removals also use None.
+		let disconnected: HashSet<_> = parts.iter().filter(|part|
+			part.reason.is_none() && part.target_channel_id.0 == 0)
+			.map(|part| part.client_id).collect();
+		for event in &mut events {
+			if let events::Event::PropertyRemoved {
+				id: events::PropertyId::Client(id), extra, ..
+			} = event {
+				if extra.reason.is_none() && disconnected.contains(id) {
+					extra.reason = Some(Reason::None);
+				}
+			}
+		}
+	}
+	Ok((events, handled))
+}
+
 impl ConnectedConnection {
 	fn handle_command(
 		&mut self, book: &mut data::Connection, stream_items: &mut VecDeque<Result<StreamItem>>,
@@ -1524,7 +1546,7 @@ impl ConnectedConnection {
 				stream_items.push_back(Err(Error::SendPacket(e)));
 			}
 		} else {
-			let (mut events, book_handled) = match book.handle_command(&msg) {
+			let (mut events, book_handled) = match handle_book_command(book, &msg) {
 				Ok(r) => r,
 				Err(error) => {
 					warn!(%error, "Failed to handle message");
@@ -2140,4 +2162,108 @@ mod nickname_tests {
             assert_eq!(con.get_options().get_name(), "Reconnect latest");
         });
     }
+}
+
+#[cfg(test)]
+mod membership_reason_tests {
+	use super::*;
+	use tsproto_packets::packets::{Direction, Flags};
+
+	fn message(wire: &str) -> InMessage {
+		let packet = OutPacket::new_with_dir(Direction::S2C, Flags::empty(), PacketType::Command);
+		InMessage::new(&packet.header(), wire.as_bytes()).unwrap()
+	}
+
+	fn book() -> data::Connection {
+		let init = message(concat!(
+			"initserver virtualserver_name=fixture virtualserver_welcomemessage= virtualserver_platform=fixture ",
+			"virtualserver_version=fixture virtualserver_maxclients=10 virtualserver_created=0 ",
+			"virtualserver_codec_encryption_mode=0 virtualserver_hostmessage= virtualserver_hostmessage_mode=0 ",
+			"virtualserver_default_server_group=1 virtualserver_default_channel_group=1 virtualserver_id=1 ",
+			"virtualserver_ask_for_privilegekey=0 virtualserver_hostbanner_url= virtualserver_hostbanner_gfx_url= ",
+			"virtualserver_hostbanner_gfx_interval=0 virtualserver_priority_speaker_dimm_modificator=0 ",
+			"virtualserver_hostbutton_tooltip= virtualserver_hostbutton_url= virtualserver_hostbutton_gfx_url= ",
+			"virtualserver_name_phonetic= virtualserver_icon_id=0 virtualserver_hostbanner_mode=0 ",
+			"virtualserver_channel_temp_delete_delay_default=0 acn=fixture aclid=1 pv=0 ",
+			"client_talk_power=0 client_needed_serverquery_view_power=0"
+		));
+		let InMessage::InitServer(init) = init else { unreachable!() };
+		let key = tsproto_types::crypto::EccKeyPrivP256::from_short(&[1; 32]).unwrap().to_pub();
+		let mut book = data::Connection::new(key, &init);
+		handle_book_command(&mut book, &message("notifychannelcreated cid=2 cpid=0 channel_order=0 channel_name=fixture invokerid=1 invokername=fixture")).unwrap();
+		for id in [ClientId(2), ClientId(3)] {
+			book.clients.insert(id, data::Client {
+				id, channel: ChannelId(2), uid: None, name: "member".into(),
+				input_muted: false, output_muted: false, output_only_muted: false,
+				input_hardware_enabled: true, output_hardware_enabled: true, talk_power_granted: false,
+				metadata: String::new(), is_recording: false, database_id: ClientDbId(1),
+				channel_group: ChannelGroupId(1), server_groups: HashSet::new(), away_message: None,
+				client_type: ClientType::Normal, avatar_hash: String::new(), talk_power: 0, talk_power_request: None,
+				description: String::new(), is_priority_speaker: false, unread_messages: 0, phonetic_name: String::new(),
+				needed_serverquery_view_power: 0, icon: IconId(0), is_channel_commander: false, country_code: String::new(),
+				inherited_channel_group_from_channel: ChannelId(0), badges: String::new(), user_tag: None,
+				permission_hints: None, optional_data: None, connection_data: None,
+			});
+		}
+		book
+	}
+
+	fn removals(events: &[events::Event]) -> Vec<(ClientId, Option<Reason>)> {
+		events.iter().filter_map(|event| match event {
+			events::Event::PropertyRemoved { id: events::PropertyId::Client(id), extra, .. } => Some((*id, extra.reason)),
+			_ => None,
+		}).collect()
+	}
+
+	#[test]
+	fn standard_disconnect_without_reason_is_distinct_from_synthetic_removal() {
+		let message = message("notifyclientleftview cfid=2 ctid=0 clid=2 reasonmsg=Client\\sdisconnected");
+		assert_eq!(removals(&book().handle_command(&message).unwrap().0), vec![(ClientId(2), None)]);
+		let (events, handled) = handle_book_command(&mut book(), &message).unwrap();
+		assert!(handled);
+		assert_eq!(removals(&events), vec![(ClientId(2), Some(Reason::None))]);
+		let InMessage::ClientLeftView(parts) = message else { unreachable!() };
+		let part = parts.iter().next().unwrap();
+		assert_eq!(part.reason, None);
+		assert_eq!(part.reason_message.as_deref(), Some("Client disconnected"));
+	}
+
+	#[test]
+	fn explicit_departure_and_subscription_reasons_are_preserved() {
+		for reason in [Reason::None, Reason::Moved, Reason::Subscription, Reason::LostConnection,
+			Reason::KickChannel, Reason::KickServer, Reason::KickServerBan, Reason::Serverstop,
+			Reason::Clientdisconnect, Reason::ClientdisconnectServerShutdown] {
+			let message = message(&format!("notifyclientleftview cfid=2 ctid=0 clid=2 reasonid={}", reason as u8));
+			let (events, _) = handle_book_command(&mut book(), &message).unwrap();
+			assert_eq!(removals(&events), vec![(ClientId(2), Some(reason))]);
+		}
+	}
+
+	#[test]
+	fn unknown_nonzero_destination_is_not_reclassified_as_disconnect() {
+		let (events, _) = handle_book_command(&mut book(), &message("notifyclientleftview cfid=2 ctid=9 clid=2")).unwrap();
+		assert_eq!(removals(&events), vec![(ClientId(2), None)]);
+	}
+
+	#[test]
+	fn channel_unsubscription_keeps_synthetic_client_removals_unchanged() {
+		let mut book = book();
+		handle_book_command(&mut book, &message("notifychannelsubscribed cid=2")).unwrap();
+		let message = message("notifychannelunsubscribed cid=2");
+		let (original, _) = book.clone().handle_command(&message).unwrap();
+		let (events, _) = handle_book_command(&mut book, &message).unwrap();
+		assert_eq!(events, original);
+		assert_eq!(removals(&events).len(), 2);
+		assert!(removals(&events).iter().all(|(_, reason)| reason.is_none()));
+		assert!(!book.channels[&ChannelId(2)].subscribed);
+	}
+
+	#[test]
+	fn multipart_departures_keep_message_and_event_order() {
+		let message = message("notifyclientleftview cfid=2 ctid=0 clid=3|cfid=2 ctid=0 clid=2 reasonid=5");
+		let mut book = book();
+		let (events, _) = handle_book_command(&mut book, &message).unwrap();
+		assert_eq!(removals(&events), vec![(ClientId(3), Some(Reason::None)), (ClientId(2), Some(Reason::KickServer))]);
+		assert!(book.clients.is_empty());
+	}
 }
