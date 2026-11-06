@@ -68,6 +68,8 @@
     <string name="settings_microphone_help">On by default. Turning off listening also mutes the microphone.</string>
     <string name="settings_listening">Listening</string>
     <string name="settings_noise_suppression">Noise Suppression</string>
+    <string name="settings_noise_enhanced">Enhanced</string>
+    <string name="settings_noise_standard">Standard</string>
     <string name="settings_noise_none">None</string>
     <string name="settings_language">Language</string>
     <string name="accessibility_choose_language">Choose language</string>
@@ -207,7 +209,7 @@
     <string name="settings_audio_applied">Active: %1$s</string>
     <string name="settings_noise_system_help">None disables MobileSpeak noise suppression. System voice processing may still apply.</string>
     <string name="error_noise_suppression">Audio processing switch failed; previous selection retained</string>
-    <string name="settings_dpdfnet_performance">DPDFNet2 uses more CPU and battery. Slower devices may have interrupted audio, especially in the background.</string>
+    <string name="settings_dpdfnet_performance">Enhanced uses more CPU and battery. Slower devices may have interrupted audio, especially in the background.</string>
     <string name="network_latency">Latency</string>
     <string name="network_packet_loss">Packet loss</string>
     <string name="network_unavailable">Network statistics unavailable</string>

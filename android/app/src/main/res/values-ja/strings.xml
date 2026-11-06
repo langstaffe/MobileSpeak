@@ -67,6 +67,8 @@
     <string name="settings_microphone_help">初期設定ではオンです。受信音声をオフにすると、マイクもミュートになります。</string>
     <string name="settings_listening">受信音声</string>
     <string name="settings_noise_suppression">ノイズ抑制</string>
+    <string name="settings_noise_enhanced">強化</string>
+    <string name="settings_noise_standard">標準</string>
     <string name="settings_noise_none">なし</string>
     <string name="settings_language">言語</string>
     <string name="accessibility_choose_language">言語を選択</string>
@@ -206,7 +208,7 @@
     <string name="settings_audio_applied">使用中：%1$s</string>
     <string name="settings_noise_system_help">「なし」を選ぶとMobileSpeakのノイズ抑制を無効にします。システムによる音声処理は適用される場合があります。</string>
     <string name="error_noise_suppression">音声処理を切り替えられませんでした。以前の設定を保持しています。</string>
-    <string name="settings_dpdfnet_performance">DPDFNet2はCPUとバッテリーの消費が増えます。処理性能が低い端末では、特にバックグラウンドで音声が途切れる場合があります。</string>
+    <string name="settings_dpdfnet_performance">「強化」はCPUとバッテリーの消費が増えます。処理性能が低い端末では、特にバックグラウンドで音声が途切れる場合があります。</string>
     <string name="network_latency">遅延</string>
     <string name="network_packet_loss">パケット損失</string>
     <string name="network_unavailable">ネットワーク統計を取得できません</string>

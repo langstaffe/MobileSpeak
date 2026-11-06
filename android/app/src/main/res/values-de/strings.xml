@@ -68,6 +68,8 @@
     <string name="settings_microphone_help">Standardmäßig an. Das Ausschalten der Wiedergabe schaltet auch das Mikrofon stumm.</string>
     <string name="settings_listening">Wiedergabe</string>
     <string name="settings_noise_suppression">Rauschunterdrückung</string>
+    <string name="settings_noise_enhanced">Erweitert</string>
+    <string name="settings_noise_standard">Standard</string>
     <string name="settings_noise_none">Keine</string>
     <string name="settings_language">Sprache</string>
     <string name="accessibility_choose_language">Sprache auswählen</string>
@@ -207,7 +209,7 @@
     <string name="settings_audio_applied">Aktiv: %1$s</string>
     <string name="settings_noise_system_help">„Keine“ deaktiviert die Rauschunterdrückung von MobileSpeak. Die Sprachverarbeitung des Systems kann weiterhin aktiv sein.</string>
     <string name="error_noise_suppression">Die Audioverarbeitung konnte nicht umgeschaltet werden. Die bisherige Auswahl bleibt erhalten.</string>
-    <string name="settings_dpdfnet_performance">DPDFNet2 benötigt mehr Prozessorleistung und Akku. Auf langsameren Geräten kann der Ton aussetzen, besonders im Hintergrund.</string>
+    <string name="settings_dpdfnet_performance">„Erweitert“ benötigt mehr Prozessorleistung und Akku. Auf langsameren Geräten kann der Ton aussetzen, besonders im Hintergrund.</string>
     <string name="network_latency">Latenz</string>
     <string name="network_packet_loss">Paketverlust</string>
     <string name="network_unavailable">Netzwerkstatistiken nicht verfügbar</string>

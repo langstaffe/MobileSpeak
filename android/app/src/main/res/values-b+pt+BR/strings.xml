@@ -69,6 +69,8 @@
     <string name="settings_microphone_help">Ativado por padrão. Desativar o áudio também silencia o microfone.</string>
     <string name="settings_listening">Áudio</string>
     <string name="settings_noise_suppression">Supressão de ruído</string>
+    <string name="settings_noise_enhanced">Aprimorada</string>
+    <string name="settings_noise_standard">Padrão</string>
     <string name="settings_noise_none">Nenhuma</string>
     <string name="settings_language">Idioma</string>
     <string name="accessibility_choose_language">Escolher idioma</string>
@@ -208,7 +210,7 @@
     <string name="settings_audio_applied">Ativo: %1$s</string>
     <string name="settings_noise_system_help">“Nenhuma” desativa a supressão de ruído do MobileSpeak. O processamento de voz do sistema ainda pode estar ativo.</string>
     <string name="error_noise_suppression">Falha ao alternar o processamento de áudio; a seleção anterior foi mantida</string>
-    <string name="settings_dpdfnet_performance">O DPDFNet2 usa mais CPU e bateria. Dispositivos mais lentos podem apresentar cortes de áudio, especialmente em segundo plano.</string>
+    <string name="settings_dpdfnet_performance">A opção “Aprimorada” usa mais CPU e bateria. Dispositivos mais lentos podem apresentar cortes de áudio, especialmente em segundo plano.</string>
     <string name="network_latency">Latência</string>
     <string name="network_packet_loss">Perda de pacotes</string>
     <string name="network_unavailable">Estatísticas de rede indisponíveis</string>

@@ -402,6 +402,12 @@ class HomeScrollStateTest {
                 chatSend("private", member.name)
                 press("microphone", label(R.string.voice_enable_microphone)); press("speaker", label(R.string.voice_disable_listening))
                 click(label(R.string.voice_drawer_expand)); press("handle", label(R.string.voice_drawer_collapse))
+                // Large text can place the file tool below the drawer's visible viewport.
+                onMain {
+                    val tools = nodes().first { it.config.getOrNull(SemanticsProperties.TestTag) in setOf("drawer-home-scroll", "drawer-tools-list") && it.config.contains(SemanticsActions.ScrollBy) }
+                    assertTrue(tools.config[SemanticsActions.ScrollBy].action!!(0f, 10000f))
+                }
+                settle()
                 press("tools", label(R.string.files_title))
                 val fileFixture = fixture.copy(channelFiles = ChannelFilesState(open = true, server = "fixture", channel = 1,
                     channelName = channel.name, status = "ready", entries = listOf(ChannelFileEntry("Feedback.txt", 1024, 1700000000, false, "file-text", null))))
@@ -432,8 +438,9 @@ class HomeScrollStateTest {
                 loadingShot.recycle()
                 publish(fixture); click(label(R.string.voice_drawer_collapse)); click(label(R.string.tab_settings))
                 press("avatar-choose", label(R.string.avatar_choose)); press("avatar-clear", label(R.string.avatar_remove))
-                val noiseOffset = onMain { nodes().first { "RNNoise" in texts(it) }.positionInRoot.y - scrollNode().boundsInRoot.top }
-                scroll(pixels = noiseOffset - 80 * context.resources.displayMetrics.density); press("noise", "RNNoise")
+                val standardNoise = label(R.string.settings_noise_standard)
+                val noiseOffset = onMain { nodes().first { standardNoise in texts(it) }.positionInRoot.y - scrollNode().boundsInRoot.top }
+                scroll(pixels = noiseOffset - 80 * context.resources.displayMetrics.density); press("noise", standardNoise)
                 scroll(pixels = 100000f)
                 press("language-entry", label(R.string.settings_language))
                 click(label(R.string.settings_language)); press("language-system", label(R.string.language_system)); click(label(R.string.action_back))

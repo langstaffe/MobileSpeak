@@ -17885,73 +17885,73 @@
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "DPDFNet2 benötigt mehr Prozessorleistung und Akku. Auf langsameren Geräten kann der Ton aussetzen, besonders im Hintergrund."
+            "value" : "„Erweitert“ benötigt mehr Prozessorleistung und Akku. Auf langsameren Geräten kann der Ton aussetzen, besonders im Hintergrund."
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "DPDFNet2 uses more CPU and battery. Slower devices may have interrupted audio, especially in the background."
+            "value" : "Enhanced uses more CPU and battery. Slower devices may have interrupted audio, especially in the background."
           }
         },
         "es" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "DPDFNet2 consume más CPU y batería. En dispositivos lentos puede haber cortes de audio, sobre todo en segundo plano."
+            "value" : "«Mejorada» consume más CPU y batería. En dispositivos lentos puede haber cortes de audio, sobre todo en segundo plano."
           }
         },
         "es-MX" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "DPDFNet2 consume más CPU y batería. En dispositivos lentos puede haber cortes de audio, sobre todo en segundo plano."
+            "value" : "«Mejorada» consume más CPU y batería. En dispositivos lentos puede haber cortes de audio, sobre todo en segundo plano."
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "DPDFNet2 sollicite davantage le processeur et la batterie. Le son peut être interrompu sur les appareils moins puissants, surtout en arrière-plan."
+            "value" : "L’option « Améliorée » sollicite davantage le processeur et la batterie. Le son peut être interrompu sur les appareils moins puissants, surtout en arrière-plan."
           }
         },
         "pl" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "DPDFNet2 zużywa więcej procesora i baterii. Na wolniejszych urządzeniach dźwięk może się przerywać, zwłaszcza w tle."
+            "value" : "Opcja „Ulepszona” zużywa więcej procesora i baterii. Na wolniejszych urządzeniach dźwięk może się przerywać, zwłaszcza w tle."
           }
         },
         "pt-BR" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "O DPDFNet2 usa mais CPU e bateria. Dispositivos mais lentos podem apresentar cortes de áudio, especialmente em segundo plano."
+            "value" : "A opção “Aprimorada” usa mais CPU e bateria. Dispositivos mais lentos podem apresentar cortes de áudio, especialmente em segundo plano."
           }
         },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "DPDFNet2 увеличивает нагрузку на процессор и расход батареи. На медленных устройствах возможны прерывания звука, особенно в фоне."
+            "value" : "«Усиленное» увеличивает нагрузку на процессор и расход батареи. На медленных устройствах возможны прерывания звука, особенно в фоне."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "DPDFNet2 的处理和耗电开销较高；较慢设备尤其在后台可能出现语音断续。"
+            "value" : "“增强”的处理和耗电开销较高；较慢设备尤其在后台可能出现语音断续。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "DPDFNet2 會消耗較多處理器資源和電量。效能較低的裝置可能出現語音斷續，尤其是在背景執行時。"
+            "value" : "「增強」會消耗較多處理器資源和電量。效能較低的裝置可能出現語音斷續，尤其是在背景執行時。"
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "DPDFNet2はCPUとバッテリーの消費が増えます。処理性能が低い端末では、特にバックグラウンドで音声が途切れる場合があります。"
+            "value" : "「強化」はCPUとバッテリーの消費が増えます。処理性能が低い端末では、特にバックグラウンドで音声が途切れる場合があります。"
           }
         },
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "DPDFNet2는 CPU와 배터리를 더 많이 사용합니다. 성능이 낮은 기기에서는 특히 백그라운드에서 음성이 끊길 수 있습니다."
+            "value" : "‘강화’는 CPU와 배터리를 더 많이 사용합니다. 성능이 낮은 기기에서는 특히 백그라운드에서 음성이 끊길 수 있습니다."
           }
         }
       }
@@ -18264,6 +18264,83 @@
         }
       }
     },
+    "settings_noise_enhanced" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Erweitert"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enhanced"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mejorada"
+          }
+        },
+        "es-MX" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mejorada"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Améliorée"
+          }
+        },
+        "pl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ulepszona"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aprimorada"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Усиленное"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "增强"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "增強"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "強化"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "강화"
+          }
+        }
+      }
+    },
     "settings_noise_none" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -18337,6 +18414,83 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "없음"
+          }
+        }
+      }
+    },
+    "settings_noise_standard" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Standard"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Standard"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Estándar"
+          }
+        },
+        "es-MX" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Estándar"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Standard"
+          }
+        },
+        "pl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Standardowa"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Padrão"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Стандартное"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "标准"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "標準"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "標準"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "표준"
           }
         }
       }

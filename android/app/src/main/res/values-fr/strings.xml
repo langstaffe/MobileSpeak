@@ -69,6 +69,8 @@
     <string name="settings_microphone_help">Activé par défaut. Désactiver l’écoute coupe aussi le microphone.</string>
     <string name="settings_listening">Écoute</string>
     <string name="settings_noise_suppression">Réduction du bruit</string>
+    <string name="settings_noise_enhanced">Améliorée</string>
+    <string name="settings_noise_standard">Standard</string>
     <string name="settings_noise_none">Aucune</string>
     <string name="settings_language">Langue</string>
     <string name="accessibility_choose_language">Choisir la langue</string>
@@ -208,7 +210,7 @@
     <string name="settings_audio_applied">Actif : %1$s</string>
     <string name="settings_noise_system_help">« Aucune » désactive la réduction du bruit de MobileSpeak. Le traitement vocal du système peut rester actif.</string>
     <string name="error_noise_suppression">Échec du changement de traitement audio. La sélection précédente est conservée.</string>
-    <string name="settings_dpdfnet_performance">DPDFNet2 sollicite davantage le processeur et la batterie. Le son peut être interrompu sur les appareils moins puissants, surtout en arrière-plan.</string>
+    <string name="settings_dpdfnet_performance">L’option « Améliorée » sollicite davantage le processeur et la batterie. Le son peut être interrompu sur les appareils moins puissants, surtout en arrière-plan.</string>
     <string name="network_latency">Latence</string>
     <string name="network_packet_loss">Perte de paquets</string>
     <string name="network_unavailable">Statistiques réseau indisponibles</string>

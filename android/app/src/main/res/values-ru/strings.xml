@@ -70,6 +70,8 @@
     <string name="settings_microphone_help">Включён по умолчанию. Отключение звука также отключает микрофон.</string>
     <string name="settings_listening">Звук</string>
     <string name="settings_noise_suppression">Шумоподавление</string>
+    <string name="settings_noise_enhanced">Усиленное</string>
+    <string name="settings_noise_standard">Стандартное</string>
     <string name="settings_noise_none">Нет</string>
     <string name="settings_language">Язык</string>
     <string name="accessibility_choose_language">Выбрать язык</string>
@@ -209,7 +211,7 @@
     <string name="settings_audio_applied">Активно: %1$s</string>
     <string name="settings_noise_system_help">«Нет» отключает шумоподавление MobileSpeak. Системная обработка голоса может оставаться активной.</string>
     <string name="error_noise_suppression">Не удалось переключить обработку звука; прежний выбор сохранён</string>
-    <string name="settings_dpdfnet_performance">DPDFNet2 увеличивает нагрузку на процессор и расход батареи. На медленных устройствах возможны прерывания звука, особенно в фоне.</string>
+    <string name="settings_dpdfnet_performance">«Усиленное» увеличивает нагрузку на процессор и расход батареи. На медленных устройствах возможны прерывания звука, особенно в фоне.</string>
     <string name="network_latency">Задержка</string>
     <string name="network_packet_loss">Потери пакетов</string>
     <string name="network_unavailable">Статистика сети недоступна</string>

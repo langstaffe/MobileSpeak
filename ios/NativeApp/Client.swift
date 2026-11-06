@@ -185,7 +185,7 @@ enum NoiseSuppressionMode: String, CaseIterable {
         defaults.removeObject(forKey: "mobilespeak.audio.vad")
         return mode
     }
-    var title: String { switch self { case .dpdfnet2: return "DPDFNet2"; case .rnnoise: return "RNNoise"; case .none: return L10n.string("settings_noise_none") } }
+    var title: String { switch self { case .dpdfnet2: return L10n.string("settings_noise_enhanced"); case .rnnoise: return L10n.string("settings_noise_standard"); case .none: return L10n.string("settings_noise_none") } }
 }
 
 enum SpeechMode: String, CaseIterable, Decodable {

@@ -67,6 +67,8 @@
     <string name="settings_microphone_help">기본적으로 켜져 있습니다. 수신 음성을 끄면 마이크도 음소거됩니다.</string>
     <string name="settings_listening">수신 음성</string>
     <string name="settings_noise_suppression">소음 억제</string>
+    <string name="settings_noise_enhanced">강화</string>
+    <string name="settings_noise_standard">표준</string>
     <string name="settings_noise_none">없음</string>
     <string name="settings_language">언어</string>
     <string name="accessibility_choose_language">언어 선택</string>
@@ -206,7 +208,7 @@
     <string name="settings_audio_applied">사용 중: %1$s</string>
     <string name="settings_noise_system_help">‘없음’을 선택하면 MobileSpeak의 소음 억제가 꺼집니다. 시스템의 음성 처리는 계속 적용될 수 있습니다.</string>
     <string name="error_noise_suppression">음성 처리를 전환하지 못했습니다. 이전 설정은 유지됩니다.</string>
-    <string name="settings_dpdfnet_performance">DPDFNet2는 CPU와 배터리를 더 많이 사용합니다. 성능이 낮은 기기에서는 특히 백그라운드에서 음성이 끊길 수 있습니다.</string>
+    <string name="settings_dpdfnet_performance">‘강화’는 CPU와 배터리를 더 많이 사용합니다. 성능이 낮은 기기에서는 특히 백그라운드에서 음성이 끊길 수 있습니다.</string>
     <string name="network_latency">지연 시간</string>
     <string name="network_packet_loss">패킷 손실</string>
     <string name="network_unavailable">네트워크 통계를 사용할 수 없습니다</string>

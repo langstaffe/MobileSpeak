@@ -70,6 +70,8 @@
     <string name="settings_microphone_help">Domyślnie włączony. Wyłączenie odsłuchu wycisza też mikrofon.</string>
     <string name="settings_listening">Odsłuch</string>
     <string name="settings_noise_suppression">Redukcja szumów</string>
+    <string name="settings_noise_enhanced">Ulepszona</string>
+    <string name="settings_noise_standard">Standardowa</string>
     <string name="settings_noise_none">Brak</string>
     <string name="settings_language">Język</string>
     <string name="accessibility_choose_language">Wybierz język</string>
@@ -209,7 +211,7 @@
     <string name="settings_audio_applied">Aktywne: %1$s</string>
     <string name="settings_noise_system_help">Opcja „Brak” wyłącza redukcję szumów MobileSpeak. Systemowe przetwarzanie głosu może nadal działać.</string>
     <string name="error_noise_suppression">Nie udało się przełączyć przetwarzania dźwięku; zachowano poprzedni wybór</string>
-    <string name="settings_dpdfnet_performance">DPDFNet2 zużywa więcej procesora i baterii. Na wolniejszych urządzeniach dźwięk może się przerywać, zwłaszcza w tle.</string>
+    <string name="settings_dpdfnet_performance">Opcja „Ulepszona” zużywa więcej procesora i baterii. Na wolniejszych urządzeniach dźwięk może się przerywać, zwłaszcza w tle.</string>
     <string name="network_latency">Opóźnienie</string>
     <string name="network_packet_loss">Utrata pakietów</string>
     <string name="network_unavailable">Statystyki sieci są niedostępne</string>

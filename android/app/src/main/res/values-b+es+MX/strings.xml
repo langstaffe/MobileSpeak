@@ -69,6 +69,8 @@
     <string name="settings_microphone_help">Activado por defecto. Al desactivar la escucha también se silencia el micrófono.</string>
     <string name="settings_listening">Escucha</string>
     <string name="settings_noise_suppression">Supresión de ruido</string>
+    <string name="settings_noise_enhanced">Mejorada</string>
+    <string name="settings_noise_standard">Estándar</string>
     <string name="settings_noise_none">Ninguna</string>
     <string name="settings_language">Idioma</string>
     <string name="accessibility_choose_language">Elegir idioma</string>
@@ -208,7 +210,7 @@
     <string name="settings_audio_applied">Activo: %1$s</string>
     <string name="settings_noise_system_help">«Ninguna» desactiva la supresión de ruido de MobileSpeak. El sistema puede seguir procesando la voz.</string>
     <string name="error_noise_suppression">Error al cambiar el procesamiento de audio; se conserva la selección anterior</string>
-    <string name="settings_dpdfnet_performance">DPDFNet2 consume más CPU y batería. En dispositivos lentos puede haber cortes de audio, sobre todo en segundo plano.</string>
+    <string name="settings_dpdfnet_performance">«Mejorada» consume más CPU y batería. En dispositivos lentos puede haber cortes de audio, sobre todo en segundo plano.</string>
     <string name="network_latency">Latencia</string>
     <string name="network_packet_loss">Pérdida de paquetes</string>
     <string name="network_unavailable">Estadísticas de red no disponibles</string>

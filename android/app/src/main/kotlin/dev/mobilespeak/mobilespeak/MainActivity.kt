@@ -942,7 +942,7 @@ internal fun SettingsScreen(ui: SessionUiState, requestPermissions: () -> Unit, 
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(stringResource(R.string.settings_noise_suppression), fontSize = 17.sp, lineHeight = 20.sp)
                 Column(Modifier.clip(RoundedCornerShape(14.dp)).background(Palette.card)) {
-                    listOf("dpdfnet2" to "DPDFNet2", "rnnoise" to "RNNoise", "none" to stringResource(R.string.settings_noise_none)).forEachIndexed { index, (mode, label) ->
+                    listOf("dpdfnet2" to R.string.settings_noise_enhanced, "rnnoise" to R.string.settings_noise_standard, "none" to R.string.settings_noise_none).forEachIndexed { index, (mode, label) ->
                         if (index > 0) HorizontalDivider(Modifier.padding(start = 16.dp), color = Palette.border)
                         val selected = ui.noiseSuppression == mode
                         val selectionState = stringResource(if (selected) R.string.selection_selected else R.string.selection_not_selected)
@@ -952,7 +952,7 @@ internal fun SettingsScreen(ui: SessionUiState, requestPermissions: () -> Unit, 
                                 ClientSession.setNoiseSuppression(mode)
                             }
                         }.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text(label, Modifier.weight(1f), fontSize = 17.sp, lineHeight = 20.sp)
+                            Text(stringResource(label), Modifier.weight(1f), fontSize = 17.sp, lineHeight = 20.sp)
                             SelectionCircle(selected)
                         }
                     }

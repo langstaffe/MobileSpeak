@@ -67,6 +67,8 @@
     <string name="settings_microphone_help">預設開啟，關閉收聽時麥克風也會靜音。</string>
     <string name="settings_listening">收聽</string>
     <string name="settings_noise_suppression">降噪</string>
+    <string name="settings_noise_enhanced">增強</string>
+    <string name="settings_noise_standard">標準</string>
     <string name="settings_noise_none">無</string>
     <string name="settings_language">語言</string>
     <string name="accessibility_choose_language">選擇語言</string>
@@ -206,7 +208,7 @@
     <string name="settings_audio_applied">目前生效：%1$s</string>
     <string name="settings_noise_system_help">「無」會關閉 MobileSpeak 降噪；系統語音處理仍可能生效。</string>
     <string name="error_noise_suppression">音訊處理切換失敗，已保留原本的選項。</string>
-    <string name="settings_dpdfnet_performance">DPDFNet2 會使用更多處理器資源和電力。效能較低的裝置在背景執行時尤其可能出現語音中斷。</string>
+    <string name="settings_dpdfnet_performance">「增強」會使用更多處理器資源和電力。效能較低的裝置在背景執行時尤其可能出現語音中斷。</string>
     <string name="network_latency">延遲</string>
     <string name="network_packet_loss">封包遺失率</string>
     <string name="network_unavailable">目前沒有網路統計資料</string>
