@@ -87,6 +87,10 @@
     <string name="voice_drawer_expanded">已展開</string>
     <string name="voice_drawer_collapsed">已收起</string>
     <string name="chat_send_failed">傳送失敗</string>
+    <string name="server_chat_title">伺服器聊天</string>
+    <string name="server_chat_input_placeholder">傳送到伺服器</string>
+    <string name="server_chat_open">開啟%1$s的伺服器聊天</string>
+    <string name="server_chat_unread">未讀訊息 %1$d 則</string>
     <string name="chat_input_placeholder">輸入訊息</string>
     <string name="notification_channel_voice">語音連線</string>
     <string name="notification_call_title">MobileSpeak 通話中</string>
@@ -124,6 +128,7 @@
     <string name="error_legacy_codec">此頻道使用舊版音訊編碼；目前僅支援 Opus。</string>
     <string name="error_disconnect_before_connect">請先中斷目前伺服器的連線，再連線至其他伺服器。</string>
     <string name="error_storage_change_while_connected">連線期間不能更改儲存位置。</string>
+    <string name="error_server_message_permission_denied">您沒有權限傳送伺服器訊息，請改為傳送頻道訊息</string>
     <string name="error_message_send_failed">訊息傳送失敗。</string>
     <string name="error_message_wrong_channel">你已不在這個頻道。</string>
     <string name="error_channel_unavailable">頻道不可用。</string>

@@ -356,6 +356,14 @@ internal object ClientSession {
     fun join(channel: Channel, password: String) =
         send(JSONObject().put("type", "join").put("channel", channel.id).put("password", password))
 
+    fun sendServerMessage(target: ServerChatTarget, text: String): String? {
+        if (state.value.snapshot.serverChatTarget != target) return null
+        val requestId = UUID.randomUUID().toString()
+        val sent = send(JSONObject().put("type", "send_server_message").put("request_id", requestId)
+            .put("connectionId", target.connectionId).put("server", target.serverId).put("message", text))
+        return if (sent) requestId else null
+    }
+
     fun sendChannelMessage(channel: Channel, text: String) =
         send(JSONObject().put("type", "send_channel_message").put("request_id", UUID.randomUUID().toString())
             .put("channel", channel.id).put("message", text))
@@ -366,10 +374,9 @@ internal object ClientSession {
             .put("client", member.id).put("uid", uid).put("message", text))
     }
 
-    fun setChatVisible(conversation: String, token: String, visible: Boolean) {
-        val server = state.value.snapshot.serverId ?: return
+    fun setChatVisible(server: String, conversation: String, token: String, visible: Boolean, connectionId: String?) {
         send(JSONObject().put("type", "set_chat_visible").put("server", server)
-            .put("conversation", conversation).put("token", token).put("visible", visible))
+            .put("conversation", conversation).put("token", token).put("visible", visible).put("connectionId", connectionId))
     }
 
     fun clearError() {
@@ -524,11 +531,7 @@ internal object ClientSession {
         val nextSnapshot = snapshotJson.snapshot()
         if (!connectionGate.accepts(nextSnapshot.connectionId, nextSnapshot.status)) return
         val chats = if (envelope.get("chats") == JSONObject.NULL) null else envelope.getJSONArray("chats").objects().map(JSONObject::chatMessage)
-        val unreadJson = envelope.getJSONObject("unread")
-        val unread = Unread(
-            unreadJson.stringOrNull("serverId"), unreadJson.stringOrNull("channel"),
-            unreadJson.getInt("channelCount"), unreadJson.getJSONObject("privateCounts").toIntMap(),
-        )
+        val unread = envelope.optJSONObject("unread")?.unread() ?: Unread()
         mutableState.update { latest ->
             latest.copy(
                 snapshot = nextSnapshot,
@@ -765,11 +768,6 @@ internal object ClientSession {
     private fun fail(source: LocalizedMessage) {
         mutableState.update { it.copy(error = source.render(context.languageContext()), errorSource = source) }
     }
-}
-
-private fun JSONObject?.toIntMap(): Map<String, Int> {
-    if (this == null) return emptyMap()
-    return keys().asSequence().associateWith { getInt(it) }
 }
 
 // A connected snapshot can precede our initial member record. Applying mute then

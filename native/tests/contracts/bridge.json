@@ -7,6 +7,12 @@
       "clients": [],
       "networkQuality": null,
       "status": "disconnected"
+    },
+    "unread": {
+      "channel": null,
+      "channelCount": 0,
+      "privateCounts": {},
+      "serverId": null
     }
   },
   {
@@ -55,6 +61,7 @@
       "channel": null,
       "channelCount": 0,
       "privateCounts": {},
+      "serverCount": 0,
       "serverId": null
     }
   },
@@ -76,6 +83,22 @@
         "targetName": "Lobby",
         "text": "contract",
         "timestamp": 1
+      },
+      {
+        "avatarPath": null,
+        "conversation": "server:fixture-server",
+        "error": null,
+        "id": "fixture-server-message",
+        "kind": "server",
+        "own": false,
+        "senderAvatarHash": "",
+        "senderName": "Server",
+        "senderUid": "",
+        "status": "received",
+        "targetId": "fixture-server",
+        "targetName": "Fixture",
+        "text": "broadcast",
+        "timestamp": 2
       }
     ],
     "events": [
@@ -108,6 +131,8 @@
       "clients": [],
       "connectionId": "fixture-connection",
       "networkQuality": null,
+      "server": "Fixture",
+      "serverId": "fixture-server",
       "status": "connected"
     },
     "soundPending": false,
@@ -121,7 +146,8 @@
       "channel": null,
       "channelCount": 0,
       "privateCounts": {},
-      "serverId": null
+      "serverCount": 3,
+      "serverId": "fixture-server"
     }
   },
   {
@@ -170,6 +196,7 @@
       "channel": null,
       "channelCount": 0,
       "privateCounts": {},
+      "serverCount": 0,
       "serverId": null
     }
   },
@@ -225,6 +252,7 @@
       "channel": null,
       "channelCount": 0,
       "privateCounts": {},
+      "serverCount": 0,
       "serverId": null
     }
   }

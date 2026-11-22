@@ -89,6 +89,10 @@
     <string name="voice_drawer_expanded">Expandido</string>
     <string name="voice_drawer_collapsed">Contraído</string>
     <string name="chat_send_failed">Error al enviar</string>
+    <string name="server_chat_title">Chat del servidor</string>
+    <string name="server_chat_input_placeholder">Enviar al servidor</string>
+    <string name="server_chat_open">Abrir el chat del servidor %1$s</string>
+    <string name="server_chat_unread">Mensajes sin leer (%1$d)</string>
     <string name="chat_input_placeholder">Mensaje</string>
     <string name="notification_channel_voice">Conexión de voz</string>
     <string name="notification_call_title">Llamada de MobileSpeak</string>
@@ -126,6 +130,7 @@
     <string name="error_legacy_codec">Este canal utiliza un códec antiguo. Solo se admite Opus.</string>
     <string name="error_disconnect_before_connect">Desconéctate antes de conectar con otro servidor.</string>
     <string name="error_storage_change_while_connected">No se puede cambiar el almacenamiento durante una conexión.</string>
+    <string name="error_server_message_permission_denied">No tienes permiso para enviar mensajes al servidor. Envía un mensaje al canal.</string>
     <string name="error_message_send_failed">No se ha podido enviar el mensaje.</string>
     <string name="error_message_wrong_channel">Ya no estás en este canal.</string>
     <string name="error_channel_unavailable">Este canal no está disponible.</string>

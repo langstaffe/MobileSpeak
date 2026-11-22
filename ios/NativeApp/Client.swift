@@ -79,6 +79,12 @@ struct Member: Decodable, Identifiable, Equatable {
     var volumeRowId: String { volumeToken ?? "client:\(id)" }
     var conversation: String? { uid.map { "client:\($0)" } }
 }
+struct ServerChatTarget: Hashable {
+    let serverId: String
+    let connectionId: String
+    var conversation: String { "server:\(serverId)" }
+}
+
 struct Snapshot: Decodable, Equatable {
     var connectionId: String?
     var status = "disconnected"
@@ -89,6 +95,10 @@ struct Snapshot: Decodable, Equatable {
     var channels: [Channel] = []
     var clients: [Member] = []
     var networkQuality: NetworkQuality?
+    var serverChatTarget: ServerChatTarget? {
+        guard status == "connected", let serverId, let connectionId else { return nil }
+        return ServerChatTarget(serverId: serverId, connectionId: connectionId)
+    }
     func onlineMember(uid: String?) -> Member? {
         guard status == "connected", let uid, !uid.isEmpty else { return nil }
         return clients.first { $0.uid == uid }
@@ -168,12 +178,20 @@ struct ChatMessage: Decodable, Identifiable, Equatable {
     let timestamp: UInt64
     let status: ChatStatus
     let error: String?
+    var serverPermissionDenied: Bool { own && status == .failed && error == "server_message_permission_denied" }
 }
 struct UnreadSnapshot: Decodable, Equatable {
     var serverId: String?
+    private var serverCountValue: Int?
+    var serverCount: Int { serverCountValue ?? 0 }
     var channel: String?
     var channelCount = 0
     var privateCounts: [String: Int] = [:]
+
+    private enum CodingKeys: String, CodingKey {
+        case serverId, channel, channelCount, privateCounts
+        case serverCountValue = "serverCount"
+    }
 }
 
 enum NoiseSuppressionMode: String, CaseIterable {
@@ -444,6 +462,10 @@ private func coreChanged(_ context: Int) {
     var busy: Bool { state.status == "connecting" || reconnecting }
     var muted: Bool { microphoneMuted || deafened }
     var currentChannel: UInt64? { state.clients.first { $0.id == state.ownClient }?.channel }
+    var serverUnread: Int {
+        guard connected, unread.serverId == state.serverId else { return 0 }
+        return unread.serverCount
+    }
     var currentChannelUnread: Int {
         guard connected, unread.serverId == state.serverId,
               let channel = state.channels.first(where: { $0.id == currentChannel }),
@@ -827,9 +849,11 @@ private func coreChanged(_ context: Int) {
     func messages(in conversation: String) -> [ChatMessage] {
         messages.filter { $0.conversation == conversation }
     }
-    func setChatVisible(server: String, conversation: String, token: UUID, visible: Bool) {
-        do { try send(["type": "set_chat_visible", "server": server, "conversation": conversation,
-                       "token": token.uuidString, "visible": visible]) }
+    func setChatVisible(server: String, conversation: String, token: UUID, visible: Bool, connectionId: String? = nil) {
+        var command: [String: Any] = ["type": "set_chat_visible", "server": server, "conversation": conversation,
+                                      "token": token.uuidString, "visible": visible]
+        if let connectionId { command["connectionId"] = connectionId }
+        do { try send(command) }
         catch { self.error = localized(error, for: .error) }
     }
     func setAppActive(_ active: Bool) {
@@ -854,6 +878,15 @@ private func coreChanged(_ context: Int) {
             try send(["type": "set_noise_suppression", "mode": mode.rawValue, "request_id": audioRequest])
             noiseSuppression = mode; audioProcessingStatus = "switching"; audioProcessingError = nil
         } catch { audioProcessingError = localizedDetail("error_noise_suppression", error: error, for: .audio) }
+    }
+    func sendServerMessage(_ text: String, target: ServerChatTarget) -> String? {
+        guard state.serverChatTarget == target else { return nil }
+        let requestId = UUID().uuidString
+        do {
+            try send(["type": "send_server_message", "request_id": requestId,
+                      "connectionId": target.connectionId, "server": target.serverId, "message": text])
+            return requestId
+        } catch { self.error = localized(error, for: .error); return nil }
     }
     @discardableResult func sendChannelMessage(_ text: String, channel: Channel) -> Bool {
         do {

@@ -89,6 +89,10 @@
     <string name="voice_drawer_expanded">Développé</string>
     <string name="voice_drawer_collapsed">Réduit</string>
     <string name="chat_send_failed">Échec de l’envoi</string>
+    <string name="server_chat_title">Discussion du serveur</string>
+    <string name="server_chat_input_placeholder">Envoyer au serveur</string>
+    <string name="server_chat_open">Ouvrir la discussion du serveur %1$s</string>
+    <string name="server_chat_unread">Messages non lus (%1$d)</string>
     <string name="chat_input_placeholder">Message</string>
     <string name="notification_channel_voice">Connexion vocale</string>
     <string name="notification_call_title">Appel MobileSpeak</string>
@@ -126,6 +130,7 @@
     <string name="error_legacy_codec">Ce salon utilise un ancien codec. Seul Opus est pris en charge.</string>
     <string name="error_disconnect_before_connect">Déconnectez-vous avant de vous connecter à un autre serveur.</string>
     <string name="error_storage_change_while_connected">Impossible de changer de stockage pendant la connexion.</string>
+    <string name="error_server_message_permission_denied">Vous n’avez pas l’autorisation d’envoyer des messages au serveur. Envoyez un message au salon.</string>
     <string name="error_message_send_failed">Impossible d’envoyer le message.</string>
     <string name="error_message_wrong_channel">Vous n’êtes plus dans ce salon.</string>
     <string name="error_channel_unavailable">Ce salon est indisponible.</string>

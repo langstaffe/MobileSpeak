@@ -2722,6 +2722,7 @@ final class ClientTests: XCTestCase {
         XCTAssertEqual(L10n.channelMembers(count: 1), "· 1 人在线")
         XCTAssertEqual(L10n.channelMembers(count: 5), "· 5 人在线")
         XCTAssertEqual(L10n.channelMembers(count: 100), "· 100 人在线")
+        XCTAssertEqual(L10n.coreError("server_message_permission_denied"), "您没有权限发送服务器消息，请改为发送频道消息")
         UserDefaults.standard.set("zh-Hant", forKey: AppLanguage.preferenceKey)
         XCTAssertEqual(L10n.channelMembers(count: 1), "· 1 人線上")
         XCTAssertEqual(L10n.channelMembers(count: 5), "· 5 人線上")
@@ -3282,6 +3283,10 @@ final class BridgeContractTests: XCTestCase {
             let decoded = try JSONDecoder().decode(Snapshot.self, from: JSONSerialization.data(withJSONObject: snapshot))
             XCTAssertEqual(decoded.status, ["disconnected", "connecting", "connected", "reconnecting", "disconnected"][index])
             XCTAssertEqual(snapshot["connectionId"] as? String, index == 0 ? nil : "fixture-connection")
+            XCTAssertEqual(decoded.serverChatTarget, index == 2 ? ServerChatTarget(serverId: "fixture-server", connectionId: "fixture-connection") : nil)
+            let unread = try XCTUnwrap(envelope["unread"])
+            let decodedUnread = try JSONDecoder().decode(UnreadSnapshot.self, from: JSONSerialization.data(withJSONObject: unread))
+            XCTAssertEqual(decodedUnread.serverCount, index == 2 ? 3 : 0)
             let speech: SpeechState
             if let value = envelope["speech"], !(value is NSNull) {
                 speech = try JSONDecoder().decode(SpeechState.self, from: JSONSerialization.data(withJSONObject: value))
@@ -3299,8 +3304,16 @@ final class BridgeContractTests: XCTestCase {
             }
             if let chats = envelope["chats"], !(chats is NSNull) {
                 let messages = try JSONDecoder().decode([ChatMessage].self, from: JSONSerialization.data(withJSONObject: chats))
-                XCTAssertEqual(messages.count, index == 2 ? 1 : 0)
-                if index == 2 { XCTAssertEqual(messages.first?.status, .sent) }
+                XCTAssertEqual(messages.count, index == 2 ? 2 : 0)
+                if let target = decoded.serverChatTarget {
+                    XCTAssertEqual(messages.first?.conversation, "channel:id:1")
+                    XCTAssertEqual(messages.first?.status, .sent)
+                    let server = try XCTUnwrap(messages.first { $0.conversation == target.conversation })
+                    XCTAssertEqual(server.senderName, "Server")
+                    XCTAssertTrue(server.senderUid.isEmpty)
+                    XCTAssertNil(server.avatarPath)
+                    XCTAssertEqual(server.status, .received)
+                }
             }
             for event in envelope["events"] as? [[String: Any]] ?? [] {
                 if event["type"] as? String == "error" {

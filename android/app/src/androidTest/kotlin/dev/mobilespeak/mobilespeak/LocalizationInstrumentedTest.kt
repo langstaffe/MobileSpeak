@@ -60,6 +60,7 @@ class LocalizationInstrumentedTest {
                 assertEquals("（我）", context.localized(R.string.member_self_suffix))
                 assertEquals("调节用户音量", context.localized(R.string.volume_title))
                 assertEquals("自动调整其他用户的音量", context.localized(R.string.settings_receive_agc_help))
+                assertEquals("您没有权限发送服务器消息，请改为发送频道消息", context.localizedCoreError("server_message_permission_denied"))
 
                 assertTrue(select(AppLanguage.TRADITIONAL_CHINESE))
                 assertEquals(AppLanguage.TRADITIONAL_CHINESE, AppLanguage.selected())

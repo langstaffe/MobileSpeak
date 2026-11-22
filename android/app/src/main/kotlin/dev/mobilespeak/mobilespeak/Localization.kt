@@ -167,6 +167,7 @@ internal fun coreErrorSource(code: String?, detail: String? = null): LocalizedMe
             "disconnect_before_connect" -> R.string.error_disconnect_before_connect
             "storage_change_while_connected" -> R.string.error_storage_change_while_connected
             "message_send_failed" -> R.string.error_message_send_failed
+            "server_message_permission_denied" -> R.string.error_server_message_permission_denied
             "message_wrong_channel" -> R.string.error_message_wrong_channel
             "channel_unavailable" -> R.string.error_channel_unavailable
             "user_offline" -> R.string.error_user_offline

@@ -378,6 +378,12 @@ mod tests {
             assert!(store.messages[0].status == ChatStatus::Failed);
             assert!(store.messages[1].status == ChatStatus::Sent);
             let previous = session.epoch;
+            let mut server_message = message("pending", ChatStatus::Pending);
+            server_message.kind = ChatKind::Server;
+            server_message.conversation = "server:server".into();
+            server_message.target_id = "server".into();
+            session.add(vec![server_message.clone()]);
+            session.fail_pending("message_unconfirmed_after_reconnect");
             session.select(Some(root.clone()), Some("other".into()));
             worker.send(Change::Add(
                 previous,
@@ -385,6 +391,15 @@ mod tests {
             ));
             worker.barrier();
             assert_eq!(out.lock().unwrap().chat_snapshot, Some(json!([])));
+            server_message.conversation = "server:other".into();
+            server_message.target_id = "other".into();
+            session.add(vec![server_message]);
+            worker.send(Change::Finish(previous, "pending".into(), ChatStatus::Sent, None));
+            worker.barrier();
+            let other = load_chat(&root, "other").unwrap();
+            assert_eq!(other.messages.len(), 1);
+            assert_eq!(other.messages[0].conversation, "server:other");
+            assert!(other.messages[0].status == ChatStatus::Pending);
             session.select(Some(root.clone()), Some("server".into()));
             worker.barrier();
             assert_eq!(
@@ -396,13 +411,15 @@ mod tests {
                     .as_array()
                     .unwrap()
                     .len(),
-                2
+                3
             );
             session.add(vec![message("exit", ChatStatus::Pending)]);
         } // Session fail-pending and Worker stop flush everything already accepted.
         let store = load_chat(&root, "server").unwrap();
-        assert_eq!(store.messages.len(), 3);
+        assert_eq!(store.messages.len(), 4);
         assert!(store.messages[2].status == ChatStatus::Failed);
+        assert_eq!(store.messages[2].conversation, "server:server");
+        assert!(store.messages[3].status == ChatStatus::Failed);
         std::fs::remove_dir_all(root).unwrap();
     }
     #[test]

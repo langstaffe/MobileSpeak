@@ -105,6 +105,13 @@ pub enum Command {
         token: String,
         percent: u16,
     },
+    SendServerMessage {
+        request_id: String,
+        #[serde(rename = "connectionId")]
+        connection_id: String,
+        server: String,
+        message: String,
+    },
     SendChannelMessage {
         request_id: String,
         channel: u64,
@@ -118,6 +125,8 @@ pub enum Command {
     },
     SetChatVisible {
         server: String,
+        #[serde(rename = "connectionId")]
+        connection_id: Option<String>,
         conversation: String,
         token: String,
         visible: bool,
@@ -267,6 +276,12 @@ impl Command {
             {
                 Err("Invalid user volume")
             }
+            Self::SendServerMessage { request_id, connection_id, server, message }
+                if connection_id.is_empty() || connection_id.len() > 128
+                    || !receive_audio::valid_identity(server) || !valid_message(request_id, message) =>
+            {
+                Err("Invalid message")
+            }
             Self::SendChannelMessage {
                 request_id,
                 channel,
@@ -286,11 +301,13 @@ impl Command {
             }
             Self::SetChatVisible {
                 server,
+                connection_id,
                 conversation,
                 token,
                 ..
             } if server.is_empty()
                 || server.len() > 256
+                || connection_id.as_ref().is_some_and(|id| id.is_empty() || id.len() > 128)
                 || conversation.is_empty()
                 || conversation.len() > 512
                 || token.is_empty()
@@ -369,6 +386,7 @@ fn valid_message(request_id: &str, message: &str) -> bool {
 #[derive(Clone, Copy, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 enum ChatKind {
+    Server,
     Channel,
     Private,
 }
@@ -418,6 +436,7 @@ impl ChatStore {
 #[derive(Default)]
 struct UnreadState {
     server: Option<String>,
+    server_count: u32,
     channel: Option<String>,
     channel_count: u32,
     private_counts: HashMap<String, u32>,
@@ -431,6 +450,7 @@ impl UnreadState {
         }
         if self.server != server {
             self.server = server;
+            self.server_count = 0;
             self.private_counts.clear();
             self.visible = None;
             self.channel = None;
@@ -448,6 +468,9 @@ impl UnreadState {
             self.channel_count = 0;
         }
     }
+    fn is_server_chat(&self, conversation: &str) -> bool {
+        conversation.strip_prefix("server:").is_some_and(|id| self.server.as_deref() == Some(id))
+    }
     fn should_notify(&self, message: &ChatMessage) -> bool {
         if self.server.is_none()
             || message.own
@@ -461,6 +484,7 @@ impl UnreadState {
             return false;
         }
         match message.kind {
+            ChatKind::Server => self.is_server_chat(&message.conversation),
             ChatKind::Channel => self.channel.as_deref() == Some(message.conversation.as_str()),
             ChatKind::Private => message.conversation == format!("client:{}", message.target_id),
         }
@@ -468,6 +492,7 @@ impl UnreadState {
     fn record(&mut self, message: &ChatMessage) {
         if !self.should_notify(message) { return; }
         match message.kind {
+            ChatKind::Server => self.server_count = self.server_count.saturating_add(1),
             ChatKind::Channel if self.channel.as_deref() == Some(message.conversation.as_str()) => {
                 self.channel_count = self.channel_count.saturating_add(1);
             }
@@ -489,6 +514,7 @@ impl UnreadState {
         }
         if visible {
             if self.channel.as_deref() != Some(conversation)
+                && !self.is_server_chat(conversation)
                 && !conversation
                     .strip_prefix("client:")
                     .is_some_and(|uid| !uid.is_empty())
@@ -517,14 +543,16 @@ impl UnreadState {
         let Some((conversation, _)) = self.visible.as_ref() else {
             return;
         };
-        if self.channel.as_deref() == Some(conversation.as_str()) {
+        if self.is_server_chat(conversation) {
+            self.server_count = 0;
+        } else if self.channel.as_deref() == Some(conversation.as_str()) {
             self.channel_count = 0;
         } else if let Some(uid) = conversation.strip_prefix("client:") {
             self.private_counts.remove(uid);
         }
     }
     fn snapshot(&self) -> Value {
-        json!({"serverId":self.server,"channel":self.channel,"channelCount":self.channel_count,"privateCounts":self.private_counts})
+        json!({"serverId":self.server,"serverCount":self.server_count,"channel":self.channel,"channelCount":self.channel_count,"privateCounts":self.private_counts})
     }
 }
 
@@ -1054,7 +1082,7 @@ fn schedule_badges(con: &Connection, storage: Option<&Path>, downloads: &mut med
 }
 
 enum PendingOperation {
-    Chat(String),
+    Chat { id: String, kind: ChatKind },
     FilesList,
     Avatar(avatar::Token),
     AvatarInfo(avatar::Token),
@@ -1081,6 +1109,31 @@ fn is_joining(operations: &HashMap<MessageHandle, PendingOperation>) -> bool {
     operations.values().any(|op| matches!(op, PendingOperation::Join))
 }
 
+fn server_chat_target(state: &tsclientlib::data::Connection) -> (ChatKind, String, String, String) {
+    let id = state.server.public_key.get_uid();
+    let conversation = format!("server:{id}");
+    (ChatKind::Server, id, state.server.name.clone(), conversation)
+}
+
+fn server_message_context(
+    expected_connection: &str,
+    expected_server: &str,
+    connection: Option<&str>,
+    server: Option<&str>,
+    ready: bool,
+) -> Result<(), &'static str> {
+    if connection != Some(expected_connection) {
+        return Err("message_send_failed");
+    }
+    if !ready {
+        return Err("connection_recovering");
+    }
+    if server != Some(expected_server) {
+        return Err("message_send_failed");
+    }
+    Ok(())
+}
+
 fn outgoing_message(
     con: &Connection,
     request_id: String,
@@ -1100,6 +1153,7 @@ fn outgoing_message(
         .map(|uid| format!("{}", uid.as_ref()))
         .unwrap_or_default();
     let (kind, target_id, target_name, conversation) = match target {
+        MessageTarget::Server => server_chat_target(state),
         MessageTarget::Channel => {
             let expected = expected_channel.ok_or("channel_unavailable")?;
             if own.channel.0 != expected {
@@ -1152,6 +1206,35 @@ fn outgoing_message(
         error: None,
     })
 }
+fn submit_chat(
+    con: &mut Connection,
+    chats: &chat::Session<'_>,
+    operations: &mut HashMap<MessageHandle, PendingOperation>,
+    target: MessageTarget,
+    message: ChatMessage,
+) {
+    let command = con.get_state().map(|state| state.send_message(target, &message.text));
+    let id = message.id.clone();
+    let kind = message.kind;
+    chats.add(vec![message]);
+    match command.and_then(|command| command.send_with_result(con)) {
+        Ok(handle) => { operations.insert(handle, PendingOperation::Chat { id, kind }); }
+        Err(_) => chats.finish(&id, ChatStatus::Failed, Some("message_send_failed".into())),
+    }
+}
+
+fn chat_send_error(kind: ChatKind, error: &tsclientlib::CommandError) -> &'static str {
+    use tsclientlib::TsError;
+    if matches!(kind, ChatKind::Server)
+        && (matches!(error.error, TsError::PermissionsClientInsufficient | TsError::Permissions)
+            || error.missing_permission.is_some())
+    {
+        "server_message_permission_denied"
+    } else {
+        "message_send_failed"
+    }
+}
+
 fn rejected_message(
     con: &Connection,
     request_id: String,
@@ -1223,78 +1306,43 @@ fn rejected_message(
         error: Some(error),
     }
 }
-fn received_messages(events: impl IntoIterator<Item = Event>, con: &Connection) -> Vec<ChatMessage> {
-    let Ok(state) = con.get_state() else {
-        return Vec::new();
-    };
-    let own_id = state.own_client;
-    let own_channel = state.clients.get(&own_id).map(|client| client.channel);
-    let mut result = Vec::new();
-    for event in events {
-        let Event::Message {
-            target,
-            invoker,
-            message,
-        } = event
-        else {
-            continue;
-        };
-        if invoker.id == own_id {
-            continue;
-        }
-        let sender = state.clients.get(&invoker.id);
-        let sender_uid = invoker
-            .uid
-            .as_ref()
-            .or_else(|| sender.and_then(|client| client.uid.as_ref()))
-            .map(|uid| format!("{}", uid.as_ref()))
-            .unwrap_or_default();
-        let avatar_hash = sender
-            .map(|client| client.avatar_hash.clone())
-            .unwrap_or_default();
-        let (kind, target_id, target_name, conversation) = match target {
-            MessageTarget::Channel => {
-                let Some(channel) = own_channel.and_then(|id| state.channels.get(&id)) else {
-                    continue;
-                };
-                let key = channel_key(channel);
-                (
-                    ChatKind::Channel,
-                    key.clone(),
-                    channel.name.clone(),
-                    format!("channel:{key}"),
-                )
-            }
-            MessageTarget::Client(_) => {
-                if sender_uid.is_empty() {
-                    continue;
-                }
-                (
-                    ChatKind::Private,
-                    sender_uid.clone(),
-                    invoker.name.clone(),
-                    format!("client:{sender_uid}"),
-                )
-            }
-            MessageTarget::Server | MessageTarget::Poke(_) => continue,
-        };
-        result.push(ChatMessage {
-            id: received_id(),
-            conversation,
-            kind,
-            target_id,
-            target_name,
-            sender_uid,
-            sender_name: invoker.name,
-            sender_avatar_hash: avatar_hash,
-            own: false,
-            text: message,
-            timestamp: timestamp(),
-            status: ChatStatus::Received,
-            error: None,
-        });
+fn received_message(event: Event, state: &tsclientlib::data::Connection) -> Option<ChatMessage> {
+    let Event::Message { target, invoker, message } = event else { return None };
+    if invoker.id == state.own_client || matches!(target, MessageTarget::Poke(_)) {
+        return None;
     }
-    result
+    let sender = state.clients.get(&invoker.id);
+    let sender_uid = invoker.uid.as_ref()
+        .or_else(|| sender.and_then(|client| client.uid.as_ref()))
+        .map(|uid| format!("{}", uid.as_ref()))
+        .unwrap_or_default();
+    let (kind, target_id, target_name, conversation) = match target {
+        MessageTarget::Server => server_chat_target(state),
+        MessageTarget::Channel => {
+            let channel = state.channels.get(&state.clients.get(&state.own_client)?.channel)?;
+            let key = channel_key(channel);
+            (ChatKind::Channel, key.clone(), channel.name.clone(), format!("channel:{key}"))
+        }
+        MessageTarget::Client(_) if !sender_uid.is_empty() => (
+            ChatKind::Private, sender_uid.clone(), invoker.name.clone(), format!("client:{sender_uid}"),
+        ),
+        _ => return None,
+    };
+    Some(ChatMessage {
+        id: received_id(),
+        conversation,
+        kind,
+        target_id,
+        target_name,
+        sender_uid,
+        sender_name: invoker.name,
+        sender_avatar_hash: sender.map(|client| client.avatar_hash.clone()).unwrap_or_default(),
+        own: false,
+        text: message,
+        timestamp: timestamp(),
+        status: ChatStatus::Received,
+        error: None,
+    })
 }
 
 #[derive(Default)]
@@ -1401,7 +1449,7 @@ async fn session(
     diagnostic!("Connection startup phase=worker_begin");
     {
         let mut output = out.lock().unwrap();
-        output.connection_id = connection_id;
+        output.connection_id = connection_id.clone();
         output.status("connecting");
     }
     let mut chats = chat_worker.session();
@@ -1625,22 +1673,24 @@ async fn session(
                     }
                     let connected_server = server_id(&con);
                     if current_server != connected_server {
+                        chats.fail_pending("message_unconfirmed_after_reconnect");
+                        operations.retain(|_, op| !matches!(op, PendingOperation::Chat { .. }));
                         network = network_quality::History::new(Instant::now());
                         out.lock().unwrap().network_quality = None;
                         current_server = connected_server;
                         chats.select(storage.clone(), current_server.clone());
                     }
                     unread.sync(current_server.clone(), current_channel_conversation(&con));
-                    let cues = if let Ok(state) = con.get_state() {
-                        sound_events.book(&events, state.own_client, |id| state.clients.get(&id).map(|client| client.channel))
-                    } else { vec![None; events.len()] };
                     let mut received = Vec::new();
-                    for (event, cue) in events.into_iter().zip(cues) {
-                        if !output_muted { if let Some(cue) = cue { playback.play_sound(cue); } }
-                        for message in received_messages(std::iter::once(event), &con) {
-                            if !output_muted && unread.should_notify(&message) { playback.play_sound(sounds::Sound::Message); }
-                            unread.record(&message);
-                            received.push(message);
+                    if let Ok(state) = con.get_state() {
+                        let cues = sound_events.book(&events, state.own_client, |id| state.clients.get(&id).map(|client| client.channel));
+                        for (event, cue) in events.into_iter().zip(cues) {
+                            if !output_muted { if let Some(cue) = cue { playback.play_sound(cue); } }
+                            if let Some(message) = received_message(event, state) {
+                                if !output_muted && unread.should_notify(&message) { playback.play_sound(sounds::Sound::Message); }
+                                unread.record(&message);
+                                received.push(message);
+                            }
                         }
                     }
                     if !received.is_empty() { chats.add(received); }
@@ -1706,10 +1756,10 @@ async fn session(
                         apply_nickname(&mut con, profile, &mut nickname_application, &mut operations, out);
                     },
                     Some(PendingOperation::FilesList) => { files.list_result(handle, result, out); files.pump(&mut con, &mut operations); },
-                    Some(PendingOperation::Chat(id)) => {
+                    Some(PendingOperation::Chat { id, kind }) => {
                         match result {
                             Ok(()) => chats.finish(&id, ChatStatus::Sent, None),
-                            Err(_) => chats.finish(&id, ChatStatus::Failed, Some("message_send_failed".into())),
+                            Err(error) => chats.finish(&id, ChatStatus::Failed, Some(chat_send_error(kind, &error).into())),
                         }
 
                     }
@@ -1812,6 +1862,7 @@ async fn session(
                     avatar.observe(avatar_store, out);
                     chats.fail_pending("message_unconfirmed_after_reconnect");
                     operations.clear();
+                    unread.visible = None;
                     if avatar.disconnected() {
                         out.lock().unwrap().event(json!({"type":"avatar_sync","status":"idle","detail":null}));
                     }
@@ -1890,7 +1941,11 @@ async fn session(
                     avatar.observe(avatar_store, out);
                     if subscribed { avatar.check(&mut con, storage.as_deref(), &avatar_tx, &mut operations, out); }
                 },
-                Some(Command::SetChatVisible { server, conversation, token, visible }) => {
+                Some(Command::SetChatVisible { server, connection_id: expected_connection, conversation, token, visible }) => {
+                    if expected_connection.is_some() && expected_connection != connection_id { continue; }
+                    if visible && conversation.starts_with("server:") && current_channel_conversation(&con).is_none() {
+                        continue;
+                    }
                     unread.set_visible(&server, &conversation, &token, visible);
                     out.lock().unwrap().set_unread(unread.snapshot());
                 },
@@ -1988,19 +2043,20 @@ async fn session(
                     }
                     processing.request_id=request_id; processing.requested.noise=mode; processing.request(processor,out);
                 },
+                Some(Command::SendServerMessage { request_id, connection_id: expected_connection, server, message }) => {
+                    let result = server_message_context(
+                        &expected_connection, &server, connection_id.as_deref(), current_server.as_deref(),
+                        subscribed && current_channel_conversation(&con).is_some(),
+                    ).and_then(|()| outgoing_message(&con, request_id, MessageTarget::Server, None, None, message));
+                    match result {
+                        Ok(chat) => submit_chat(&mut con, &chats, &mut operations, MessageTarget::Server, chat),
+                        Err(error) => out.lock().unwrap().event(json!({"type":"error","code":error,"connectionId":expected_connection})),
+                    }
+                },
                 Some(Command::SendChannelMessage { request_id, channel, message }) => {
                     let target = MessageTarget::Channel;
                     match outgoing_message(&con, request_id.clone(), target, Some(channel), None, message.clone()) {
-                        Ok(chat) => {
-                            let id = chat.id.clone();
-                            chats.add(vec![chat]);
-                            let send = con.get_state()?.send_message(target, &message).send_with_result(&mut con);
-                            match send {
-                                Ok(handle) => { operations.insert(handle, PendingOperation::Chat(id)); },
-                                Err(_) => chats.finish(&id, ChatStatus::Failed, Some("message_send_failed".into())),
-                            }
-
-                        }
+                        Ok(chat) => submit_chat(&mut con, &chats, &mut operations, target, chat),
                         Err(error) => {
                             chats.add(vec![rejected_message(
                                 &con,
@@ -2019,16 +2075,7 @@ async fn session(
                 Some(Command::SendPrivateMessage { request_id, client, uid, message }) => {
                     let target = MessageTarget::Client(tsclientlib::ClientId(client));
                     match outgoing_message(&con, request_id.clone(), target, None, Some(&uid), message.clone()) {
-                        Ok(chat) => {
-                            let id = chat.id.clone();
-                            chats.add(vec![chat]);
-                            let send = con.get_state()?.send_message(target, &message).send_with_result(&mut con);
-                            match send {
-                                Ok(handle) => { operations.insert(handle, PendingOperation::Chat(id)); },
-                                Err(_) => chats.finish(&id, ChatStatus::Failed, Some("message_send_failed".into())),
-                            }
-
-                        }
+                        Ok(chat) => submit_chat(&mut con, &chats, &mut operations, target, chat),
                         Err(error) => {
                             chats.add(vec![rejected_message(
                                 &con,
@@ -2283,6 +2330,8 @@ impl Bridge {
                         command @ (Command::FilesOpen { .. } | Command::FilesBack { .. } | Command::FilesList { .. } | Command::FilesSort { .. } | Command::FilesDownload { .. } | Command::FilesUpload { .. } | Command::FilesRetry { .. }) => {
                             files.offline(&command, storage.as_deref(), &worker_output);
                         }
+                        Command::SendServerMessage { connection_id, .. } => worker_output.lock().unwrap()
+                            .event(json!({"type":"error","code":"message_send_failed","connectionId":connection_id})),
                         _ => {}
                     }
                 }
@@ -2882,14 +2931,11 @@ mod tests {
         fn message(kind: ChatKind, target: &str) -> ChatMessage {
             ChatMessage {
                 id: "new".into(),
-                conversation: format!(
-                    "{}:{target}",
-                    if matches!(kind, ChatKind::Channel) {
-                        "channel"
-                    } else {
-                        "client"
-                    }
-                ),
+                conversation: format!("{}:{target}", match kind {
+                    ChatKind::Server => "server",
+                    ChatKind::Channel => "channel",
+                    ChatKind::Private => "client",
+                }),
                 kind,
                 target_id: target.into(),
                 target_name: String::new(),
@@ -2951,10 +2997,104 @@ mod tests {
         assert_eq!(unread.private_counts.get("bob"), Some(&1));
         unread.sync(None, None);
         assert_eq!(unread.private_counts.get("bob"), Some(&1));
+
+        let server = message(ChatKind::Server, "server-a");
+        unread.record(&server);
+        unread.record(&message(ChatKind::Server, "server-b"));
+        unread.sync(Some("server-a".into()), Some("channel:c".into()));
+        assert_eq!(unread.server_count, 1);
+        unread.record(&message(ChatKind::Channel, "c"));
+        unread.set_visible("server-a", "server:server-b", "wrong", true);
+        assert_eq!(unread.server_count, 1);
+        unread.set_visible("server-a", "server:server-a", "server-page", true);
+        assert_eq!(unread.server_count, 0);
+        assert_eq!(unread.channel_count, 1);
+        unread.sync(Some("server-a".into()), Some("channel:d".into()));
+        unread.set_visible("server-a", "server:server-a", "stale", false);
+        assert!(!unread.should_notify(&server));
+        unread.set_app_active(false);
+        assert!(unread.should_notify(&server));
+        unread.record(&server);
+        assert_eq!(unread.server_count, 1);
+        unread.set_app_active(true);
+        assert_eq!(unread.server_count, 0);
+        unread.set_visible("server-a", "server:server-a", "server-page", false);
+        unread.record(&server);
         unread.sync(Some("server-b".into()), Some("channel:a".into()));
+        assert_eq!(unread.server_count, 0);
+        assert!(!unread.should_notify(&server));
         assert!(unread.private_counts.is_empty());
         unread.set_visible("server-a", "channel:a", "stale", true);
         assert!(unread.visible.is_none());
+    }
+    #[test]
+    fn server_text_uses_the_protocol_invoker_and_ignores_echoes_and_pokes() {
+        use tsclientlib::InMessage;
+        use tsproto_packets::packets::{Direction, Flags, OutPacket, PacketType};
+
+        let packet = OutPacket::new_with_dir(Direction::S2C, Flags::empty(), PacketType::Command);
+        let init = InMessage::new(&packet.header(), concat!(
+            "initserver virtualserver_name=fixture virtualserver_welcomemessage= virtualserver_platform=fixture ",
+            "virtualserver_version=fixture virtualserver_maxclients=10 virtualserver_created=0 ",
+            "virtualserver_codec_encryption_mode=0 virtualserver_hostmessage= virtualserver_hostmessage_mode=0 ",
+            "virtualserver_default_server_group=1 virtualserver_default_channel_group=1 virtualserver_id=1 ",
+            "virtualserver_ask_for_privilegekey=0 virtualserver_hostbanner_url= virtualserver_hostbanner_gfx_url= ",
+            "virtualserver_hostbanner_gfx_interval=0 virtualserver_priority_speaker_dimm_modificator=0 ",
+            "virtualserver_hostbutton_tooltip= virtualserver_hostbutton_url= virtualserver_hostbutton_gfx_url= ",
+            "virtualserver_name_phonetic= virtualserver_icon_id=0 virtualserver_hostbanner_mode=0 ",
+            "virtualserver_channel_temp_delete_delay_default=0 acn=fixture aclid=1 pv=0 ",
+            "client_talk_power=0 client_needed_serverquery_view_power=0"
+        ).as_bytes()).unwrap();
+        let InMessage::InitServer(init) = init else { panic!("fixture must be initserver") };
+        let key = Identity::create().key().to_pub();
+        let server = key.get_uid();
+        let mut state = tsclientlib::data::Connection::new(key, &init);
+        let mut receive = |packet_type, wire: &str| {
+            let packet = OutPacket::new_with_dir(Direction::S2C, Flags::empty(), packet_type);
+            let parsed = InMessage::new(&packet.header(), wire.as_bytes()).unwrap();
+            let (events, _) = state.handle_command(&parsed).unwrap();
+            received_message(events.into_iter().next().unwrap(), &state)
+        };
+        for (wire, name) in [
+            ("notifytextmessage targetmode=3 msg=hello invokerid=0 invokername=Server", "Server"),
+            ("notifytextmessage targetmode=3 msg=hello invokerid=7 invokername=Visitor", "Visitor"),
+        ] {
+            let message = receive(PacketType::Command, wire).unwrap();
+            assert!(matches!(message.kind, ChatKind::Server));
+            assert_eq!(message.conversation, format!("server:{server}"));
+            assert_eq!(message.target_id, server);
+            assert_eq!(message.sender_name, name);
+            assert!(message.sender_uid.is_empty() && message.sender_avatar_hash.is_empty());
+            assert!(!message.own);
+        }
+        assert!(receive(PacketType::Command, "notifytextmessage targetmode=3 msg=hello invokerid=1 invokername=Self").is_none());
+        assert!(receive(PacketType::CommandLow, "notifyclientpoke msg=hello invokerid=7 invokername=Visitor").is_none());
+    }
+    #[test]
+    fn server_send_rejects_stale_connection_wrong_server_and_recovery() {
+        let valid = json!({"type":"send_server_message","request_id":"request","connectionId":"connection","server":"server","message":"hello"});
+        assert!(serde_json::from_value::<Command>(valid.clone()).unwrap().validate().is_ok());
+        for field in ["request_id", "connectionId", "server", "message"] {
+            let mut invalid = valid.clone();
+            invalid[field] = json!("");
+            assert!(serde_json::from_value::<Command>(invalid).unwrap().validate().is_err());
+        }
+        let check = |connection, server, ready| server_message_context("connection", "server", connection, server, ready);
+        assert_eq!(check(Some("connection"), Some("server"), true), Ok(()));
+        assert_eq!(check(Some("new"), Some("server"), true), Err("message_send_failed"));
+        assert_eq!(check(Some("connection"), Some("other"), true), Err("message_send_failed"));
+        assert_eq!(check(Some("connection"), Some("server"), false), Err("connection_recovering"));
+    }
+    #[test]
+    fn permission_error_uses_specific_hint_for_server_chat_only() {
+        use tsclientlib::{CommandError, TsError};
+        let denied = CommandError { error: TsError::PermissionsClientInsufficient, missing_permission: None };
+        assert_eq!(chat_send_error(ChatKind::Server, &denied), "server_message_permission_denied");
+        assert_eq!(chat_send_error(ChatKind::Channel, &denied), "message_send_failed");
+        assert_eq!(chat_send_error(ChatKind::Private, &denied), "message_send_failed");
+
+        let flooding = CommandError { error: TsError::ClientIsFlooding, missing_permission: None };
+        assert_eq!(chat_send_error(ChatKind::Server, &flooding), "message_send_failed");
     }
     #[test]
     fn notifications_only_fire_for_changed_state_or_events() {
@@ -3227,7 +3367,8 @@ mod contract_regressions {
         playback.set_active(true);
         let mut legacy = Output::default(); legacy.status("disconnected");
         let mut missing = legacy.snapshot.clone(); missing.as_object_mut().unwrap().remove("connectionId");
-        samples.push(json!({"snapshot":missing,"events":[],"chats":null}));
+        samples.push(json!({"snapshot":missing,"events":[],"chats":null,
+            "unread":{"serverId":null,"channel":null,"channelCount":0,"privateCounts":{}}}));
         for status in ["connecting", "connected", "reconnecting", "disconnected"] {
             let mut out = output.lock().unwrap();
             out.connection_id = Some("fixture-connection".into()); out.status(status);
@@ -3237,7 +3378,12 @@ mod contract_regressions {
             out.profile = profile::Profile::default().snapshot();
             out.set_chats(json!([]));
             if status == "connected" {
-                let store = ChatStore { messages: vec![ChatMessage { id:"fixture-message".into(), conversation:"channel:id:1".into(), kind:ChatKind::Channel, target_id:"id:1".into(), target_name:"Lobby".into(), sender_uid:"uid".into(), sender_name:"Speaker".into(), sender_avatar_hash:String::new(), own:true, text:"contract".into(), timestamp:1, status:ChatStatus::Sent, error:None }] };
+                out.set_snapshot(json!({"status":status,"server":"Fixture","serverId":"fixture-server","channels":[],"clients":[]}));
+                out.set_unread(UnreadState { server: Some("fixture-server".into()), server_count: 3, ..Default::default() }.snapshot());
+                let store = ChatStore { messages: vec![
+                    ChatMessage { id:"fixture-message".into(), conversation:"channel:id:1".into(), kind:ChatKind::Channel, target_id:"id:1".into(), target_name:"Lobby".into(), sender_uid:"uid".into(), sender_name:"Speaker".into(), sender_avatar_hash:String::new(), own:true, text:"contract".into(), timestamp:1, status:ChatStatus::Sent, error:None },
+                    ChatMessage { id:"fixture-server-message".into(), conversation:"server:fixture-server".into(), kind:ChatKind::Server, target_id:"fixture-server".into(), target_name:"Fixture".into(), sender_uid:String::new(), sender_name:"Server".into(), sender_avatar_hash:String::new(), own:false, text:"broadcast".into(), timestamp:2, status:ChatStatus::Received, error:None },
+                ] };
                 out.set_chats(chat_snapshot(&store, None, None));
             }
             if status == "disconnected" { out.event(json!({"type":"error","code":"core_error","detail":"fixture failure"})); }

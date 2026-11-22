@@ -24,13 +24,24 @@ class BridgeContractTest {
                 assertEquals(it.getBoolean("available"), speech.available)
                 assertEquals(it.getBoolean("transmitting"), speech.transmitting)
             }
-            assertEquals(listOf("disconnected", "connecting", "connected", "reconnecting", "disconnected")[i], snapshot.snapshot().status)
+            val decoded = snapshot.snapshot()
+            assertEquals(listOf("disconnected", "connecting", "connected", "reconnecting", "disconnected")[i], decoded.status)
             assertEquals(if (i == 0) null else "fixture-connection", snapshot.stringOrNull("connectionId"))
+            assertEquals(if (i == 2) ServerChatTarget("fixture-server", "fixture-connection") else null, decoded.serverChatTarget)
+            assertEquals(if (i == 2) 3L else 0L, envelope.getJSONObject("unread").unread().serverCount)
             if (i > 0) assertEquals(ProfileState(), envelope.getJSONObject("profile").profile())
             if (!envelope.isNull("chats")) {
                 val messages = envelope.getJSONArray("chats").objects().map(JSONObject::chatMessage)
-                assertEquals(if (i == 2) 1 else 0, messages.size)
-                if (i == 2) assertEquals("sent", messages.first().status)
+                assertEquals(if (i == 2) 2 else 0, messages.size)
+                decoded.serverChatTarget?.let { target ->
+                    assertEquals("channel:id:1", messages.first().conversation)
+                    assertEquals("sent", messages.first().status)
+                    val server = messages.single { it.conversation == target.conversation }
+                    assertEquals("Server", server.senderName)
+                    assertEquals("", server.senderUid)
+                    assertEquals(null, server.avatarPath)
+                    assertEquals("received", server.status)
+                }
             }
             for (event in envelope.getJSONArray("events").objects()) {
                 when (event.getString("type")) {

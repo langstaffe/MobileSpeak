@@ -238,7 +238,13 @@ private data class PageTarget(val chat: ChatTarget? = null, val settings: String
     val key: String get() = chat?.conversation ?: settings ?: "home"
 }
 
-internal data class ChatTarget(val conversation: String, val title: String, val channel: Channel? = null, val member: Member? = null)
+internal data class ChatTarget(
+    val conversation: String,
+    val title: String,
+    val channel: Channel? = null,
+    val member: Member? = null,
+    val serverChat: ServerChatTarget? = null,
+)
 
 @Composable
 internal fun MobileSpeakApp(requestPermissions: () -> Unit, openAbout: Boolean = false, requestPushToTalkPermission: () -> Unit = requestPermissions, consumedAbout: () -> Unit = {}) {
@@ -259,11 +265,15 @@ internal fun MobileSpeakApp(requestPermissions: () -> Unit, openAbout: Boolean =
     var selectedChannel by remember { mutableStateOf<Channel?>(null) }
     var chat by androidx.compose.runtime.saveable.rememberSaveable(
         stateSaver = androidx.compose.runtime.saveable.listSaver<ChatTarget?, String>(
-            save = { target -> target?.let { listOf(it.conversation, it.title) } ?: emptyList() },
+            save = { target -> target?.let {
+                val saved = listOf(it.conversation, it.title)
+                it.serverChat?.let { server -> saved + listOf(server.serverId, server.connectionId) } ?: saved
+            } ?: emptyList() },
             restore = { saved -> saved.firstOrNull()?.let { conversation ->
                 ChatTarget(conversation, saved[1],
                     channel = ui.snapshot.channels.firstOrNull { it.conversation == conversation },
-                    member = ui.snapshot.clients.firstOrNull { it.conversation == conversation })
+                    member = ui.snapshot.clients.firstOrNull { it.conversation == conversation },
+                    serverChat = if (saved.size == 4) ServerChatTarget(saved[2], saved[3]) else null)
             } },
         ),
     ) { mutableStateOf<ChatTarget?>(null) }
@@ -303,12 +313,14 @@ internal fun MobileSpeakApp(requestPermissions: () -> Unit, openAbout: Boolean =
         }
     }
 
-    LaunchedEffect(ui.snapshot.status, ui.snapshot.ownClient?.let { id -> ui.snapshot.clients.firstOrNull { it.id == id }?.channel }) {
+    val currentChannel = ui.snapshot.clients.firstOrNull { it.id == ui.snapshot.ownClient }?.channel
+    LaunchedEffect(ui.snapshot.status, ui.snapshot.serverChatTarget, currentChannel) {
         if (ui.snapshot.status != "connected") {
             drawerExpanded = false
             selectedChannel = null
             closeChat()
-        } else if (chat?.channel != null && chat?.channel?.id != ui.snapshot.clients.firstOrNull { it.id == ui.snapshot.ownClient }?.channel) {
+        } else if (chat?.channel?.let { it.id != currentChannel } == true ||
+            chat?.serverChat?.let { it != ui.snapshot.serverChatTarget } == true) {
             closeChat()
         }
     }
@@ -351,7 +363,11 @@ internal fun MobileSpeakApp(requestPermissions: () -> Unit, openAbout: Boolean =
                     containerColor = Palette.background,
                     contentWindowInsets = WindowInsets(0),
                     modifier = Modifier.windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)),
-                    topBar = { Header(ui) },
+                    topBar = {
+                        Header(ui) { target ->
+                            if (chat == null && !navigation.isRunning) chat = ChatTarget(target.conversation, "", serverChat = target)
+                        }
+                    },
                     bottomBar = {
                         Column(Modifier.background(Palette.bottom).navigationBarsPadding()) {
                             PushToTalkBar(ui, requestPushToTalkPermission,
@@ -448,7 +464,7 @@ internal fun MobileSpeakApp(requestPermissions: () -> Unit, openAbout: Boolean =
 }
 
 @Composable
-internal fun Header(ui: SessionUiState) {
+internal fun Header(ui: SessionUiState, onServerChat: (ServerChatTarget) -> Unit = {}) {
     val disconnectLabel = stringResource(R.string.action_disconnect)
     Column {
     Row(
@@ -457,16 +473,41 @@ internal fun Header(ui: SessionUiState) {
         horizontalArrangement = Arrangement.spacedBy(11.dp),
     ) {
         val server = ui.snapshot.server
-        if (server == null) {
-            Image(
-                painterResource(R.mipmap.ic_launcher),
-                contentDescription = "MobileSpeak",
-                modifier = Modifier.size(34.dp).clip(RoundedCornerShape(8.dp)),
-            )
+        val chat = ui.snapshot.serverChatTarget
+        if (server != null && chat != null) {
+            val label = stringResource(R.string.server_chat_open, server)
+            val unread = if (ui.unread.serverId == chat.serverId) ui.unread.serverCount else 0L
+            val unreadLabel = if (unread > 0) stringResource(R.string.server_chat_unread, unread) else null
+            Row(
+                Modifier.weight(1f).heightIn(min = 48.dp)
+                    .clickable(interactionSource = null, indication = RowPressFeedback, role = Role.Button) { onServerChat(chat) }
+                    .clearAndSetSemantics {
+                        contentDescription = label
+                        if (unreadLabel != null) stateDescription = unreadLabel
+                    },
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(11.dp),
+            ) {
+                Box(Modifier.size(34.dp), contentAlignment = Alignment.Center) {
+                    Icon(UiIcons.Chat, null, Modifier.size(28.dp), tint = Color.White)
+                    UnreadBadge(minOf(unread, 100L).toInt(), Modifier.align(Alignment.TopEnd)
+                        .offset(x = 5.dp, y = (-5).dp))
+                }
+                Text(server, fontSize = 16.sp, lineHeight = 19.sp,
+                    overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.ExtraBold, maxLines = 1)
+            }
         } else {
-            Avatar(server, null, false, 34, accessible = false)
+            if (server == null) {
+                Image(
+                    painterResource(R.mipmap.ic_launcher),
+                    contentDescription = "MobileSpeak",
+                    modifier = Modifier.size(34.dp).clip(RoundedCornerShape(8.dp)),
+                )
+            } else {
+                Avatar(server, null, false, 34, accessible = false)
+            }
+            Text(server ?: "MobileSpeak", Modifier.weight(1f), fontSize = 16.sp, lineHeight = 19.sp, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.ExtraBold, maxLines = 1)
         }
-        Text(server ?: "MobileSpeak", Modifier.weight(1f), fontSize = 16.sp, lineHeight = 19.sp, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.ExtraBold, maxLines = 1)
         if (ui.snapshot.status != "disconnected") {
             Box(
                 Modifier.size(44.dp).semantics { contentDescription = disconnectLabel }.clickable(interactionSource = null, indication = RowPressFeedback) { ClientSession.disconnect() },
@@ -1218,16 +1259,37 @@ internal fun ChatScreen(target: ChatTarget, ui: SessionUiState, active: Boolean,
     val messages = ui.messages.filter { it.conversation == target.conversation }
     val token = remember(target.conversation) { UUID.randomUUID().toString() }
     var input by androidx.compose.runtime.saveable.rememberSaveable(target.conversation) { mutableStateOf("") }
+    var serverMessageRequests by remember(target.serverChat) { mutableStateOf(emptySet<String>()) }
+    var showServerPermissionAlert by remember(target.serverChat) { mutableStateOf(false) }
     val listState = rememberLazyListState()
-    val available = ui.snapshot.status == "connected" && if (target.channel != null) {
-        ui.snapshot.clients.firstOrNull { it.id == ui.snapshot.ownClient }?.channel == target.channel.id
-    } else {
-        target.member?.uid?.let { uid -> ui.snapshot.clients.any { it.uid == uid } } == true
+    val showsSenderName = target.channel != null || target.serverChat != null
+    val available = ui.snapshot.status == "connected" && when {
+        target.serverChat != null -> target.serverChat == ui.snapshot.serverChatTarget
+        target.channel != null -> ui.snapshot.clients.firstOrNull { it.id == ui.snapshot.ownClient }?.channel == target.channel.id
+        else -> target.member?.uid?.let { uid -> ui.snapshot.clients.any { it.uid == uid } } == true
     }
     val valid = active && available && input.trim().isNotEmpty() && input.toByteArray().size <= 8192
-    DisposableEffect(target.conversation, active) {
-        if (active) ClientSession.setChatVisible(target.conversation, token, true)
-        onDispose { if (active) ClientSession.setChatVisible(target.conversation, token, false) }
+    LaunchedEffect(ui.messages, active, available, serverMessageRequests) {
+        if (!active || !available) {
+            serverMessageRequests = emptySet()
+            showServerPermissionAlert = false
+        } else if (serverMessageRequests.isNotEmpty()) {
+            val finished = messages.filter { it.status != "pending" && it.id in serverMessageRequests }
+            serverMessageRequests -= finished.map { it.id }
+            if (finished.any { it.serverPermissionDenied }) showServerPermissionAlert = true
+        }
+    }
+    if (active && available && showServerPermissionAlert) AlertDialog(
+        onDismissRequest = { showServerPermissionAlert = false },
+        title = { Text(stringResource(R.string.chat_send_failed)) },
+        text = { Text(stringResource(R.string.error_server_message_permission_denied)) },
+        confirmButton = { TextButton(onClick = { showServerPermissionAlert = false }) { Text(stringResource(R.string.action_close)) } },
+        containerColor = Palette.card, titleContentColor = Palette.text, textContentColor = Palette.text,
+    )
+    val visibleServer = if (active && (target.serverChat == null || available)) ui.snapshot.serverId else null
+    DisposableEffect(target, visibleServer) {
+        if (visibleServer != null) ClientSession.setChatVisible(visibleServer, target.conversation, token, true, target.serverChat?.connectionId)
+        onDispose { if (visibleServer != null) ClientSession.setChatVisible(visibleServer, target.conversation, token, false, target.serverChat?.connectionId) }
     }
     val keyboardHeight = WindowInsets.ime.getBottom(LocalDensity.current)
     LaunchedEffect(messages.size, keyboardHeight) {
@@ -1242,8 +1304,9 @@ internal fun ChatScreen(target: ChatTarget, ui: SessionUiState, active: Boolean,
             }
             Row(Modifier.align(Alignment.Center).padding(horizontal = 52.dp).heightIn(min = 56.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 peer?.let { Avatar(it.name, livePeer?.avatarPath ?: target.member?.avatarPath, livePeer?.speaking == true, 30, livePeer, accessible = false) }
-                val description = livePeer?.accessibilityLabel(context) ?: peer?.name ?: target.title
-                Text(peer?.name ?: target.title, Modifier.clearAndSetSemantics { contentDescription = description }, fontSize = 17.sp, lineHeight = 20.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                val title = if (target.serverChat != null) stringResource(R.string.server_chat_title) else peer?.name ?: target.title
+                val description = livePeer?.accessibilityLabel(context) ?: title
+                Text(title, Modifier.clearAndSetSemantics { contentDescription = description }, fontSize = 17.sp, lineHeight = 20.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
         BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
@@ -1253,11 +1316,11 @@ internal fun ChatScreen(target: ChatTarget, ui: SessionUiState, active: Boolean,
                     val sender = ui.snapshot.onlineMember(message.senderUid)
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = if (message.own) Arrangement.End else Arrangement.Start, verticalAlignment = Alignment.Bottom) {
                         if (!message.own) {
-                            Avatar(message.senderName, sender?.avatarPath ?: message.avatarPath, sender?.speaking == true, 30, sender, accessible = target.channel == null)
+                            Avatar(message.senderName, sender?.avatarPath ?: message.avatarPath, sender?.speaking == true, 30, sender, accessible = !showsSenderName)
                             Spacer(Modifier.width(8.dp))
                         }
                         Column(Modifier.widthIn(max = bubbleWidth), horizontalAlignment = if (message.own) Alignment.End else Alignment.Start, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            if (target.channel != null && !message.own) {
+                            if (showsSenderName && !message.own) {
                                 val description = sender?.accessibilityLabel(context) ?: message.senderName
                                 Text(message.senderName, Modifier.clearAndSetSemantics { contentDescription = description }, fontSize = 12.sp, lineHeight = 14.sp, color = Palette.muted)
                             }
@@ -1266,8 +1329,9 @@ internal fun ChatScreen(target: ChatTarget, ui: SessionUiState, active: Boolean,
                             }
                             if (message.own && message.status == "pending") CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 1.dp, color = Palette.muted)
                             if (message.own && message.status == "failed") Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                                val error = if (message.serverPermissionDenied) "message_send_failed" else message.error
                                 Icon(UiIcons.Error, stringResource(R.string.chat_send_failed), Modifier.size(12.dp), tint = Palette.disconnect)
-                                Text(message.error?.let { context.localizedCoreError(it, "") } ?: stringResource(R.string.chat_send_failed), fontSize = 11.sp, lineHeight = 13.sp, color = Palette.disconnect)
+                                Text(error?.let { context.localizedCoreError(it, "") } ?: stringResource(R.string.chat_send_failed), fontSize = 11.sp, lineHeight = 13.sp, color = Palette.disconnect)
                             }
                         }
                         if (message.own) {
@@ -1284,11 +1348,22 @@ internal fun ChatScreen(target: ChatTarget, ui: SessionUiState, active: Boolean,
             BasicTextField(input, { input = it }, Modifier.weight(1f).heightIn(min = 34.dp).clip(RoundedCornerShape(5.dp)).background(Color.Black)
                 .then(if (input.toByteArray().size > 8192) Modifier.border(1.dp, Palette.disconnect, RoundedCornerShape(5.dp)) else Modifier).padding(horizontal = 7.dp, vertical = 6.dp),
                 textStyle = androidx.compose.ui.text.TextStyle(color = Palette.text, fontSize = 17.sp, lineHeight = 20.sp), cursorBrush = SolidColor(Palette.accent), maxLines = 4,
-                decorationBox = { field -> Box { if (input.isEmpty()) Text(stringResource(R.string.chat_input_placeholder), color = Color(0xFF646468), fontSize = 17.sp, lineHeight = 20.sp); field() } })
+                decorationBox = { field -> Box {
+                    if (input.isEmpty()) Text(stringResource(if (target.serverChat != null) R.string.server_chat_input_placeholder else R.string.chat_input_placeholder),
+                        color = Color(0xFF646468), fontSize = 17.sp, lineHeight = 20.sp)
+                    field()
+                } })
             PressFeedback(ToolbarPressFeedback) { source, feedback, _ ->
                 IconButton(interactionSource = source, enabled = valid, onClick = {
-                    val sent = target.channel?.let { ClientSession.sendChannelMessage(it, input) }
-                        ?: target.member?.let { ClientSession.sendPrivateMessage(it, input) } ?: false
+                    val sent = when {
+                        target.serverChat != null -> ClientSession.sendServerMessage(target.serverChat, input)?.let { requestId ->
+                            serverMessageRequests += requestId
+                            true
+                        } ?: false
+                        target.channel != null -> ClientSession.sendChannelMessage(target.channel, input)
+                        target.member != null -> ClientSession.sendPrivateMessage(target.member, input)
+                        else -> false
+                    }
                     if (sent) input = ""
                 }, modifier = Modifier.size(38.dp).then(feedback)) {
                     Icon(UiIcons.Send, stringResource(R.string.action_send), Modifier.size(22.dp), tint = if (valid) Palette.text else Palette.muted)

@@ -1304,13 +1304,33 @@ struct HomeView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 11) {
-                if let server = client.state.server {
-                    Avatar(name: server).accessibilityHidden(true)
+                if let server = client.state.server, let target = client.state.serverChatTarget {
+                    NavigationLink(destination: ChatView(client: client, title: L10n.string("server_chat_title"),
+                                                         conversation: target.conversation, serverChat: target)) {
+                        HStack(spacing: 11) {
+                            AppIcon(name: "channel-chat", size: 28).foregroundStyle(.white)
+                                .frame(width: 34, height: 34)
+                                .overlay(alignment: .topTrailing) {
+                                    UnreadBadge(count: client.serverUnread).offset(x: 5, y: -5)
+                                }
+                            Text(server).font(.system(size: 16, weight: .heavy)).lineLimit(1)
+                        }
+                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(L10n.format("server_chat_open", server))
+                    .accessibilityValue(client.serverUnread > 0 ? L10n.format("server_chat_unread", client.serverUnread) : "")
+                    .id(target)
                 } else {
-                    Image("AppLogo").resizable().frame(width: 34, height: 34).clipShape(RoundedRectangle(cornerRadius: 8)).accessibilityLabel("MobileSpeak")
+                    if let server = client.state.server {
+                        Avatar(name: server).accessibilityHidden(true)
+                    } else {
+                        Image("AppLogo").resizable().frame(width: 34, height: 34).clipShape(RoundedRectangle(cornerRadius: 8)).accessibilityLabel("MobileSpeak")
+                    }
+                    Text(client.state.server ?? "MobileSpeak").font(.system(size: 16, weight: .heavy)).lineLimit(1)
+                    Spacer(minLength: 0)
                 }
-                Text(client.state.server ?? "MobileSpeak").font(.system(size: 16, weight: .heavy)).lineLimit(1)
-                Spacer(minLength: 0)
                 if client.connected || client.busy {
                     Button { client.disconnect() } label: {
                         Image("Icon-off").renderingMode(.original).resizable().scaledToFit()
@@ -1904,18 +1924,24 @@ struct ChatView: View {
     let conversation: String
     var member: Member? = nil
     var channel: Channel? = nil
+    var serverChat: ServerChatTarget? = nil
     @State private var text = ""
     @State private var chatToken = UUID()
     @State private var openedServer: String?
+    @State private var serverMessageRequests: Set<String> = []
+    @State private var showServerPermissionAlert = false
     @Environment(\.dismiss) private var dismiss
     private var messages: [ChatMessage] { client.messages(in: conversation) }
+    private var showsSenderName: Bool { channel != nil || serverChat != nil }
     private var available: Bool {
         guard client.connected else { return false }
+        if let serverChat { return client.state.serverChatTarget == serverChat }
         if let channel { return client.currentChannel == channel.id }
         if let uid = member?.uid { return client.state.clients.contains { $0.uid == uid } }
         return false
     }
     var body: some View {
+        let sendEnabled = available && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         VStack(spacing: 0) {
             ScrollViewReader { proxy in
                 ScrollView {
@@ -1926,6 +1952,11 @@ struct ChatView: View {
                     }.padding(14)
                 }
                 .onChange(of: messages) { value in
+                    if available && !serverMessageRequests.isEmpty {
+                        let finished = value.filter { $0.status != .pending && serverMessageRequests.contains($0.id) }
+                        serverMessageRequests.subtract(finished.map(\.id))
+                        if finished.contains(where: \.serverPermissionDenied) { showServerPermissionAlert = true }
+                    }
                     if let id = value.last?.id { withAnimation { proxy.scrollTo(id, anchor: .bottom) } }
                 }
                 .onAppear { if let id = messages.last?.id { proxy.scrollTo(id, anchor: .bottom) } }
@@ -1933,12 +1964,15 @@ struct ChatView: View {
             Divider()
             PushToTalkBar(client: client, showsTarget: true)
             HStack(alignment: .bottom, spacing: 10) {
-                TextField(L10n.string("chat_input_placeholder"), text: $text)
+                TextField(L10n.string(serverChat == nil ? "chat_input_placeholder" : "server_chat_input_placeholder"), text: $text)
                     .textFieldStyle(.roundedBorder)
                     .onSubmit(send)
-                Button(action: send) { AppIcon(name: "send", size: 22).frame(width: 38, height: 38) }
-                    .disabled(!available || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    .accessibilityLabel(L10n.string("action_send"))
+                Button(action: send) {
+                    AppIcon(name: "send", size: 22).frame(width: 38, height: 38)
+                        .foregroundStyle(sendEnabled ? Color(hex: 0xF2F3F5) : Palette.muted)
+                }
+                .disabled(!sendEnabled)
+                .accessibilityLabel(L10n.string("action_send"))
             }.padding(10).background(Palette.bottom)
         }
         .background(Palette.background.ignoresSafeArea())
@@ -1946,6 +1980,11 @@ struct ChatView: View {
         .navigationBarHidden(false)
         .navigationBarTitleDisplayMode(.inline)
         .navigationTitle("")
+        .alert(L10n.string("chat_send_failed"), isPresented: $showServerPermissionAlert) {
+            Button(L10n.string("action_close"), role: .cancel) {}
+        } message: {
+            Text(L10n.string("error_server_message_permission_denied"))
+        }
         .toolbar {
             ToolbarItem(placement: .principal) {
                 if let member {
@@ -1960,17 +1999,22 @@ struct ChatView: View {
             }
         }
         .onAppear {
-            if channel != nil && !available { dismiss(); return }
+            if showsSenderName && !available { dismiss(); return }
             guard available, let server = client.state.serverId else { return }
             openedServer = server
-            client.setChatVisible(server: server, conversation: conversation, token: chatToken, visible: true)
+            client.setChatVisible(server: server, conversation: conversation, token: chatToken, visible: true, connectionId: serverChat?.connectionId)
         }
         .onDisappear {
+            serverMessageRequests.removeAll()
+            showServerPermissionAlert = false
             if let openedServer {
-                client.setChatVisible(server: openedServer, conversation: conversation, token: chatToken, visible: false)
+                client.setChatVisible(server: openedServer, conversation: conversation, token: chatToken, visible: false, connectionId: serverChat?.connectionId)
             }
         }
         .onChange(of: client.connected) { connected in if !connected { dismiss() } }
+        .onChange(of: client.state.serverChatTarget) { target in
+            if let serverChat, target != serverChat { dismiss() }
+        }
         .onChange(of: client.currentChannel) { current in
             if let channel, current != channel.id { dismiss() }
         }
@@ -1982,8 +2026,14 @@ struct ChatView: View {
         let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard available, !value.isEmpty else { return }
         guard value.utf8.count <= 8192 else { client.showError(.key("chat_message_too_long")); return }
-        if let channel, client.sendChannelMessage(value, channel: channel) { text = "" }
-        else if let member = currentMember, client.sendPrivateMessage(value, member: member) { text = "" }
+        if let serverChat {
+            if let requestId = client.sendServerMessage(value, target: serverChat) {
+                serverMessageRequests.insert(requestId)
+                text = ""
+            }
+        } else if let channel {
+            if client.sendChannelMessage(value, channel: channel) { text = "" }
+        } else if let member = currentMember, client.sendPrivateMessage(value, member: member) { text = "" }
     }
     @ViewBuilder private func messageRow(_ message: ChatMessage) -> some View {
         let sender = client.state.onlineMember(uid: message.senderUid)
@@ -1991,10 +2041,10 @@ struct ChatView: View {
             if message.own { Spacer(minLength: 46) }
             else {
                 Avatar(name: message.senderName, path: sender?.avatarPath ?? message.avatarPath, speaking: sender?.speaking ?? false, size: 30, member: sender)
-                    .accessibilityHidden(channel != nil)
+                    .accessibilityHidden(showsSenderName)
             }
             VStack(alignment: message.own ? .trailing : .leading, spacing: 4) {
-                if channel != nil && !message.own {
+                if showsSenderName && !message.own {
                     Text(message.senderName).font(.caption).foregroundStyle(Palette.muted).accessibilityLabel(sender?.accessibilityLabel ?? message.senderName)
                 }
                 Text(message.text)
@@ -2006,8 +2056,9 @@ struct ChatView: View {
                     HStack(spacing: 4) {
                         if message.status == .pending { ProgressView().scaleEffect(0.65) }
                         if message.status == .failed {
+                            let error = message.serverPermissionDenied ? "message_send_failed" : message.error
                             AppIcon(name: "error", scaledSize: 12, relativeTo: .caption2).foregroundStyle(.red)
-                            Text(message.error.map { L10n.coreError($0, detail: "") } ?? L10n.string("chat_send_failed")).foregroundStyle(.red)
+                            Text(error.map { L10n.coreError($0, detail: "") } ?? L10n.string("chat_send_failed")).foregroundStyle(.red)
                         }
                     }.font(.caption2)
                 }

@@ -40,6 +40,10 @@ data class Member(
     val statusIcon get() = if (away) "afk" else if (deafened) "speaker-off" else if (muted) "mic-off" else null
 }
 
+data class ServerChatTarget(val serverId: String, val connectionId: String) {
+    val conversation get() = "server:$serverId"
+}
+
 data class Snapshot(
     val status: String = "disconnected",
     val server: String? = null,
@@ -51,6 +55,9 @@ data class Snapshot(
     val networkQuality: NetworkQuality? = null,
     val connectionId: String? = null,
 ) {
+    val serverChatTarget: ServerChatTarget?
+        get() = if (status == "connected" && serverId != null && connectionId != null) ServerChatTarget(serverId, connectionId) else null
+
     fun onlineMember(uid: String?): Member? =
         if (status == "connected" && !uid.isNullOrEmpty()) clients.firstOrNull { it.uid == uid } else null
 }
@@ -117,13 +124,22 @@ data class ChatMessage(
     val status: String,
     val error: String?,
     val senderUid: String = "",
-)
+) {
+    val serverPermissionDenied get() = own && status == "failed" && error == "server_message_permission_denied"
+}
 
 data class Unread(
     val serverId: String? = null,
     val channel: String? = null,
     val channelCount: Int = 0,
     val privateCounts: Map<String, Int> = emptyMap(),
+    val serverCount: Long = 0,
+)
+
+internal fun JSONObject.unread() = Unread(
+    stringOrNull("serverId"), stringOrNull("channel"), getInt("channelCount"),
+    getJSONObject("privateCounts").let { counts -> counts.keys().asSequence().associateWith { counts.getInt(it) } },
+    optLong("serverCount", 0),
 )
 
 internal fun JSONObject.chatMessage() = ChatMessage(

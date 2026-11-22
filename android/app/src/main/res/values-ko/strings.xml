@@ -87,6 +87,10 @@
     <string name="voice_drawer_expanded">펼쳐짐</string>
     <string name="voice_drawer_collapsed">접힘</string>
     <string name="chat_send_failed">전송 실패</string>
+    <string name="server_chat_title">서버 채팅</string>
+    <string name="server_chat_input_placeholder">서버에 보내기</string>
+    <string name="server_chat_open">%1$s 서버 채팅 열기</string>
+    <string name="server_chat_unread">읽지 않은 메시지 %1$d개</string>
     <string name="chat_input_placeholder">메시지</string>
     <string name="notification_channel_voice">음성 연결</string>
     <string name="notification_call_title">MobileSpeak 통화</string>
@@ -124,6 +128,7 @@
     <string name="error_legacy_codec">이 채널은 오래된 코덱을 사용합니다. Opus만 지원됩니다.</string>
     <string name="error_disconnect_before_connect">다른 서버에 연결하려면 먼저 현재 연결을 해제하세요.</string>
     <string name="error_storage_change_while_connected">연결 중에는 저장소를 변경할 수 없습니다.</string>
+    <string name="error_server_message_permission_denied">서버 메시지를 보낼 권한이 없습니다. 대신 채널 메시지를 보내 주세요.</string>
     <string name="error_message_send_failed">메시지를 보내지 못했습니다.</string>
     <string name="error_message_wrong_channel">현재 이 채널에 참가하고 있지 않습니다.</string>
     <string name="error_channel_unavailable">이 채널은 사용할 수 없습니다.</string>
