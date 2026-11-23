@@ -693,19 +693,50 @@ private fun BookmarkField(
 }
 
 private val pageTitleInset = 14.dp
+private val pageTitleBottomSpacing = 8.dp
 
 @Composable
 private fun PageTitle(title: String, modifier: Modifier = Modifier) {
-    Text(title, modifier.padding(bottom = 8.dp), fontSize = 20.sp, lineHeight = 24.sp, fontWeight = FontWeight.ExtraBold)
+    Text(title, modifier.padding(bottom = pageTitleBottomSpacing), fontSize = 20.sp, lineHeight = 24.sp, fontWeight = FontWeight.ExtraBold)
 }
 
 @Composable
 internal fun ChannelScreen(ui: SessionUiState, onSelect: (Channel) -> Unit, onChat: (Channel) -> Unit) {
     val haptic = LocalHapticFeedback.current
     val ownChannel = ui.snapshot.clients.firstOrNull { it.id == ui.snapshot.ownClient }?.channel
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(pageTitleInset), verticalArrangement = Arrangement.spacedBy(9.dp)) {
-        item { PageTitle(stringResource(R.string.tab_channels)) }
-        items(orderedChannels(ui.snapshot.channels), key = { it.first.id }) { (channel, depth) ->
+    val target = ui.snapshot.serverChatTarget
+    val listState = rememberLazyListState()
+    val tree = remember(ui.snapshot.channels) { orderedChannels(ui.snapshot.channels) }
+    var creating by remember(target) { mutableStateOf(false) }
+    var saving by remember(target) { mutableStateOf(false) }
+    var lastLocated by rememberSaveable { mutableStateOf<String?>(null) }
+    val created = ui.channelCommandResults["create"]
+    LaunchedEffect(created, tree) {
+        if (created?.connectionId == target?.connectionId && created != null && created.error == null &&
+            created.requestId != lastLocated) {
+            val index = tree.indexOfFirst { it.first.id == created.channel }
+            if (index >= 0) {
+                listState.scrollToItem(index + 1)
+                lastLocated = created.requestId
+            }
+        }
+    }
+    LazyColumn(Modifier.fillMaxSize(), state = listState, contentPadding = PaddingValues(pageTitleInset), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+        item {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                PageTitle(stringResource(R.string.tab_channels), Modifier.weight(1f))
+                if (target != null) {
+                    Row(Modifier.heightIn(min = 44.dp).clickable(interactionSource = null, indication = ToolbarPressFeedback, role = Role.Button) {
+                        ClientSession.cancelPushToTalk(); creating = true
+                    }.padding(bottom = pageTitleBottomSpacing), verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Icon(UiIcons.Plus, null, Modifier.size(18.dp), tint = Palette.accent)
+                        Text(stringResource(R.string.channel_create_title), color = Palette.accent)
+                    }
+                }
+            }
+        }
+        items(tree, key = { it.first.id }) { (channel, depth) ->
             val spacer = channelSpacer(channel)
             val selected = channel.id == ownChannel
             val members = ui.snapshot.clients.filter { it.channel == channel.id }
@@ -739,20 +770,52 @@ internal fun ChannelScreen(ui: SessionUiState, onSelect: (Channel) -> Unit, onCh
             }
         }
     }
+    if (creating && target != null) {
+        ChannelManagementSheet(saving, { creating = false }) {
+            ChannelCreator(target, null, created, { saving = it }, { creating = false }) { creating = false }
+        }
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ChannelDialog(channel: Channel, ui: SessionUiState, onDismiss: () -> Unit) {
+internal fun ChannelDialog(channel: Channel, ui: SessionUiState, onDismiss: () -> Unit) {
     var passwordPrompt by remember(channel.id) { mutableStateOf(false) }
     var password by remember(channel.id) { mutableStateOf("") }
+    var editing by remember(channel.id) { mutableStateOf<ChannelEditSelection?>(null) }
+    var creating by remember(channel.id) { mutableStateOf<ChannelEditSelection?>(null) }
+    var moving by remember(channel.id) { mutableStateOf<ChannelEditSelection?>(null) }
+    var deleting by remember(channel.id) { mutableStateOf<ChannelEditSelection?>(null) }
+    var deleteRequest by remember(channel.id) { mutableStateOf<String?>(null) }
+    var deleteError by remember(channel.id) { mutableStateOf<ChannelCommandResult?>(null) }
+    var menu by remember(channel.id) { mutableStateOf(false) }
+    var saving by remember(channel.id) { mutableStateOf(false) }
     val current = ui.snapshot.channels.firstOrNull { it.id == channel.id } ?: channel
     val ownChannel = ui.snapshot.clients.firstOrNull { it.id == ui.snapshot.ownClient }?.channel
     val members = ui.snapshot.clients.filter { it.channel == channel.id }
+    val hasMembersOrChildren = members.isNotEmpty() || ui.snapshot.channels.any { it.parent == current.id }
+    val target = ui.snapshot.serverChatTarget
+    val deleteResult = ui.channelCommandResults["delete"]
+    LaunchedEffect(deleteResult) {
+        if (deleteResult != null && deleteResult.requestId == deleteRequest) {
+            deleteRequest = null
+            if (deleteResult.error == null) onDismiss() else deleteError = deleteResult
+        }
+    }
+    LaunchedEffect(target, current.id, current.description == null) {
+        if (target != null && current.description == null) {
+            ClientSession.channelCommand("description", target, current.id, UUID.randomUUID().toString())
+        }
+    }
+    LaunchedEffect(ui.snapshot.channels.any { it.id == channel.id }) {
+        if (ui.snapshot.channels.none { it.id == channel.id }) onDismiss()
+    }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState, containerColor = Palette.background, contentColor = Palette.text,
         modifier = Modifier.padding(horizontal = 8.dp).padding(bottom = 8.dp),
-        shape = RoundedCornerShape(40.dp), dragHandle = null, scrimColor = Color.Black.copy(alpha = .55f)) {
+        shape = RoundedCornerShape(40.dp), dragHandle = null, scrimColor = Color.Black.copy(alpha = .55f),
+        sheetGesturesEnabled = deleteRequest == null,
+        properties = ModalBottomSheetProperties(shouldDismissOnBackPress = deleteRequest == null, shouldDismissOnClickOutside = deleteRequest == null)) {
         BoxWithConstraints(Modifier.fillMaxWidth()) {
             val listMaximum = (maxHeight * .78f - 172.dp).coerceAtLeast(52.dp)
             Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -760,24 +823,97 @@ private fun ChannelDialog(channel: Channel, ui: SessionUiState, onDismiss: () ->
                     ChannelIcon(current, 28)
                     Spacer(Modifier.width(8.dp))
                     Text(current.name, Modifier.weight(1f), fontSize = 20.sp, lineHeight = 24.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    if (deleteRequest != null) {
+                        Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) {
+                            CircularProgressIndicator(Modifier.size(20.dp), color = Palette.accent, strokeWidth = 2.dp)
+                        }
+                    } else if (target != null) {
+                        Box {
+                            PressFeedback(ToolbarPressFeedback) { source, feedback, _ ->
+                                IconButton(onClick = { menu = true }, interactionSource = source, modifier = feedback.size(44.dp)) {
+                                    Icon(UiIcons.More, stringResource(R.string.channel_manage), Modifier.size(24.dp), tint = Palette.accent)
+                                }
+                            }
+                            DropdownMenu(menu, onDismissRequest = { menu = false }, containerColor = Palette.card) {
+                                DropdownMenuItem(text = { Text(stringResource(R.string.channel_create_child)) },
+                                    leadingIcon = { Icon(UiIcons.Plus, null, Modifier.size(24.dp), tint = Palette.accent) },
+                                    onClick = { menu = false; creating = ChannelEditSelection(current, target) })
+                                if (current.canEdit != false) DropdownMenuItem(text = { Text(stringResource(R.string.channel_edit_title)) },
+                                    leadingIcon = { Icon(UiIcons.Pencil, null, Modifier.size(24.dp), tint = Palette.accent) },
+                                    onClick = { menu = false; editing = ChannelEditSelection(current, target) })
+                                DropdownMenuItem(text = { Text(stringResource(R.string.channel_move_title)) },
+                                    leadingIcon = { Icon(UiIcons.Sort, null, Modifier.size(24.dp), tint = Palette.accent) },
+                                    onClick = { menu = false; moving = ChannelEditSelection(current, target) })
+                                if (current.canDelete != false) DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.channel_delete_title), color = Palette.disconnect) },
+                                    leadingIcon = { Icon(UiIcons.Trash, null, Modifier.size(24.dp), tint = Palette.disconnect) },
+                                    onClick = {
+                                        menu = false
+                                        if (hasMembersOrChildren) {
+                                            deleteError = ChannelCommandResult("", "channel_delete_not_empty")
+                                        } else deleting = ChannelEditSelection(current, target)
+                                    })
+                            }
+                        }
+                    }
                     PressFeedback(ToolbarPressFeedback) { source, feedback, _ ->
-                        TextButton(interactionSource = source, modifier = feedback, onClick = onDismiss) { Text(stringResource(R.string.action_close), fontSize = 17.sp, lineHeight = 20.sp) }
+                        TextButton(interactionSource = source, modifier = feedback, onClick = onDismiss, enabled = deleteRequest == null) { Text(stringResource(R.string.action_close), fontSize = 17.sp, lineHeight = 20.sp) }
                     }
                 }
                 Column(Modifier.fillMaxWidth().heightIn(min = 52.dp, max = listMaximum).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    current.description?.takeIf { it.isNotBlank() }?.let { description ->
+                        Text(description, modifier = Modifier.fillMaxWidth(), fontSize = 15.sp, lineHeight = 20.sp, color = Palette.muted)
+                    }
                     if (members.isEmpty()) Text(stringResource(R.string.channel_no_members), Modifier.padding(vertical = 16.dp), color = Palette.muted)
                     members.forEach { MemberRow(it) }
                 }
                 Button(onClick = {
                     if (current.password) passwordPrompt = true
                     else { ClientSession.join(current, ""); onDismiss() }
-                }, enabled = ui.snapshot.status == "connected" && ownChannel != current.id,
+                }, enabled = ui.snapshot.status == "connected" && ownChannel != current.id && deleteRequest == null,
                     modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp), shape = RoundedCornerShape(14.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = Palette.accent, contentColor = Palette.text, disabledContainerColor = Color(0xFF050608), disabledContentColor = Palette.card)) {
                     Text(stringResource(R.string.channel_join), fontSize = 17.sp, lineHeight = 20.sp, fontWeight = FontWeight.SemiBold)
                 }
             }
         }
+    }
+    editing?.let { selection ->
+        ChannelManagementSheet(saving, { editing = null }, containerColor = channelFormBackground) {
+            ChannelEditor(selection, current, ui.channelCommandResults, onSaving = { saving = it }) { editing = null }
+        }
+    }
+    creating?.let { selection ->
+        ChannelManagementSheet(saving, { creating = null }) {
+            ChannelCreator(selection.target, selection.channel, ui.channelCommandResults["create"], { saving = it },
+                { creating = null }) { creating = null; onDismiss() }
+        }
+    }
+    moving?.let { selection ->
+        ChannelManagementSheet(saving, { moving = null }, swipeToClose = false, containerColor = channelFormBackground) {
+            ChannelMover(selection, ui.snapshot.channels, ui.channelCommandResults["move"], { saving = it }) { moving = null }
+        }
+    }
+    deleting?.let { selection ->
+        AlertDialog(onDismissRequest = { deleting = null },
+            title = { Text(stringResource(R.string.channel_delete_title)) },
+            text = { Text(stringResource(R.string.channel_delete_message, selection.channel.name)) },
+            confirmButton = { TextButton(onClick = {
+                deleting = null
+                if (hasMembersOrChildren) {
+                    deleteError = ChannelCommandResult("", "channel_delete_not_empty")
+                } else {
+                    val request = UUID.randomUUID().toString()
+                    deleteRequest = request
+                    ClientSession.channelCommand("delete", selection.target, selection.channel.id, request)
+                }
+            }) { Text(stringResource(R.string.action_delete), color = Palette.disconnect) } },
+            dismissButton = { TextButton(onClick = { deleting = null }) { Text(stringResource(R.string.action_cancel)) } })
+    }
+    deleteError?.let { error ->
+        AlertDialog(onDismissRequest = { deleteError = null }, title = { Text(stringResource(R.string.error_channel_delete_failed)) },
+            text = { Text(LocalContext.current.localizedCoreError(error.error, error.detail)) },
+            confirmButton = { TextButton(onClick = { deleteError = null }) { Text(stringResource(R.string.action_close)) } })
     }
     if (passwordPrompt) AlertDialog(onDismissRequest = { passwordPrompt = false }, title = { Text(stringResource(R.string.channel_password)) }, text = {
         OutlinedTextField(password, { password = it }, singleLine = true, visualTransformation = PasswordVisualTransformation(), label = { Text(stringResource(R.string.password)) })
@@ -1417,7 +1553,7 @@ internal fun Avatar(name: String, path: String?, speaking: Boolean, size: Int, m
 }
 
 @Composable
-private fun ChannelIcon(channel: Channel, size: Int = 21) {
+internal fun ChannelIcon(channel: Channel, size: Int = 21) {
     Box(
         Modifier.size(size.dp).clip(RoundedCornerShape(4.dp)),
         contentAlignment = Alignment.Center,

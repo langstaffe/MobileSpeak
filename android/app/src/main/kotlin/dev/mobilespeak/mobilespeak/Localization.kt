@@ -170,6 +170,15 @@ internal fun coreErrorSource(code: String?, detail: String? = null): LocalizedMe
             "server_message_permission_denied" -> R.string.error_server_message_permission_denied
             "message_wrong_channel" -> R.string.error_message_wrong_channel
             "channel_unavailable" -> R.string.error_channel_unavailable
+            "channel_edit_failed" -> R.string.error_channel_edit_failed
+            "channel_description_failed" -> R.string.error_channel_description_failed
+            "channel_permission_denied" -> R.string.error_channel_permission_denied
+            "channel_create_failed" -> R.string.error_channel_create_failed
+            "channel_move_failed" -> R.string.error_channel_move_failed
+            "channel_delete_failed" -> R.string.error_channel_delete_failed
+            "channel_delete_not_empty" -> R.string.error_channel_delete_not_empty
+            "channel_position_changed" -> R.string.error_channel_position_changed
+            "channel_invalid_parent" -> R.string.error_channel_invalid_parent
             "user_offline" -> R.string.error_user_offline
             "user_identity_unavailable" -> R.string.error_user_identity_unavailable
             "user_connection_changed" -> R.string.error_user_connection_changed

@@ -12,6 +12,7 @@ enum Palette {
     static let selected = Color(hex: 0x3A3D42)
     static let border = Color(hex: 0x3A3E46)
     static let muted = Color(hex: 0x949BA4)
+    static let text = Color(hex: 0xF2F3F5)
     static let accent = Color(hex: 0x5865F2)
     static let green = Color(hex: 0x23A559)
     static let disconnect = Color(hex: 0xC83F4A)
@@ -435,6 +436,7 @@ private struct ChannelMemberListHeightKey: PreferenceKey {
 }
 private struct PageTitle: View {
     static let inset: CGFloat = 14
+    static let bottomSpacing: CGFloat = 8
     @EnvironmentObject private var language: LanguageSettings
     let key: String
     var body: some View {
@@ -442,7 +444,7 @@ private struct PageTitle: View {
             .environment(\.locale, language.locale)
             .font(.system(.title3).weight(.heavy))
             .fixedSize(horizontal: false, vertical: true)
-            .padding(.bottom, 8)
+            .padding(.bottom, Self.bottomSpacing)
     }
 }
 private extension View {
@@ -1297,6 +1299,14 @@ struct HomeView: View {
     @State private var avatarClearPresented = false
     @State private var avatarSelection: AvatarSelectionRequest?
     @State private var channelSheet = ChannelSheetState()
+    @State private var editingChannel: ChannelEditSelection?
+    @State private var rootChannelCreation: ChannelCreation?
+    @State private var childChannelCreation: ChannelCreation?
+    @State private var movingChannel: ChannelEditSelection?
+    @State private var deletingChannel: ChannelEditSelection?
+    @State private var channelDeleteRequest: String?
+    @State private var channelDeleteError: String?
+    @State private var channelToReveal: UInt64?
     @State private var lockedChannel: Channel?
     @State private var channelPassword = ""
     @State private var channelMemberListHeight: CGFloat = 52
@@ -1391,13 +1401,19 @@ struct HomeView: View {
                 .onChange(of: proxy.size.height) { viewportHeight = $0 }
         })
         .onChange(of: client.connected) { connected in
-            if !connected { drawerExpanded = false; drawerBlocksClick = false; userVolumesOpen = false }
+            if !connected {
+                drawerExpanded = false; drawerBlocksClick = false; userVolumesOpen = false
+                editingChannel = nil; channelSheet.selected = nil
+                rootChannelCreation = nil; childChannelCreation = nil; movingChannel = nil
+                deletingChannel = nil; channelDeleteRequest = nil; channelDeleteError = nil; channelToReveal = nil
+            }
         }
         .navigationTitle(tab == 2 ? L10n.string("tab_settings") : "")
         .onChange(of: tab) { _ in client.endPushToTalk() }
         .onChange(of: showConnect) { _ in client.endPushToTalk() }
         .onChange(of: editingBookmark?.id) { _ in client.endPushToTalk() }
         .onChange(of: channelSheet.selected?.id) { _ in client.endPushToTalk() }
+        .onChange(of: rootChannelCreation?.id) { _ in client.endPushToTalk() }
         .onChange(of: nicknamePresented) { _ in client.endPushToTalk() }
         .onChange(of: avatarSelection?.id) { _ in client.endPushToTalk() }
         .onChange(of: avatarClearPresented) { _ in client.endPushToTalk() }
@@ -1414,10 +1430,29 @@ struct HomeView: View {
             let members = client.state.clients.filter { $0.channel == channel.id }
             let layout = Self.channelSheetLayout(memberHeight: channelMemberListHeight, viewportHeight: viewportHeight)
             VStack(spacing: 16) {
-                HStack { ChannelIcon(channel: current, size: 28); Text(current.name).font(.title3.bold()).lineLimit(1); Spacer(); Button(L10n.string("action_close")) { channelSheet.selected = nil } }
-                    .frame(height: 44)
+                HStack {
+                    ChannelIcon(channel: current, size: 28)
+                    Text(current.name).font(.title3.bold()).lineLimit(1)
+                    Spacer(minLength: 0)
+                    if channelDeleteRequest != nil {
+                        ProgressView().frame(width: 44, height: 44)
+                    } else if let target = client.state.serverChatTarget {
+                        let menuLanguage = language.selection == .system ? language.systemLanguage : language.selection
+                        ChannelManagementMenu(items: .init(target: target, channelID: channel.id,
+                            canEdit: current.canEdit != false, canDelete: current.canDelete != false, language: menuLanguage)) {
+                            manageChannel($0, id: channel.id, target: target)
+                        }.frame(width: 44, height: 44)
+                    }
+                    Button(L10n.string("action_close")) { channelSheet.selected = nil }
+                        .disabled(channelDeleteRequest != nil)
+                }.frame(height: 44)
                 ScrollView {
-                    VStack(spacing: 16) {
+                    VStack(alignment: .leading, spacing: 16) {
+                        if let description = current.description, !description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            Text(description).font(.subheadline).foregroundStyle(Palette.muted)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                         if members.isEmpty {
                             Text(L10n.string("channel_no_members")).foregroundStyle(Palette.muted).frame(maxWidth: .infinity, minHeight: 52)
                         } else {
@@ -1435,7 +1470,7 @@ struct HomeView: View {
                     .buttonStyle(.borderedProminent)
                     .buttonBorderShape(.roundedRectangle(radius: 14))
                     .frame(maxWidth: .infinity)
-                    .disabled(!client.connected || client.currentChannel == channel.id)
+                    .disabled(!client.connected || client.currentChannel == channel.id || channelDeleteRequest != nil)
             }
             .padding(20)
             .background(Palette.background.ignoresSafeArea())
@@ -1443,7 +1478,54 @@ struct HomeView: View {
                 guard channelSheet.selected?.id == channel.id, abs(height - channelMemberListHeight) > 0.5 else { return }
                 withAnimation(.easeInOut(duration: 0.2)) { channelMemberListHeight = height }
             }
+            .task(id: current.description == nil) {
+                if current.description == nil, let target = client.state.serverChatTarget {
+                    try? client.channelCommand("description", target: target, channel: current.id, request: UUID().uuidString)
+                }
+            }
+            .onChange(of: client.state.channels.contains { $0.id == channel.id }) { present in
+                if !present {
+                    editingChannel = nil; childChannelCreation = nil; movingChannel = nil
+                    channelDeleteRequest = nil; channelSheet.selected = nil
+                }
+            }
+            .onChange(of: client.channelCommandResults["delete"]) { result in
+                guard let result, result.requestId == channelDeleteRequest else { return }
+                channelDeleteRequest = nil
+                if let error = result.error { channelDeleteError = L10n.coreError(error, detail: result.detail) }
+                else { channelSheet.selected = nil }
+            }
+            .alert(L10n.string("channel_delete_title"), isPresented: Binding(
+                get: { deletingChannel != nil }, set: { if !$0 { deletingChannel = nil } }
+            ), presenting: deletingChannel) { selection in
+                Button(L10n.string("action_delete"), role: .destructive) { deleteChannel(selection) }
+                Button(L10n.string("action_cancel"), role: .cancel) {}
+            } message: { selection in
+                Text(L10n.format("channel_delete_message", selection.channel.name))
+            }
+            .alert(L10n.string("error_channel_delete_failed"), isPresented: Binding(
+                get: { channelDeleteError != nil }, set: { if !$0 { channelDeleteError = nil } }
+            )) {
+                Button(L10n.string("action_close"), role: .cancel) {}
+            } message: { Text(channelDeleteError ?? "") }
+            .sheet(item: $editingChannel) { selection in
+                ChannelEditView(client: client, selection: selection)
+            }
+            .sheet(item: $childChannelCreation) { selection in
+                ChannelCreateView(client: client, selection: selection) { id in
+                    childChannelCreation = nil; channelSheet.selected = nil; channelToReveal = id
+                }
+            }
+            .sheet(item: $movingChannel) { selection in
+                ChannelMoveView(client: client, selection: selection)
+            }
+            .interactiveDismissDisabled(channelDeleteRequest != nil)
             .adaptiveSheetHeight(layout.sheet)
+        }
+        .sheet(item: $rootChannelCreation) { selection in
+            ChannelCreateView(client: client, selection: selection) { id in
+                rootChannelCreation = nil; channelToReveal = id
+            }
         }
         .alert(L10n.string("channel_password"), isPresented: Binding(get: { lockedChannel != nil }, set: { if !$0 { lockedChannel = nil } })) {
             SecureField(L10n.string("password"), text: $channelPassword)
@@ -1494,9 +1576,20 @@ struct HomeView: View {
         }.padding(24).frame(maxWidth: .infinity, maxHeight: .infinity)
     }
     private var channels: some View {
+        ScrollViewReader { reader in
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 9) {
-                PageTitle(key: "tab_channels")
+                HStack {
+                    PageTitle(key: "tab_channels")
+                    Spacer(minLength: 0)
+                    if let target = client.state.serverChatTarget {
+                        Button { rootChannelCreation = ChannelCreation(target: target, parent: nil) } label: {
+                            Label { Text(L10n.string("channel_create_title")) } icon: { AppIcon(name: "plus", scaledSize: 18) }
+                                .padding(.bottom, PageTitle.bottomSpacing)
+                                .frame(minHeight: 44)
+                        }.foregroundStyle(Palette.accent)
+                    }
+                }
                 ForEach(client.orderedChannels, id: \.channel.id) { entry in
                     let channel = entry.channel
                     if let spacer = channel.spacer {
@@ -1545,6 +1638,14 @@ struct HomeView: View {
                     }
                 }
             }.padding(PageTitle.inset)
+        }
+        .task(id: channelToReveal) {
+            guard let id = channelToReveal else { return }
+            await Task.yield()
+            guard !Task.isCancelled else { return }
+            reader.scrollTo(id, anchor: .center)
+            channelToReveal = nil
+        }
         }
     }
     private var members: some View {
@@ -1890,6 +1991,44 @@ struct HomeView: View {
         guard channel.id != client.currentChannel else { return }
         if channel.password { channelPassword = ""; lockedChannel = channel } else { client.join(channel) }
     }
+
+    private func manageChannel(_ action: ChannelManagementMenu.Action, id: UInt64, target: ServerChatTarget) {
+        guard channelSheet.selected?.id == id, client.state.serverChatTarget == target,
+              let channel = client.state.channels.first(where: { $0.id == id }) else { return }
+        let selection = ChannelEditSelection(channel: channel, target: target)
+        switch action {
+        case .createChild:
+            childChannelCreation = ChannelCreation(target: target, parent: channel)
+        case .edit:
+            if channel.canEdit != false { editingChannel = selection }
+        case .move:
+            movingChannel = selection
+        case .delete:
+            guard channel.canDelete != false else { return }
+            if channelHasMembersOrChildren(id) {
+                channelDeleteError = L10n.string("error_channel_delete_not_empty")
+            } else { deletingChannel = selection }
+        }
+    }
+
+    private func channelHasMembersOrChildren(_ id: UInt64) -> Bool {
+        client.state.clients.contains { $0.channel == id } || client.state.channels.contains { $0.parent == id }
+    }
+
+    private func deleteChannel(_ selection: ChannelEditSelection) {
+        let id = selection.channel.id
+        guard !channelHasMembersOrChildren(id) else {
+            channelDeleteError = L10n.string("error_channel_delete_not_empty")
+            return
+        }
+        let request = UUID().uuidString
+        do {
+            try client.channelCommand("delete", target: selection.target, channel: id, request: request)
+            channelDeleteRequest = request
+        } catch {
+            channelDeleteError = LocalizedNotice.source(of: error)?.text ?? error.localizedDescription
+        }
+    }
     private func showChannel(_ channel: Channel) {
         if !channelSheet.active { channelMemberListHeight = 52 }
         channelSheet.select(channel)
@@ -1899,6 +2038,694 @@ struct HomeView: View {
         let maximum = max(chrome + 52, viewportHeight * 0.78)
         let list = min(max(52, memberHeight), maximum - chrome)
         return (chrome + list, list)
+    }
+}
+
+struct ChannelManagementMenu: UIViewRepresentable {
+    enum Action: Equatable { case createChild, edit, move, delete }
+
+    struct Items: Equatable {
+        let target: ServerChatTarget
+        let channelID: UInt64
+        let canEdit: Bool
+        let canDelete: Bool
+        let language: AppLanguage
+    }
+
+    let items: Items
+    let onAction: (Action) -> Void
+    @ScaledMetric private var iconSize: CGFloat = 24
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    func makeUIView(context: Context) -> UIButton {
+        let button = UIButton(type: .system)
+        button.tintColor = UIColor(Palette.accent)
+        button.showsMenuAsPrimaryAction = true
+        return button
+    }
+
+    func updateUIView(_ button: UIButton, context: Context) {
+        context.coordinator.update(button, items: items, iconSize: iconSize, onAction: onAction)
+    }
+
+    @MainActor final class Coordinator {
+        private var displayed: Items?
+        private var displayedIconSize: CGFloat?
+        private var onAction: ((Action) -> Void)?
+
+        func update(_ button: UIButton, items: Items, iconSize: CGFloat, onAction: @escaping (Action) -> Void) {
+            self.onAction = onAction
+            if displayedIconSize != iconSize, let image = UIImage(named: "Icon-more") {
+                let size = CGSize(width: iconSize, height: iconSize)
+                let scaled = UIGraphicsImageRenderer(size: size).image { _ in image.draw(in: CGRect(origin: .zero, size: size)) }
+                button.setImage(scaled.withRenderingMode(.alwaysTemplate), for: .normal)
+                displayedIconSize = iconSize
+            }
+
+            // Reassigning the system menu while it is visible can animate its rows again.
+            guard displayed != items else { return }
+            displayed = items
+            button.accessibilityLabel = L10n.string("channel_manage")
+            func action(_ kind: Action, _ title: String, _ icon: String, destructive: Bool = false) -> UIAction {
+                let tint = destructive ? Palette.menuDestructive : UIColor(Palette.accent)
+                let image = UIImage(named: "Icon-" + icon)?.withTintColor(tint, renderingMode: .alwaysOriginal)
+                return UIAction(title: L10n.string(title), image: image, attributes: destructive ? .destructive : []) { [weak self] _ in
+                    if let self, self.displayed == items {
+                        self.onAction?(kind)
+                    }
+                }
+            }
+            var actions = [action(.createChild, "channel_create_child", "plus")]
+            if items.canEdit { actions.append(action(.edit, "channel_edit_title", "pencil")) }
+            actions.append(action(.move, "channel_move_title", "sort"))
+            if items.canDelete { actions.append(action(.delete, "channel_delete_title", "trash", destructive: true)) }
+            button.menu = UIMenu(children: actions)
+        }
+    }
+}
+
+struct ChannelEditSelection: Identifiable {
+    let channel: Channel
+    let target: ServerChatTarget
+    var id: UInt64 { channel.id }
+}
+
+struct ChannelCreation: Identifiable {
+    let target: ServerChatTarget
+    let parent: Channel?
+    let id = UUID()
+}
+
+private struct ChannelFormChoice: View {
+    let title: String
+    let prefix: String
+    @Binding var selection: String
+    let options: [String]
+
+    private static let checkmark = UIImage(named: "Icon-checkmark").map { source in
+        let size = CGSize(width: 18, height: 18)
+        return UIGraphicsImageRenderer(size: size).image { _ in
+            source.withRenderingMode(.alwaysOriginal).draw(in: CGRect(origin: .zero, size: size))
+        }
+    }
+
+    var body: some View {
+        Menu {
+            ForEach(options, id: \.self) { option in
+                let label = L10n.string(prefix + option)
+                let selected = option == selection
+                Button { selection = option } label: {
+                    Label { Text(label) } icon: {
+                        if let image = Self.checkmark {
+                            Image(uiImage: image.withTintColor(selected ? UIColor(Palette.text) : .clear,
+                                                               renderingMode: .alwaysOriginal))
+                        }
+                    }
+                }.accessibilityAddTraits(selected ? .isSelected : [])
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Text(L10n.string(title)).foregroundStyle(Palette.text)
+                Spacer(minLength: 12)
+                Text(L10n.string(prefix + selection)).multilineTextAlignment(.trailing)
+                AppIcon(name: "chevrons-up-down", size: 14).accessibilityHidden(true)
+            }
+            .foregroundStyle(Palette.accent)
+            .frame(minHeight: 22)
+            .contentShape(Rectangle())
+        }
+        .menuIndicator(.hidden)
+        .accessibilityLabel(L10n.string(title))
+        .accessibilityValue(L10n.string(prefix + selection))
+    }
+}
+
+struct ChannelCreateView: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject var client: Client
+    let selection: ChannelCreation
+    let onCreated: (UInt64) -> Void
+    @State private var name = ""
+    @State private var password = ""
+    @State private var type = "temporary"
+    @State private var position = "bottom"
+    @State private var request: String?
+    @State private var error: String?
+
+    private var nameValid: Bool { !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+
+    var body: some View {
+        NavigationView {
+            Form {
+                Section {
+                    TextField(L10n.string("channel_edit_name"), text: $name)
+                        .accessibilityLabel(L10n.string("channel_edit_name"))
+                    SecureField(L10n.string("channel_password"), text: $password)
+                        .textContentType(.oneTimeCode).autocorrectionDisabled()
+                    ChannelFormChoice(title: "channel_edit_type", prefix: "channel_edit_", selection: $type,
+                                      options: ["temporary", "semi_permanent", "permanent"])
+                    if selection.parent == nil {
+                        ChannelFormChoice(title: "channel_position", prefix: "channel_position_", selection: $position,
+                                          options: ["top", "bottom"])
+                    }
+                } header: {
+                    if let parent = selection.parent { Text(L10n.format("channel_create_under", parent.name)) }
+                }.disabled(request != nil)
+                Section {
+                    if let error { Text(error).foregroundStyle(Palette.disconnect) }
+                    Button { save() } label: {
+                        if request != nil { ProgressView().accessibilityLabel(L10n.string("channel_create_action")) }
+                        else { Text(L10n.string("channel_create_action")) }
+                    }.disabled(request != nil || !nameValid)
+                }
+            }
+            .navigationTitle(L10n.string(selection.parent == nil ? "channel_create_title" : "channel_create_child"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(L10n.string("action_cancel")) { dismiss() }.disabled(request != nil)
+                }
+            }
+        }.navigationViewStyle(.stack)
+            .interactiveDismissDisabled(request != nil)
+            .onChange(of: client.channelCommandResults["create"]) { result in
+                guard let result, result.requestId == request else { return }
+                request = nil
+                if let id = result.channel, result.error == nil { onCreated(id) }
+                else { error = L10n.coreError(result.error ?? "channel_create_failed", detail: result.detail) }
+            }
+    }
+
+    private func save() {
+        var changes = ["name": name, "password": password, "channel_type": type]
+        if selection.parent == nil { changes["position"] = position }
+        let id = UUID().uuidString
+        do {
+            try client.channelCommand("create", target: selection.target, channel: selection.parent?.id ?? 0,
+                                      request: id, changes: changes)
+            request = id; error = nil
+        } catch {
+            self.error = LocalizedNotice.source(of: error)?.text ?? error.localizedDescription
+        }
+    }
+}
+
+struct ChannelMoveView: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @ObservedObject var client: Client
+    let selection: ChannelEditSelection
+    @State private var original: Channel
+    @State private var parent: UInt64
+    @State private var siblings: [Channel]
+    @State private var preview: [Channel]
+    @State private var rowFrames: [UInt64: CGRect] = [:]
+    @GestureState private var gestureActive = false
+    @State private var drag: ChannelMoveDrag?
+    @State private var choosingParent = false
+    @State private var request: String?
+    @State private var error: String?
+
+    init(client: Client, selection: ChannelEditSelection) {
+        self.client = client; self.selection = selection
+        let original = selection.channel
+        let rows = client.orderedChannels.map(\.channel).filter { $0.parent == original.parent }
+        _original = State(initialValue: original)
+        _parent = State(initialValue: original.parent)
+        _siblings = State(initialValue: rows.filter { $0.id != original.id })
+        _preview = State(initialValue: rows)
+    }
+
+    private var index: Int? { preview.firstIndex { $0.id == original.id } }
+    private var order: UInt64 {
+        guard let index, index > 0 else { return 0 }
+        return preview[index - 1].id
+    }
+    private var canSave: Bool {
+        request == nil && drag == nil && index != nil && (parent != original.parent || order != original.order)
+    }
+    private var reorderAnimation: Animation? {
+        reduceMotion ? nil : .timingCurve(0, 0, 0.2, 1, duration: 0.18)
+    }
+    private var forbiddenParents: Set<UInt64> {
+        let descendants = Dictionary(grouping: client.state.channels, by: \.parent)
+        var visited: Set<UInt64> = []
+        var pending = [original.id]
+        while let channel = pending.popLast() {
+            if visited.insert(channel).inserted { pending.append(contentsOf: (descendants[channel] ?? []).map(\.id)) }
+        }
+        return visited
+    }
+
+    var body: some View {
+        NavigationView {
+            Group {
+                if choosingParent {
+                    List {
+                        parentEntry(id: 0, name: L10n.string("channel_root_level"), depth: 0)
+                        let excluded = forbiddenParents
+                        ForEach(client.orderedChannels, id: \.channel.id) { entry in
+                            if !excluded.contains(entry.channel.id), entry.channel.spacer == nil {
+                                parentEntry(id: entry.channel.id, name: entry.channel.name, depth: entry.depth)
+                            }
+                        }
+                    }
+                } else {
+                    ScrollViewReader { reader in
+                        ScrollView {
+                            VStack(alignment: .leading, spacing: 0) {
+                                moveTarget
+                                Text(L10n.string("channel_move_drag"))
+                                    .font(.callout.weight(.semibold))
+                                    .foregroundStyle(Palette.muted)
+                                    .padding(.horizontal, 16)
+                                    .padding(.vertical, 24)
+                                    .accessibilityAddTraits(.isHeader)
+                                LazyVStack(spacing: 30) {
+                                    ForEach(preview) { row in
+                                        positionedRow(row)
+                                    }
+                                }
+                                .padding(.horizontal, 16)
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.top, 32)
+                            .padding(.bottom, 16)
+                        }
+                            .background(Color(uiColor: .systemGroupedBackground))
+                            .overlay { dragOverlay(reader) }
+                            .onPreferenceChange(ChannelMoveFrames.self) { rowFrames = $0 }
+                            .onChange(of: gestureActive) { active in
+                                if !active, let startingRows = drag?.startingRows {
+                                    withAnimation(reorderAnimation) { preview = startingRows }
+                                    drag = nil
+                                }
+                            }
+                            .safeAreaInset(edge: .bottom, spacing: 0) { saveBar }
+                            .task(id: parent) {
+                                guard index != nil else { return }
+                                await Task.yield()
+                                guard !Task.isCancelled else { return }
+                                reader.scrollTo(original.id)
+                            }
+                    }
+                }
+            }
+            .navigationTitle(L10n.string(choosingParent ? "channel_choose_parent" : "channel_move_title"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(L10n.string("action_cancel")) {
+                        if choosingParent { choosingParent = false } else { dismiss() }
+                    }.disabled(request != nil)
+                }
+            }
+        }.navigationViewStyle(.stack)
+            .interactiveDismissDisabled(request != nil)
+            .onChange(of: client.channelCommandResults["move"]) { result in
+                guard let result, result.requestId == request else { return }
+                request = nil
+                if let code = result.error {
+                    error = L10n.coreError(code, detail: result.detail)
+                    if code == "channel_position_changed", let latest = client.state.channels.first(where: { $0.id == original.id }) {
+                        original = latest
+                        setParent(client.state.channels.contains { $0.id == parent } || parent == 0 ? parent : latest.parent)
+                    }
+                } else { dismiss() }
+            }
+    }
+
+    private var moveTarget: some View {
+        Button { choosingParent = true } label: {
+            HStack {
+                Text(L10n.string("channel_move_target")).foregroundStyle(Palette.text)
+                Spacer()
+                Text(parent == 0 ? L10n.string("channel_as_root") :
+                    L10n.format("channel_as_child", client.state.channels.first { $0.id == parent }?.name ?? ""))
+                    .multilineTextAlignment(.trailing)
+                AppIcon(name: "chevron-right", scaledSize: 14).accessibilityHidden(true)
+            }.foregroundStyle(Palette.accent)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .frame(minHeight: 72)
+                .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 24))
+        }.buttonStyle(.plain)
+            .disabled(request != nil || drag != nil)
+            .accessibilityIdentifier("channel-move-target")
+    }
+
+    @ViewBuilder private func positionedRow(_ row: Channel) -> some View {
+        let selected = row.id == original.id
+        let card = moveRow(row)
+            .opacity(selected && drag != nil ? 0 : 1)
+            .background {
+                GeometryReader { geometry in
+                    Color.clear.preference(key: ChannelMoveFrames.self,
+                        value: [row.id: geometry.frame(in: .global)])
+                }
+            }
+        if selected && request == nil && drag == nil {
+            card.accessibilityElement(children: .combine)
+                .accessibilityAction(named: Text(L10n.string("channel_move_up"))) {
+                    if let index, index > 0 { move(preview[index - 1].id, after: false) }
+                }
+                .accessibilityAction(named: Text(L10n.string("channel_move_down"))) {
+                    if let index, index + 1 < preview.count { move(preview[index + 1].id, after: true) }
+                }
+        } else { card }
+    }
+
+    private func moveRow(_ row: Channel) -> some View {
+        let selected = row.id == original.id
+        return HStack(spacing: 0) {
+            HStack(spacing: 10) {
+                ChannelIcon(channel: row)
+                Text(row.spacer.flatMap { $0.text.isEmpty ? nil : $0.text } ?? row.name)
+                    .foregroundStyle(Palette.text)
+                    .lineLimit(2)
+                Spacer(minLength: 0)
+            }.padding(.horizontal, 12).frame(minHeight: 48)
+                .background(selected ? Palette.selected : Palette.card)
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+                .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(selected ? Palette.accent : Palette.border))
+            if selected && request == nil {
+                AppIcon(name: "channel-reorder-handle", size: 22)
+                    .foregroundStyle(Color(hex: 0x49494B))
+                    .frame(width: 32)
+                    .accessibilityHidden(true)
+            }
+        }
+    }
+
+    private func dragOverlay(_ reader: ScrollViewProxy) -> some View {
+        GeometryReader { geometry in
+            let bounds = geometry.frame(in: .global)
+            if let frame = drag?.frame ?? rowFrames[original.id], request == nil, drag != nil || frame.intersects(bounds) {
+                if let drag {
+                    moveRow(original).frame(width: frame.width, height: frame.height)
+                        .position(x: frame.midX - bounds.minX, y: drag.centerY - bounds.minY)
+                        .transaction { $0.animation = nil }
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                }
+                // Keep the gesture attached to the viewport when the source row scrolls offscreen.
+                Color.clear.contentShape(Rectangle()).frame(width: 44, height: frame.height)
+                    .position(x: frame.maxX - 22 - bounds.minX, y: frame.midY - bounds.minY)
+                    .gesture(DragGesture(minimumDistance: 4, coordinateSpace: .global)
+                        .updating($gestureActive) { _, active, _ in active = true }
+                        .onChanged { value in
+                            var current = drag ?? ChannelMoveDrag(frame: frame, startingRows: preview)
+                            current.translation = value.translation.height
+                            drag = current
+                            place(at: current.centerY, within: bounds)
+                        }
+                        .onEnded { value in
+                            if let drag { place(at: drag.frame.midY + value.translation.height, within: bounds) }
+                            drag = nil
+                        })
+                    .accessibilityHidden(true)
+                    .task(id: drag != nil) {
+                        while let drag, !Task.isCancelled {
+                            let rows = visibleRows(in: bounds)
+                            let scroll = edgeScroll(at: drag.centerY - bounds.minY, height: bounds.height,
+                                                    first: rows.first?.id, last: rows.last?.id)
+                            if let scroll {
+                                withAnimation(reduceMotion ? nil : .linear(duration: 0.16)) {
+                                    reader.scrollTo(scroll.id, anchor: scroll.down ? .bottom : .top)
+                                }
+                            }
+                            try? await Task.sleep(nanoseconds: 180_000_000)
+                            if scroll != nil, !Task.isCancelled, let current = self.drag {
+                                place(at: current.centerY, within: bounds)
+                            }
+                        }
+                    }
+            }
+        }.clipped()
+    }
+
+    private func visibleRows(in bounds: CGRect) -> [(id: UInt64, frame: CGRect)] {
+        preview.compactMap { row in
+            guard let frame = rowFrames[row.id], frame.intersects(bounds) else { return nil }
+            return (row.id, frame)
+        }
+    }
+
+    private func place(at y: CGFloat, within bounds: CGRect) {
+        guard y >= bounds.minY, y <= bounds.maxY else { return }
+        let siblings = visibleRows(in: bounds).filter { $0.id != original.id }
+        if let next = siblings.first(where: { y < $0.frame.midY }) {
+            move(next.id, after: false)
+        } else if let last = siblings.last {
+            move(last.id, after: true)
+        }
+    }
+
+    private func edgeScroll(at y: CGFloat, height: CGFloat, first: UInt64?, last: UInt64?) -> (id: UInt64, down: Bool)? {
+        if y >= 0, y < 50, let first, let index = preview.firstIndex(where: { $0.id == first }), index > 0 {
+            return (preview[index - 1].id, false)
+        }
+        if y <= height, y > height - 50, let last, let index = preview.firstIndex(where: { $0.id == last }), index + 1 < preview.count {
+            return (preview[index + 1].id, true)
+        }
+        return nil
+    }
+
+    private func move(_ sibling: UInt64, after: Bool) {
+        guard request == nil, let index, let target = preview.firstIndex(where: { $0.id == sibling }) else { return }
+        let insertion = target + (after ? 1 : 0)
+        guard insertion != index, insertion != index + 1 else { return }
+        withAnimation(reorderAnimation) {
+            preview.move(fromOffsets: IndexSet(integer: index), toOffset: insertion)
+        }
+    }
+
+    private var saveBar: some View {
+        let submitting = request != nil
+        return VStack(alignment: .leading, spacing: 10) {
+            if let error { Text(error).foregroundStyle(Palette.disconnect) }
+            Button { save() } label: {
+                ZStack {
+                    Text(L10n.string("channel_move_save")).opacity(submitting ? 0 : 1)
+                    if submitting { ProgressView().tint(Palette.text).accessibilityHidden(true) }
+                }
+            }.buttonStyle(ChannelMoveSaveStyle(submitting: submitting))
+                .accessibilityLabel(L10n.string("channel_move_save"))
+                .disabled(!canSave)
+        }.padding(.horizontal, 16).padding(.vertical, 8)
+            .background(Color(uiColor: .systemGroupedBackground))
+    }
+
+    private func parentEntry(id: UInt64, name: String, depth: Int) -> some View {
+        Button { setParent(id); choosingParent = false } label: {
+            HStack {
+                Text(name).foregroundStyle(Palette.text)
+                Spacer()
+                if id == parent { AppIcon(name: "checkmark", scaledSize: 18).accessibilityHidden(true) }
+            }.padding(.leading, CGFloat(min(depth, 4)) * 10).frame(minHeight: 40)
+        }.accessibilityAddTraits(id == parent ? .isSelected : [])
+            .accessibilityIdentifier("channel-parent-\(id)")
+    }
+
+    private func setParent(_ id: UInt64) {
+        if id == parent, !preview.isEmpty, choosingParent { return }
+        parent = id
+        let rows = client.orderedChannels.map(\.channel).filter { $0.parent == id }
+        siblings = rows.filter { $0.id != original.id }
+        preview = id == original.parent ? rows : siblings + [original]
+    }
+
+    private func save() {
+        let id = UUID().uuidString
+        let changes: [String: Any] = [
+            "parent": parent, "order": order, "original_parent": original.parent, "original_order": original.order,
+            "siblings": siblings.map { ["id": $0.id, "order": $0.order] },
+        ]
+        do {
+            try client.channelCommand("move", target: selection.target, channel: original.id, request: id, changes: changes)
+            request = id; error = nil
+        } catch {
+            self.error = LocalizedNotice.source(of: error)?.text ?? error.localizedDescription
+        }
+    }
+}
+
+private struct ChannelMoveFrames: PreferenceKey {
+    static let defaultValue: [UInt64: CGRect] = [:]
+    static func reduce(value: inout [UInt64: CGRect], nextValue: () -> [UInt64: CGRect]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, newest in newest })
+    }
+}
+
+private struct ChannelMoveDrag {
+    let frame: CGRect
+    let startingRows: [Channel]
+    var translation: CGFloat = 0
+    var centerY: CGFloat { frame.midY + translation }
+}
+
+private struct ChannelMoveSaveStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var enabled
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    let submitting: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        let emphasized = enabled || submitting
+        let recovery = Animation.timingCurve(0, 0, 0.2, 1, duration: 0.35)
+        configuration.label.font(.headline).frame(maxWidth: .infinity, minHeight: 68)
+            .foregroundStyle(emphasized ? Palette.text : Palette.muted)
+            .background(emphasized ? Palette.accent : Palette.card, in: RoundedRectangle(cornerRadius: 14))
+            .opacity(configuration.isPressed ? 0.75 : 1)
+            .animation(configuration.isPressed || reduceMotion ? nil : recovery, value: configuration.isPressed)
+    }
+}
+
+struct ChannelEditView: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject var client: Client
+    let selection: ChannelEditSelection
+    @State private var name: String
+    @State private var topic: String
+    @State private var description: String
+    @State private var originalDescription: String?
+    @State private var passwordMode = "keep"
+    @State private var password = ""
+    @State private var limitMode: String
+    @State private var limit: String
+    @State private var type: String
+    @State private var request: String?
+    @State private var error: String?
+
+    init(client: Client, selection: ChannelEditSelection) {
+        self.client = client
+        self.selection = selection
+        let channel = selection.channel
+        _name = State(initialValue: channel.name)
+        _topic = State(initialValue: channel.topic ?? "")
+        _description = State(initialValue: channel.description ?? "")
+        _originalDescription = State(initialValue: channel.description)
+        _limitMode = State(initialValue: channel.maxClients?.mode ?? "unknown")
+        _limit = State(initialValue: channel.maxClients?.value.map(String.init) ?? "")
+        _type = State(initialValue: channel.channelType ?? "unknown")
+    }
+
+    private var latestDescription: String? {
+        client.state.channels.first { $0.id == selection.channel.id }?.description
+    }
+
+    private var changes: [String: Any] {
+        let channel = selection.channel
+        var values: [String: Any] = [:]
+        if name != channel.name { values["name"] = name }
+        if topic != (channel.topic ?? "") { values["topic"] = topic }
+        if let originalDescription, description != originalDescription { values["description"] = description }
+        if passwordMode == "set" { values["password"] = ["mode": "set", "value": password] }
+        if passwordMode == "remove" { values["password"] = ["mode": "remove"] }
+        if limitMode == "unlimited", channel.maxClients?.mode != "unlimited" {
+            values["max_clients"] = ["mode": "unlimited"]
+        }
+        if limitMode == "limited", let count = UInt16(limit),
+           channel.maxClients?.mode != "limited" || Int(count) != channel.maxClients?.value {
+            values["max_clients"] = ["mode": "limited", "value": count] as [String: Any]
+        }
+        if type != "unknown", type != channel.channelType { values["channel_type"] = type }
+        return values
+    }
+
+    private var valid: Bool {
+        !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && (limitMode != "limited" || UInt16(limit) != nil)
+            && (passwordMode != "set" || !password.isEmpty)
+    }
+
+    var body: some View {
+        NavigationView {
+            Form {
+                Section(selection.channel.name) {
+                    field("channel_edit_name") {
+                        TextField("", text: $name).accessibilityLabel(L10n.string("channel_edit_name"))
+                    }
+                    field("channel_edit_topic") {
+                        TextField("", text: $topic).accessibilityLabel(L10n.string("channel_edit_topic"))
+                    }
+                    field("channel_edit_description") {
+                        if originalDescription != nil {
+                            TextEditor(text: $description)
+                                .frame(minHeight: 96)
+                                .accessibilityLabel(L10n.string("channel_edit_description"))
+                        } else if client.channelCommandResults["description"]?.error != nil {
+                            Text(L10n.string("error_channel_description_failed")).font(.footnote).foregroundStyle(Palette.muted)
+                        } else {
+                            ProgressView()
+                        }
+                    }
+                }.disabled(request != nil)
+                Section {
+                    ChannelFormChoice(title: "channel_password", prefix: "channel_edit_password_", selection: $passwordMode,
+                                      options: ["keep", "set", "remove"])
+                    if passwordMode == "set" {
+                        SecureField(L10n.string("channel_edit_password_set"), text: $password)
+                            .textContentType(.oneTimeCode).autocorrectionDisabled()
+                    }
+                    ChannelFormChoice(title: "channel_edit_max_clients", prefix: "channel_edit_", selection: $limitMode,
+                                      options: (selection.channel.maxClients == nil ? ["unknown"] : []) + ["unlimited", "limited"])
+                    if limitMode == "limited" {
+                        TextField(L10n.string("channel_edit_max_clients"), text: $limit).keyboardType(.numberPad)
+                    }
+                    ChannelFormChoice(title: "channel_edit_type", prefix: "channel_edit_", selection: $type,
+                                      options: (selection.channel.channelType == nil ? ["unknown"] : []) + ["temporary", "semi_permanent", "permanent"])
+                }.disabled(request != nil)
+                Section {
+                    if let error { Text(error).foregroundStyle(Palette.disconnect) }
+                    Button { save() } label: {
+                        if request != nil { ProgressView().accessibilityLabel(L10n.string("action_save")) }
+                        else { Text(L10n.string("action_save")) }
+                    }.disabled(request != nil || !valid || changes.isEmpty)
+                }
+            }
+            .navigationTitle(L10n.string("channel_edit_title"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(L10n.string("action_cancel")) { dismiss() }.disabled(request != nil)
+                }
+            }
+        }
+        .navigationViewStyle(.stack)
+        .interactiveDismissDisabled(request != nil)
+        .onChange(of: passwordMode) { if $0 != "set" { password = "" } }
+        .onAppear { loadDescription(latestDescription) }
+        .onChange(of: latestDescription, perform: loadDescription)
+        .onChange(of: client.channelCommandResults["edit"]) { result in
+            guard let result, result.requestId == request else { return }
+            request = nil
+            if let code = result.error { error = L10n.coreError(code, detail: result.detail) }
+            else { dismiss() }
+        }
+    }
+
+    private func field<Content: View>(_ label: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(L10n.string(label)).font(.subheadline).foregroundStyle(Palette.muted)
+            content()
+        }
+    }
+
+    private func loadDescription(_ value: String?) {
+        guard originalDescription == nil, let value else { return }
+        originalDescription = value; description = value
+    }
+
+    private func save() {
+        let id = UUID().uuidString
+        do {
+            try client.channelCommand("edit", target: selection.target, channel: selection.channel.id,
+                                      request: id, changes: changes)
+            error = nil; request = id
+        } catch {
+            self.error = LocalizedNotice.source(of: error)?.text ?? error.localizedDescription
+        }
     }
 }
 

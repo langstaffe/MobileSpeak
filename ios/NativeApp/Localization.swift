@@ -163,6 +163,9 @@ enum L10n {
             "disconnect_before_connect", "storage_change_while_connected", "message_send_failed",
             "server_message_permission_denied", "message_wrong_channel", "channel_unavailable", "user_offline", "user_identity_unavailable",
             "user_connection_changed", "unsupported_message_target",
+            "channel_edit_failed", "channel_description_failed", "channel_permission_denied",
+            "channel_create_failed", "channel_move_failed", "channel_delete_failed", "channel_delete_not_empty",
+            "channel_position_changed", "channel_invalid_parent",
             "nickname_invalid", "profile_save_failed", "profile_read_failed", "profile_rename_failed",
             "receive_audio_read_failed", "receive_audio_save_failed", "receive_audio_context_changed",
         ]

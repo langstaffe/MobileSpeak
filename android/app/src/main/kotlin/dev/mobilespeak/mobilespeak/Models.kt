@@ -14,9 +14,21 @@ data class Channel(
     val permanent: Boolean,
     val key: String,
     val iconPath: String?,
+    val topic: String? = null,
+    val description: String? = null,
+    val channelType: String? = null,
+    val maxClients: ChannelClientLimit? = null,
+    val canEdit: Boolean? = null,
+    val canDelete: Boolean? = null,
 ) {
     val conversation get() = "channel:$key"
 }
+
+data class ChannelClientLimit(val mode: String, val value: Int?)
+data class ChannelCommandResult(
+    val requestId: String, val error: String?, val detail: String? = null,
+    val channel: Long? = null, val connectionId: String? = null,
+)
 
 data class Badge(val id: String, val name: String, val description: String, val iconPath: String?)
 data class GroupIcon(val id: Long, val name: String, val iconId: Long, val iconPath: String?)
@@ -217,6 +229,7 @@ data class SessionUiState(
     val snapshot: Snapshot = Snapshot(),
     val soundPending: Boolean = false,
     val channelFiles: ChannelFilesState = ChannelFilesState(),
+    val channelCommandResults: Map<String, ChannelCommandResult> = emptyMap(),
     val channelFilesLocalError: String? = null,
     val channelFilesLocalErrorSource: LocalizedMessage? = null,
     val fileCache: FileCacheState = FileCacheState(),
@@ -292,7 +305,15 @@ internal fun JSONObject.snapshot() = Snapshot(
     networkQuality = optJSONObject("networkQuality")?.networkQuality(),
     channels = getJSONArray("channels").objects().map {
         Channel(it.getLong("id"), it.getLong("parent"), it.getLong("order"), it.getString("name"),
-            it.getBoolean("password"), it.getBoolean("permanent"), it.getString("key"), it.stringOrNull("iconPath"))
+            it.getBoolean("password"), it.getBoolean("permanent"), it.getString("key"), it.stringOrNull("iconPath"),
+            topic = it.stringOrNull("topic"), description = it.stringOrNull("description"),
+            channelType = it.stringOrNull("channelType"),
+            maxClients = it.optJSONObject("maxClients")?.let { limit ->
+                ChannelClientLimit(limit.getString("mode"), if (limit.has("value")) limit.getInt("value") else null)
+            },
+            canEdit = if (it.has("canEdit") && !it.isNull("canEdit")) it.getBoolean("canEdit") else null,
+            canDelete = if (it.has("canDelete") && !it.isNull("canDelete")) it.getBoolean("canDelete") else null,
+        )
     },
     clients = getJSONArray("clients").objects().map { client ->
         Member(

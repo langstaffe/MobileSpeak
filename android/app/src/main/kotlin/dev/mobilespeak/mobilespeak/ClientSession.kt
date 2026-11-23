@@ -45,6 +45,7 @@ internal object ClientSession {
     private var fileCacheClearRequest: Long? = null
     private var activeBookmarkId: String? = null
     private val connectionGate = ConnectionGate()
+    private val channelCommandRequests = mutableMapOf<String, String>()
     private var pendingConnect: JSONObject? = null
     private var tailPollScheduled = false
     private val serviceHandler = android.os.Handler(android.os.Looper.getMainLooper())
@@ -356,6 +357,28 @@ internal object ClientSession {
     fun join(channel: Channel, password: String) =
         send(JSONObject().put("type", "join").put("channel", channel.id).put("password", password))
 
+    fun channelCommand(operation: String, target: ServerChatTarget, channelId: Long, request: String, changes: JSONObject? = null) =
+        coreExecutor.execute {
+            channelCommandRequests[operation] = request
+            mutableState.update { it.copy(channelCommandResults = it.channelCommandResults - operation) }
+            val command = JSONObject()
+                .put("type", if (operation == "description") "load_channel_description" else "${operation}_channel")
+                .put("server", target.serverId).put("connectionId", target.connectionId)
+                .put("channel", channelId).put("request_id", request)
+                .put("changes", changes)
+            val error = when {
+                state.value.snapshot.serverChatTarget != target -> "channel_unavailable"
+                !send(command) -> "channel_${operation}_failed"
+                else -> null
+            }
+            if (error != null) channelCommandResult(operation, ChannelCommandResult(request, error))
+        }
+
+    private fun channelCommandResult(operation: String, result: ChannelCommandResult) {
+        if (channelCommandRequests[operation] != result.requestId) return
+        mutableState.update { it.copy(channelCommandResults = it.channelCommandResults + (operation to result)) }
+    }
+
     fun sendServerMessage(target: ServerChatTarget, text: String): String? {
         if (state.value.snapshot.serverChatTarget != target) return null
         val requestId = UUID.randomUUID().toString()
@@ -453,6 +476,12 @@ internal object ClientSession {
             val event = events.getJSONObject(index)
             if (event.has("connectionId") && !connectionGate.accepts(event.stringOrNull("connectionId"))) continue
             when (event.getString("type")) {
+                "channel_command_result" -> channelCommandResult(
+                    event.getString("operation"),
+                    ChannelCommandResult(event.getString("requestId"), event.stringOrNull("error"), event.stringOrNull("detail"),
+                        if (event.has("channel") && !event.isNull("channel")) event.getLong("channel") else null,
+                        event.stringOrNull("connectionId")),
+                )
                 "file_cache_result" -> synchronized(fileCacheLock) {
                     if (event.optLong("requestId") == fileCacheRequest) {
                         val clearing = fileCacheClearRequest == fileCacheRequest

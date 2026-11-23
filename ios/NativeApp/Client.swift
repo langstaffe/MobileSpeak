@@ -20,6 +20,12 @@ struct Channel: Decodable, Identifiable, Equatable {
     let key: String
     let icon: UInt32?
     let iconPath: String?
+    var topic: String? = nil
+    var description: String? = nil
+    var channelType: String? = nil
+    var maxClients: ChannelClientLimit? = nil
+    var canEdit: Bool? = nil
+    var canDelete: Bool? = nil
     var conversation: String { "channel:\(key)" }
     var spacer: Spacer? {
         guard permanent, parent == 0, name.first == "[", let end = name.firstIndex(of: "]") else { return nil }
@@ -83,6 +89,18 @@ struct ServerChatTarget: Hashable {
     let serverId: String
     let connectionId: String
     var conversation: String { "server:\(serverId)" }
+}
+
+struct ChannelClientLimit: Decodable, Equatable {
+    let mode: String
+    let value: Int?
+}
+
+struct ChannelCommandResult: Equatable {
+    let requestId: String
+    let error: String?
+    let detail: String?
+    var channel: UInt64? = nil
 }
 
 struct Snapshot: Decodable, Equatable {
@@ -280,6 +298,8 @@ private func coreChanged(_ context: Int) {
     let handle: UnsafeMutableRawPointer
     @Published var state = Snapshot()
     @Published var channelFiles = ChannelFilesState()
+    @Published private(set) var channelCommandResults: [String: ChannelCommandResult] = [:]
+    private var channelCommandRequests: [String: String] = [:]
     @Published var channelFilesLocalError: String?
     @Published var fileCache = FileCacheState()
     @Published var fileImporting = false
@@ -550,6 +570,21 @@ private func coreChanged(_ context: Int) {
         let result = String(decoding: data, as: UTF8.self).withCString { ts_command(handle, $0) }
         if result != 0 { throw LocalizedNotice.key("error_operation_submit").error(domain: "MobileSpeak", code: Int(result)) }
     }
+    func channelCommand(_ operation: String, target: ServerChatTarget, channel: UInt64,
+                        request: String, changes: [String: Any]? = nil) throws {
+        guard state.serverChatTarget == target else {
+            throw LocalizedNotice.key("error_channel_unavailable").error(domain: "MobileSpeak", code: -1)
+        }
+        var command: [String: Any] = [
+            "type": operation == "description" ? "load_channel_description" : "\(operation)_channel",
+            "server": target.serverId, "connectionId": target.connectionId,
+            "channel": channel, "request_id": request,
+        ]
+        command["changes"] = changes
+        try send(command)
+        channelCommandRequests[operation] = request
+        channelCommandResults[operation] = nil
+    }
     @discardableResult func saveNickname(_ nickname: String) -> UInt64 {
         nicknameRequest += 1
         nicknameSaving = true; nicknameSaveError = nil
@@ -647,6 +682,12 @@ private func coreChanged(_ context: Int) {
                     do { try saveIdentity(JSONSerialization.data(withJSONObject: identity)) }
                     catch { self.error = localized(error, for: .error) }
                     connectionLogger.info("Connection startup phase=identity_save elapsed_ms=\(Int((ProcessInfo.processInfo.systemUptime - started) * 1000))")
+                } else if event["type"] as? String == "channel_command_result",
+                          let operation = event["operation"] as? String, let request = event["requestId"] as? String,
+                          channelCommandRequests[operation] == request {
+                    channelCommandResults[operation] = ChannelCommandResult(
+                        requestId: request, error: event["error"] as? String, detail: event["detail"] as? String,
+                        channel: (event["channel"] as? NSNumber)?.uint64Value)
                 } else if event["type"] as? String == "file_cache_result" {
                     let request = (event["requestId"] as? NSNumber)?.uint64Value
                     if request == fileCacheRequest {

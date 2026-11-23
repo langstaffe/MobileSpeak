@@ -42,6 +42,8 @@ internal object UiIcons {
         @Composable get() = ImageVector.vectorResource(R.drawable.ic_waveform)
     val DrawerHandle: ImageVector
         @Composable get() = ImageVector.vectorResource(R.drawable.ic_drawer_handle)
+    val ChannelReorderHandle: ImageVector
+        @Composable get() = ImageVector.vectorResource(R.drawable.ic_channel_reorder_handle)
     val Chat: ImageVector
         @Composable get() = ImageVector.vectorResource(R.drawable.ic_channel_chat)
     val Send: ImageVector
@@ -56,6 +58,8 @@ internal object UiIcons {
         @Composable get() = ImageVector.vectorResource(R.drawable.ic_error)
     val ChevronRight: ImageVector
         @Composable get() = ImageVector.vectorResource(R.drawable.ic_chevron_right)
+    val ChevronsUpDown: ImageVector
+        @Composable get() = ImageVector.vectorResource(R.drawable.ic_chevrons_up_down)
 
     val Folder: ImageVector
         @Composable get() = ImageVector.vectorResource(R.drawable.ic_folder)

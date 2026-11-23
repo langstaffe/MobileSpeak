@@ -1875,7 +1875,7 @@ final class ClientTests: XCTestCase {
     }
 
     @MainActor func testIconAssetsKeepTemplateTintAndOffOriginalColors() throws {
-        let names = "afk avatar-placeholder channel-chat channels checkmark chevron-right error headphones lock members mic-off mic-on more off pencil plus trash send settings speaker-off speaker-on waveform folder file file-text file-image file-audio file-archive upload download sort refresh info share".split(separator: " ")
+        let names = "afk avatar-placeholder channel-chat channel-reorder-handle channels checkmark chevron-right chevrons-up-down error headphones lock members mic-off mic-on more off pencil plus trash send settings speaker-off speaker-on waveform folder file file-text file-image file-audio file-archive upload download sort refresh info share".split(separator: " ")
         for name in names {
             let image = try XCTUnwrap(UIImage(named: "Icon-" + name))
             let off = name == "off"
@@ -3273,6 +3273,240 @@ extension ClientTests {
 }
 
 final class BridgeContractTests: XCTestCase {
+    @MainActor func testChannelManagementMenuKeepsNativeMenuDuringSnapshotUpdates() throws {
+        let button = UIButton(type: .system)
+        let coordinator = ChannelManagementMenu.Coordinator()
+        func update(connectionID: String = "connection", channelID: UInt64 = 7,
+                    canEdit: Bool = true, canDelete: Bool = true, language: AppLanguage = .english,
+                    onAction: @escaping (ChannelManagementMenu.Action) -> Void = { _ in }) throws -> UIMenu {
+            let target = ServerChatTarget(serverId: "fixture", connectionId: connectionID)
+            coordinator.update(button, items: .init(target: target, channelID: channelID,
+                canEdit: canEdit, canDelete: canDelete, language: language), iconSize: 24, onAction: onAction)
+            return try XCTUnwrap(button.menu)
+        }
+        let initial = try update()
+        let actions = initial.children.compactMap { $0 as? UIAction }
+        XCTAssertEqual(actions.count, 4)
+        XCTAssertTrue(actions.allSatisfy { $0.image != nil })
+        XCTAssertTrue(try XCTUnwrap(actions.last).attributes.contains(.destructive))
+        var selected: ChannelManagementMenu.Action?
+        XCTAssertTrue(try update(onAction: { selected = $0 }) === initial)
+        button.sendAction(try XCTUnwrap(actions.first))
+        XCTAssertEqual(selected, .createChild)
+        selected = nil
+        XCTAssertFalse(try update(connectionID: "new-connection", onAction: { selected = $0 }) === initial)
+        button.sendAction(try XCTUnwrap(actions.first))
+        XCTAssertNil(selected)
+        XCTAssertFalse(try update(channelID: 8) === initial)
+        let limited = try update(canEdit: false, canDelete: false)
+        XCTAssertEqual(limited.children.compactMap { ($0 as? UIAction)?.title },
+                       [L10n.string("channel_create_child"), L10n.string("channel_move_title")])
+        XCTAssertFalse(try update(canEdit: false, canDelete: false, language: .simplifiedChinese) === limited)
+    }
+
+    @MainActor func testChannelDescriptionLayoutAndPrefilledEditor() async throws {
+        #if targetEnvironment(simulator)
+        let library = try XCTUnwrap(dlopen("/usr/lib/libAccessibility.dylib", RTLD_NOW))
+        let setAutomation = unsafeBitCast(try XCTUnwrap(dlsym(library, "_AXSSetAutomationEnabled")), to: (@convention(c) (Bool) -> Void).self)
+        let automation = unsafeBitCast(try XCTUnwrap(dlsym(library, "_AXSAutomationEnabled")), to: (@convention(c) () -> Bool).self)()
+        setAutomation(true)
+        defer { setAutomation(automation); dlclose(library) }
+        #endif
+        let client = Client.shared
+        guard !client.connected, !client.busy else { throw XCTSkip("Requires the offline fixture") }
+        ts_set_notifier(client.handle, nil, 0)
+        defer {
+            ts_set_notifier(client.handle, { context in
+                DispatchQueue.main.async {
+                    Unmanaged<Client>.fromOpaque(UnsafeRawPointer(bitPattern: context)!).takeUnretainedValue().receive()
+                }
+            }, Int(bitPattern: Unmanaged.passUnretained(client).toOpaque()))
+        }
+        try await Task.sleep(nanoseconds: 300_000_000)
+        client.receive()
+        let original = client.state
+        let savedLanguage = UserDefaults.standard.object(forKey: AppLanguage.preferenceKey)
+        UserDefaults.standard.set("zh-Hans", forKey: AppLanguage.preferenceKey)
+        let channel = Channel(id: 7, parent: 0, order: 0, name: "乡岗井茶", password: true, permanent: false,
+            key: "fixture", icon: nil, iconPath: nil, topic: "周末闲聊", description: "欢迎来这里聊天。",
+            channelType: "semi_permanent", maxClients: ChannelClientLimit(mode: "limited", value: 4), canEdit: true)
+        let parent = Channel(id: 8, parent: 0, order: 7, name: "休闲区", password: false, permanent: true,
+                             key: "parent", icon: nil, iconPath: nil)
+        let sibling = Channel(id: 9, parent: 8, order: 0, name: "游戏大厅", password: false, permanent: true,
+                              key: "child", icon: nil, iconPath: nil)
+        let additionalChannels = (UInt64(10)...16).map { id in
+            let previous: UInt64 = id == 10 ? 8 : id - 1
+            return Channel(id: id, parent: 0, order: previous, name: "测试频道 \(id)", password: false,
+                           permanent: true, key: "test-\(id)", icon: nil, iconPath: nil)
+        }
+        let member = Member(id: 1, channel: 7, uid: "fixture", name: "MobileSpeakUser", avatarHash: "", avatarPath: nil,
+            badges: [], serverGroupIcons: [], channelGroupIcon: nil, muted: false, deafened: false, speaking: false)
+        client.state = Snapshot(connectionId: "fixture", status: "connected", server: "祥和山庄", serverId: "fixture",
+                                ownClient: member.id, channels: [channel, parent, sibling] + additionalChannels, clients: [member])
+        let target = try XCTUnwrap(client.state.serverChatTarget)
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let window = UIWindow(windowScene: scene)
+        let host = UIHostingController(rootView: AnyView(
+            NavigationView { HomeView(client: client) }.navigationViewStyle(.stack)
+                .environmentObject(LanguageSettings()).preferredColorScheme(.dark).tint(Palette.accent)))
+        window.rootViewController = host; window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true; client.state = original
+            UserDefaults.standard.set(savedLanguage, forKey: AppLanguage.preferenceKey)
+        }
+        func elements(_ root: UIView) -> [NSObject] {
+            var visited = Set<ObjectIdentifier>()
+            func collect(_ value: NSObject) -> [NSObject] {
+                guard visited.insert(ObjectIdentifier(value)).inserted, !value.accessibilityElementsHidden else { return [] }
+                if let view = value as? UIView, view.isHidden || view.alpha < 0.01 { return [] }
+                let count = value.accessibilityElementCount()
+                let children = value.accessibilityElements as? [NSObject]
+                    ?? (count > 0 && count < 1000 ? (0..<count).compactMap { value.accessibilityElement(at: $0) as? NSObject } : [])
+                let subviews = children.isEmpty ? ((value as? UIView)?.subviews ?? []).flatMap(collect) : children.flatMap(collect)
+                return (value.isAccessibilityElement ? [value] : []) + subviews
+            }
+            return collect(root)
+        }
+        func capture(_ name: String) {
+            let shot = UIGraphicsImageRenderer(bounds: window.bounds).image { _ in
+                window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+            }
+            let attachment = XCTAttachment(image: shot); attachment.name = name
+            attachment.lifetime = .keepAlways; add(attachment)
+        }
+        try await Task.sleep(nanoseconds: 300_000_000)
+        capture("ios-channel-list")
+        let card = try XCTUnwrap(elements(host.view).first { $0.accessibilityTraits.contains(.button) && $0.accessibilityLabel?.hasPrefix(channel.name) == true })
+        XCTAssertTrue(card.accessibilityActivate())
+        try await Task.sleep(nanoseconds: 450_000_000)
+        capture("ios-channel-detail")
+        let detailController = try XCTUnwrap(host.presentedViewController)
+        let detail = try XCTUnwrap(detailController.view)
+        let rows = elements(detail)
+        let description = try XCTUnwrap(rows.first { $0.accessibilityLabel == channel.description })
+        let person = try XCTUnwrap(rows.first { $0.accessibilityLabel == member.name })
+        XCTAssertLessThan(description.accessibilityFrame.maxY, person.accessibilityFrame.minY)
+        XCTAssertTrue(rows.contains { $0.accessibilityLabel == L10n.string("channel_manage") })
+        func menuButton(in view: UIView) -> UIButton? {
+            if let button = view as? UIButton, button.accessibilityLabel == L10n.string("channel_manage") { return button }
+            return view.subviews.lazy.compactMap { menuButton(in: $0) }.first
+        }
+        let button = try XCTUnwrap(menuButton(in: detail))
+        let displayedMenu = try XCTUnwrap(button.menu)
+        for rtt in [21.0, 24.0, 20.0] {
+            client.state.networkQuality = NetworkQuality(rttMs: rtt)
+            try await Task.sleep(nanoseconds: 75_000_000)
+            XCTAssertTrue(menuButton(in: detail) === button)
+            XCTAssertTrue(button.menu === displayedMenu)
+        }
+        func openManagementPage(_ key: String) throws {
+            let currentButton = try XCTUnwrap(menuButton(in: detail))
+            let action = try XCTUnwrap(currentButton.menu?.children.compactMap { $0 as? UIAction }.first { $0.title == L10n.string(key) })
+            currentButton.sendAction(action)
+        }
+        func presentedPage(containing key: String) async throws -> UIView {
+            for _ in 0..<24 {
+                if let view = detailController.presentedViewController?.view,
+                   elements(view).contains(where: { $0.accessibilityLabel == L10n.string(key) }) { return view }
+                try await Task.sleep(nanoseconds: 100_000_000)
+            }
+            return try XCTUnwrap(nil as UIView?, "Expected to present \(key)")
+        }
+        try openManagementPage("channel_edit_title")
+        let editor = try await presentedPage(containing: "channel_edit_name")
+        capture("ios-channel-editor")
+        let form = elements(editor)
+        XCTAssertTrue(form.contains { $0.accessibilityLabel == L10n.string("channel_edit_name") && $0.accessibilityValue == channel.name })
+        XCTAssertTrue(form.contains { $0.accessibilityLabel == L10n.string("channel_edit_topic") && $0.accessibilityValue == "周末闲聊" })
+        XCTAssertTrue(form.contains { $0.accessibilityLabel == L10n.string("channel_edit_max_clients") &&
+            $0.accessibilityValue == L10n.string("channel_edit_limited") })
+        XCTAssertTrue(form.contains { $0.accessibilityLabel == L10n.string("action_save") && $0.accessibilityTraits.contains(.notEnabled) })
+        let cancelEditor = try XCTUnwrap(form.first { $0.accessibilityLabel == L10n.string("action_cancel") && $0.accessibilityTraits.contains(.button) })
+        XCTAssertTrue(cancelEditor.accessibilityActivate())
+        for _ in 0..<24 where detailController.presentedViewController != nil {
+            try await Task.sleep(nanoseconds: 100_000_000)
+        }
+        XCTAssertNil(detailController.presentedViewController)
+        try openManagementPage("channel_move_title")
+        let move = try await presentedPage(containing: "channel_move_save")
+        try await Task.sleep(nanoseconds: 400_000_000)
+        capture("ios-channel-move-root")
+        let initialRows = elements(move)
+        let save = L10n.string("channel_move_save")
+        let saveButton = try XCTUnwrap(initialRows.first { $0.accessibilityLabel == save && $0.accessibilityTraits.contains(.notEnabled) })
+        func scrollableList(in view: UIView) -> UIScrollView? {
+            if let scroll = view as? UIScrollView, scroll.contentSize.height > scroll.bounds.height { return scroll }
+            return view.subviews.lazy.compactMap { scrollableList(in: $0) }.first
+        }
+        let list = try XCTUnwrap(scrollableList(in: move))
+        let initialOffset = list.contentOffset
+        // The lazy column revises its content height as the last rows become visible.
+        for _ in 0..<6 {
+            let bottom = list.contentSize.height - list.bounds.height + list.adjustedContentInset.bottom
+            list.setContentOffset(CGPoint(x: initialOffset.x, y: bottom), animated: false)
+            try await Task.sleep(nanoseconds: 150_000_000)
+            if let row = elements(move).first(where: { $0.accessibilityLabel == additionalChannels.last?.name }),
+               row.accessibilityFrame.maxY < saveButton.accessibilityFrame.minY { break }
+        }
+        let lastRow = try XCTUnwrap(elements(move).first { $0.accessibilityLabel == additionalChannels.last?.name })
+        XCTAssertLessThan(lastRow.accessibilityFrame.maxY, saveButton.accessibilityFrame.minY)
+        capture("ios-channel-move-scrolled-bottom")
+        list.setContentOffset(initialOffset, animated: false)
+        try await Task.sleep(nanoseconds: 150_000_000)
+        let moveDown = try XCTUnwrap(elements(move).flatMap { $0.accessibilityCustomActions ?? [] }
+            .first { $0.name == L10n.string("channel_move_down") })
+        XCTAssertTrue(try XCTUnwrap(moveDown.actionHandler)(moveDown))
+        try await Task.sleep(nanoseconds: 300_000_000)
+        let reordered = elements(move)
+        let after = try XCTUnwrap(reordered.first { $0.accessibilityLabel?.contains(channel.name) == true })
+        let before = try XCTUnwrap(reordered.first { $0.accessibilityLabel == parent.name })
+        XCTAssertGreaterThan(after.accessibilityFrame.minY, before.accessibilityFrame.minY)
+        XCTAssertTrue(reordered.contains { $0.accessibilityLabel == save && !$0.accessibilityTraits.contains(.notEnabled) })
+        capture("ios-channel-move-reordered")
+        let moveUp = try XCTUnwrap(reordered.flatMap { $0.accessibilityCustomActions ?? [] }
+            .first { $0.name == L10n.string("channel_move_up") })
+        XCTAssertTrue(try XCTUnwrap(moveUp.actionHandler)(moveUp))
+        try await Task.sleep(nanoseconds: 300_000_000)
+        let restored = elements(move)
+        let restoredChannel = try XCTUnwrap(restored.first { $0.accessibilityLabel == channel.name })
+        let restoredSibling = try XCTUnwrap(restored.first { $0.accessibilityLabel == parent.name })
+        XCTAssertLessThan(restoredChannel.accessibilityFrame.minY, restoredSibling.accessibilityFrame.minY)
+        XCTAssertTrue(restored.contains { $0.accessibilityLabel == save && $0.accessibilityTraits.contains(.notEnabled) })
+        let destination = try XCTUnwrap(elements(move).first {
+            ($0 as? UIAccessibilityIdentification)?.accessibilityIdentifier == "channel-move-target" ||
+                $0.accessibilityLabel?.contains(L10n.string("channel_move_target")) == true
+        })
+        XCTAssertTrue(destination.accessibilityActivate())
+        try await Task.sleep(nanoseconds: 300_000_000)
+        let targets = elements(move)
+        XCTAssertFalse(targets.contains { $0.accessibilityLabel == channel.name })
+        let targetRow = try XCTUnwrap(targets.first { $0.accessibilityLabel == parent.name })
+        XCTAssertTrue(targetRow.accessibilityActivate())
+        try await Task.sleep(nanoseconds: 300_000_000)
+        XCTAssertTrue(elements(move).contains { $0.accessibilityLabel == sibling.name })
+        capture("ios-channel-move-under-parent")
+
+        let cancelMove = try XCTUnwrap(elements(move).first { $0.accessibilityLabel == L10n.string("action_cancel") && $0.accessibilityTraits.contains(.button) })
+        XCTAssertTrue(cancelMove.accessibilityActivate())
+        try await Task.sleep(nanoseconds: 450_000_000)
+        let close = try XCTUnwrap(elements(detail).first { $0.accessibilityLabel == L10n.string("action_close") && $0.accessibilityTraits.contains(.button) })
+        XCTAssertTrue(close.accessibilityActivate())
+        try await Task.sleep(nanoseconds: 400_000_000)
+
+        host.rootView = AnyView(ChannelCreateView(client: client, selection: ChannelCreation(target: target, parent: nil)) { _ in }
+            .preferredColorScheme(.dark).tint(Palette.accent))
+        try await Task.sleep(nanoseconds: 300_000_000)
+        XCTAssertTrue(elements(host.view).contains { $0.accessibilityLabel == L10n.string("channel_position") &&
+            $0.accessibilityValue == L10n.string("channel_position_bottom") })
+        capture("ios-channel-create-root")
+
+        host.rootView = AnyView(ChannelCreateView(client: client, selection: ChannelCreation(target: target, parent: channel)) { _ in }
+            .preferredColorScheme(.dark).tint(Palette.accent))
+        try await Task.sleep(nanoseconds: 300_000_000)
+        XCTAssertFalse(elements(host.view).contains { $0.accessibilityLabel == L10n.string("channel_position") })
+        capture("ios-channel-create-child")
+    }
+
     func testSharedRustOutputAndOptionalConnectionFields() throws {
         let url = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "bridge", withExtension: "json"))
         let samples = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [[String: Any]])
@@ -3284,6 +3518,18 @@ final class BridgeContractTests: XCTestCase {
             XCTAssertEqual(decoded.status, ["disconnected", "connecting", "connected", "reconnecting", "disconnected"][index])
             XCTAssertEqual(snapshot["connectionId"] as? String, index == 0 ? nil : "fixture-connection")
             XCTAssertEqual(decoded.serverChatTarget, index == 2 ? ServerChatTarget(serverId: "fixture-server", connectionId: "fixture-connection") : nil)
+            if index == 2 {
+                let edited = try XCTUnwrap(decoded.channels.first)
+                XCTAssertEqual(edited.topic, "Fixture topic")
+                XCTAssertEqual(edited.description, "")
+                XCTAssertEqual(edited.channelType, "semi_permanent")
+                XCTAssertEqual(edited.maxClients, ChannelClientLimit(mode: "limited", value: 0))
+                XCTAssertEqual(edited.canEdit, false)
+                XCTAssertEqual(edited.canDelete, true)
+                XCTAssertNil(decoded.channels.last?.description)
+                XCTAssertNil(decoded.channels.last?.canEdit)
+                XCTAssertNil(decoded.channels.last?.canDelete)
+            }
             let unread = try XCTUnwrap(envelope["unread"])
             let decodedUnread = try JSONDecoder().decode(UnreadSnapshot.self, from: JSONSerialization.data(withJSONObject: unread))
             XCTAssertEqual(decodedUnread.serverCount, index == 2 ? 3 : 0)
@@ -3322,6 +3568,16 @@ final class BridgeContractTests: XCTestCase {
                 } else if event["type"] as? String == "audio_processing" {
                     XCTAssertNil(event["connectionId"])
                     XCTAssertEqual((event["requested"] as? [String: String])?["noise"], "dpdfnet2")
+                } else if event["type"] as? String == "channel_command_result" {
+                    XCTAssertEqual(event["connectionId"] as? String, "fixture-connection")
+                    if event["operation"] as? String == "create" {
+                        XCTAssertEqual(event["requestId"] as? String, "fixture-create")
+                        XCTAssertEqual(event["channel"] as? Int, 2)
+                    } else {
+                        XCTAssertEqual(event["operation"] as? String, "edit")
+                        XCTAssertEqual(event["requestId"] as? String, "fixture-edit")
+                        XCTAssertEqual(event["error"] as? String, "channel_permission_denied")
+                    }
                 }
             }
         }

@@ -103,6 +103,24 @@
     ],
     "events": [
       {
+        "channel": null,
+        "connectionId": "fixture-connection",
+        "detail": null,
+        "error": "channel_permission_denied",
+        "operation": "edit",
+        "requestId": "fixture-edit",
+        "type": "channel_command_result"
+      },
+      {
+        "channel": 2,
+        "connectionId": "fixture-connection",
+        "detail": null,
+        "error": null,
+        "operation": "create",
+        "requestId": "fixture-create",
+        "type": "channel_command_result"
+      },
+      {
         "applied": {
           "noise": "rnnoise"
         },
@@ -127,7 +145,39 @@
       "agc": true
     },
     "snapshot": {
-      "channels": [],
+      "channels": [
+        {
+          "canDelete": true,
+          "canEdit": false,
+          "channelType": "semi_permanent",
+          "description": "",
+          "icon": null,
+          "iconPath": null,
+          "id": 1,
+          "key": "id:1",
+          "maxClients": {
+            "mode": "limited",
+            "value": 0
+          },
+          "name": "Lobby",
+          "order": 0,
+          "parent": 0,
+          "password": true,
+          "permanent": false,
+          "topic": "Fixture topic"
+        },
+        {
+          "icon": null,
+          "iconPath": null,
+          "id": 2,
+          "key": "id:2",
+          "name": "Legacy",
+          "order": 1,
+          "parent": 0,
+          "password": false,
+          "permanent": true
+        }
+      ],
       "clients": [],
       "connectionId": "fixture-connection",
       "networkQuality": null,

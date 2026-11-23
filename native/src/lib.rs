@@ -13,6 +13,7 @@ mod audio_models;
 mod audio_processing;
 mod avatar;
 mod badges;
+mod channel_edit;
 mod channel_files;
 mod chat;
 mod media;
@@ -75,6 +76,29 @@ pub enum Command {
         channel: u64,
         #[serde(default)]
         password: String,
+    },
+    LoadChannelDescription {
+        #[serde(flatten)]
+        target: channel_edit::Target,
+    },
+    EditChannel {
+        #[serde(flatten)]
+        target: channel_edit::Target,
+        changes: channel_edit::Changes,
+    },
+    CreateChannel {
+        #[serde(flatten)]
+        target: channel_edit::Target,
+        changes: channel_edit::Create,
+    },
+    MoveChannel {
+        #[serde(flatten)]
+        target: channel_edit::Target,
+        changes: channel_edit::Move,
+    },
+    DeleteChannel {
+        #[serde(flatten)]
+        target: channel_edit::Target,
     },
     Mute {
         input: bool,
@@ -257,6 +281,15 @@ impl Command {
             }
             Self::Join { channel, password } if *channel == 0 || password.len() > 1024 => {
                 Err("Invalid channel")
+            }
+            Self::LoadChannelDescription { target } | Self::DeleteChannel { target }
+                | Self::MoveChannel { target, .. } => target.validate(),
+            Self::EditChannel { target, changes } => {
+                target.validate()?;
+                changes.validate()
+            }
+            Self::CreateChannel { target, changes } => {
+                target.validate_create(changes)
             }
             Self::PushToTalk { token, .. } if token.is_empty() || token.len() > 64 => Err("Invalid speech token"),
             Self::SetUserVolume {
@@ -861,6 +894,11 @@ fn snapshot(
                 "id":channel.id.0,"parent":channel.parent.0,"order":channel.order.0,
                 "name":channel.name,"password":channel.has_password.unwrap_or(false),
                 "permanent":channel.channel_type == ChannelType::Permanent,
+                "channelType":channel_edit::kind(channel.channel_type),"topic":channel.topic,
+                "description":channel.optional_data.as_ref().map(|data| &data.description),
+                "maxClients":channel.max_clients.and_then(channel_edit::limit),
+                "canEdit":channel.permission_hints.map(|hints| hints.contains(tsclientlib::ChannelPermissionHint::MODIFY)),
+                "canDelete":channel.permission_hints.map(|hints| hints.contains(tsclientlib::ChannelPermissionHint::DELETE)),
                 "key":channel_key(channel),"icon":icon,"iconPath":icon_path
             })
         })
@@ -1083,6 +1121,7 @@ fn schedule_badges(con: &Connection, storage: Option<&Path>, downloads: &mut med
 
 enum PendingOperation {
     Chat { id: String, kind: ChatKind },
+    Channel(channel_edit::Pending),
     FilesList,
     Avatar(avatar::Token),
     AvatarInfo(avatar::Token),
@@ -1627,6 +1666,13 @@ async fn session(
                     #[cfg(feature = "network-diagnostics")]
                     if network_trace.is_none() { network_trace = network_diagnostics::Diagnostics::attach(&mut con); }
                     for event in &events {
+                        if let Event::PropertyAdded { id: tsclientlib::events::PropertyId::Channel(id), invoker: Some(invoker), .. } = event {
+                            for operation in operations.values_mut() {
+                                if let PendingOperation::Channel(pending) = operation {
+                                    pending.created(*id, invoker.id, &con);
+                                }
+                            }
+                        }
                         if let Event::PropertyRemoved { id: tsclientlib::events::PropertyId::Client(id), .. } = event {
                             receive.remove(*id); audio.get_mut_queues().remove(id);
                         }
@@ -1751,6 +1797,11 @@ async fn session(
                     }
                 },
                 Some(Ok(StreamItem::MessageResult(handle, result))) => match operations.remove(&handle) {
+                    Some(PendingOperation::Channel(pending)) => {
+                        if let Some(waiting) = pending.result(result, &con, files, out) {
+                            operations.insert(handle, PendingOperation::Channel(waiting));
+                        }
+                    },
                     Some(PendingOperation::ProfileRename(token)) => {
                         nickname_application.result(token, profile, result.map_err(|error| error.to_string()), out);
                         apply_nickname(&mut con, profile, &mut nickname_application, &mut operations, out);
@@ -1900,6 +1951,21 @@ async fn session(
                 if subscribed { avatar.check(&mut con, storage.as_deref(), &avatar_tx, &mut operations, out); }
             },
             received = rx.recv() => match received {
+                Some(Command::LoadChannelDescription { target }) => {
+                    channel_edit::submit(target, channel_edit::Action::Description, &mut con, &mut operations, out);
+                },
+                Some(Command::EditChannel { target, changes }) => {
+                    channel_edit::submit(target, channel_edit::Action::Edit(changes), &mut con, &mut operations, out);
+                },
+                Some(Command::CreateChannel { target, changes }) => {
+                    channel_edit::submit(target, channel_edit::Action::Create(changes), &mut con, &mut operations, out);
+                },
+                Some(Command::MoveChannel { target, changes }) => {
+                    channel_edit::submit(target, channel_edit::Action::Move(changes), &mut con, &mut operations, out);
+                },
+                Some(Command::DeleteChannel { target }) => {
+                    channel_edit::submit(target, channel_edit::Action::Delete, &mut con, &mut operations, out);
+                },
                 Some(Command::SetNickname { nickname, request_id }) => {
                     if profile.save(&nickname, request_id, out) {
                         con.set_connect_name(profile.nickname.clone());
@@ -2137,6 +2203,10 @@ async fn session(
                 }
             },
             _ = clock.tick() => {
+                operations.retain(|_, operation| match operation {
+                    PendingOperation::Channel(pending) => pending.waiting(&con, files, out),
+                    _ => true,
+                });
                 let (expired, changed) = downloads.expire(Instant::now());
                 for handle in expired { con.cancel_filetransfer(handle); }
                 if changed || Instant::now() >= media_retry {
@@ -2332,6 +2402,11 @@ impl Bridge {
                         }
                         Command::SendServerMessage { connection_id, .. } => worker_output.lock().unwrap()
                             .event(json!({"type":"error","code":"message_send_failed","connectionId":connection_id})),
+                        Command::LoadChannelDescription { target } => target.unavailable("description", &worker_output),
+                        Command::EditChannel { target, .. } => target.unavailable("edit", &worker_output),
+                        Command::CreateChannel { target, .. } => target.unavailable("create", &worker_output),
+                        Command::MoveChannel { target, .. } => target.unavailable("move", &worker_output),
+                        Command::DeleteChannel { target } => target.unavailable("delete", &worker_output),
                         _ => {}
                     }
                 }
@@ -3378,7 +3453,18 @@ mod contract_regressions {
             out.profile = profile::Profile::default().snapshot();
             out.set_chats(json!([]));
             if status == "connected" {
-                out.set_snapshot(json!({"status":status,"server":"Fixture","serverId":"fixture-server","channels":[],"clients":[]}));
+                out.set_snapshot(json!({"status":status,"server":"Fixture","serverId":"fixture-server","clients":[],
+                    "channels":[
+                        {"id":1,"parent":0,"order":0,"name":"Lobby","password":true,"permanent":false,
+                         "key":"id:1","icon":null,"iconPath":null,"topic":"Fixture topic","description":"",
+                         "channelType":"semi_permanent","maxClients":{"mode":"limited","value":0},"canEdit":false,"canDelete":true},
+                        {"id":2,"parent":0,"order":1,"name":"Legacy","password":false,"permanent":true,
+                         "key":"id:2","icon":null,"iconPath":null}
+                    ]}));
+                out.event(json!({"type":"channel_command_result","operation":"edit","requestId":"fixture-edit",
+                    "error":"channel_permission_denied","detail":null,"channel":null}));
+                out.event(json!({"type":"channel_command_result","operation":"create","requestId":"fixture-create",
+                    "error":null,"detail":null,"channel":2}));
                 out.set_unread(UnreadState { server: Some("fixture-server".into()), server_count: 3, ..Default::default() }.snapshot());
                 let store = ChatStore { messages: vec![
                     ChatMessage { id:"fixture-message".into(), conversation:"channel:id:1".into(), kind:ChatKind::Channel, target_id:"id:1".into(), target_name:"Lobby".into(), sender_uid:"uid".into(), sender_name:"Speaker".into(), sender_avatar_hash:String::new(), own:true, text:"contract".into(), timestamp:1, status:ChatStatus::Sent, error:None },
