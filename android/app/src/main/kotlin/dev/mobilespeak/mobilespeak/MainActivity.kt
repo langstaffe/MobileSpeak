@@ -63,6 +63,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -234,6 +235,8 @@ internal object Palette {
     val disconnect = Color(0xFFC83F4A)
 }
 
+private val ChannelDetailScrim = Color.Black.copy(alpha = .55f)
+
 private data class PageTarget(val chat: ChatTarget? = null, val settings: String? = null) {
     val key: String get() = chat?.conversation ?: settings ?: "home"
 }
@@ -246,6 +249,7 @@ internal data class ChatTarget(
     val serverChat: ServerChatTarget? = null,
 )
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun MobileSpeakApp(requestPermissions: () -> Unit, openAbout: Boolean = false, requestPushToTalkPermission: () -> Unit = requestPermissions, consumedAbout: () -> Unit = {}) {
     val ui by ClientSession.state.collectAsStateWithLifecycle()
@@ -263,6 +267,14 @@ internal fun MobileSpeakApp(requestPermissions: () -> Unit, openAbout: Boolean =
     var showNewBookmark by remember { mutableStateOf(false) }
     var deletingBookmark by remember { mutableStateOf<Bookmark?>(null) }
     var selectedChannel by remember { mutableStateOf<Channel?>(null) }
+    val channelSheet = if (selectedChannel != null) rememberModalBottomSheetState(skipPartiallyExpanded = true) else null
+    val channelScrimAlpha = animateFloatAsState(
+        targetValue = if (channelSheet?.targetValue == SheetValue.Expanded) 1f else 0f,
+        // Match the Material 3 1.4.0 bottom sheet scrim's default effects spring.
+        animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = 1600f),
+        label = "Channel detail scrim",
+    )
+    var outgoingChannelScrimAlpha by remember { mutableStateOf<Float?>(null) }
     var chat by androidx.compose.runtime.saveable.rememberSaveable(
         stateSaver = androidx.compose.runtime.saveable.listSaver<ChatTarget?, String>(
             save = { target -> target?.let {
@@ -291,8 +303,18 @@ internal fun MobileSpeakApp(requestPermissions: () -> Unit, openAbout: Boolean =
         if (chat != null) {
             focusManager.clearFocus()
             keyboard?.hide()
+            outgoingChannelScrimAlpha = null
             chat = null
         }
+    }
+    fun openPrivateChat(member: Member, connection: ServerChatTarget? = null): Boolean {
+        if (chat != null || settingsPage != null || navigation.isRunning) return false
+        val snapshot = ClientSession.state.value.snapshot
+        if (connection != null && snapshot.serverChatTarget != connection) return false
+        val peer = snapshot.privateChatPeer(member) ?: return false
+        val conversation = peer.conversation ?: return false
+        chat = ChatTarget(conversation, peer.name, member = peer)
+        return true
     }
 
     LaunchedEffect(openAbout) {
@@ -409,15 +431,25 @@ internal fun MobileSpeakApp(requestPermissions: () -> Unit, openAbout: Boolean =
                                             requestPermissions()
                                         },
                                     )
-                                    tab == 0 -> ChannelScreen(ui, onSelect = { selectedChannel = it }, onChat = { if (chat == null && !navigation.isRunning) chat = ChatTarget(it.conversation, it.name, channel = it) })
-                                    else -> MemberScreen(ui) {
-                                        it.conversation?.let { conversation -> if (chat == null && !navigation.isRunning) chat = ChatTarget(conversation, it.name, member = it) }
-                                    }
+                                    tab == 0 -> ChannelScreen(
+                                        ui,
+                                        onSelect = { if (chat == null && !navigation.isRunning) selectedChannel = it },
+                                        onChat = { if (chat == null && !navigation.isRunning) chat = ChatTarget(it.conversation, it.name, channel = it) },
+                                    )
+                                    else -> MemberScreen(ui) { openPrivateChat(it) }
                                 } }
                             }
                             VoiceDrawer(ui, requestPermissions, drawerExpanded, setDrawerExpanded, maxHeight, maxWidth, Modifier.align(Alignment.BottomCenter))
                         }
                     }
+                }
+            }
+            if (target.key == "home") {
+                // Draw in Home's window so removing the dialog cannot expose a bright frame.
+                Canvas(Modifier.matchParentSize()) {
+                    val alpha = if (page.chat != null) outgoingChannelScrimAlpha
+                        else if (channelSheet != null) channelScrimAlpha.value else null
+                    if (alpha != null) drawRect(ChannelDetailScrim, alpha = alpha.coerceIn(0f, 1f))
                 }
             }
         }
@@ -453,12 +485,20 @@ internal fun MobileSpeakApp(requestPermissions: () -> Unit, openAbout: Boolean =
             dismissButton = { TextButton(onClick = { deletingBookmark = null }) { Text(stringResource(R.string.action_cancel)) } },
         )
     }
-    selectedChannel?.let { channel ->
+    val channel = selectedChannel
+    if (channel != null && channelSheet != null) {
         ChannelDialog(
             channel,
             ui,
             onDismiss = { selectedChannel = null },
-
+            onPrivateChat = { member, connection ->
+                if (selectedChannel === channel && openPrivateChat(member, connection)) {
+                    outgoingChannelScrimAlpha = channelScrimAlpha.value
+                    selectedChannel = null
+                }
+            },
+            sheetState = channelSheet,
+            scrimColor = Color.Transparent,
         )
     }
 }
@@ -779,7 +819,14 @@ internal fun ChannelScreen(ui: SessionUiState, onSelect: (Channel) -> Unit, onCh
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun ChannelDialog(channel: Channel, ui: SessionUiState, onDismiss: () -> Unit) {
+internal fun ChannelDialog(
+    channel: Channel,
+    ui: SessionUiState,
+    onDismiss: () -> Unit,
+    onPrivateChat: (Member, ServerChatTarget) -> Unit,
+    sheetState: SheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+    scrimColor: Color = ChannelDetailScrim,
+) {
     var passwordPrompt by remember(channel.id) { mutableStateOf(false) }
     var password by remember(channel.id) { mutableStateOf("") }
     var editing by remember(channel.id) { mutableStateOf<ChannelEditSelection?>(null) }
@@ -810,12 +857,12 @@ internal fun ChannelDialog(channel: Channel, ui: SessionUiState, onDismiss: () -
     LaunchedEffect(ui.snapshot.channels.any { it.id == channel.id }) {
         if (ui.snapshot.channels.none { it.id == channel.id }) onDismiss()
     }
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val canDismiss = deleteRequest == null
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState, containerColor = Palette.background, contentColor = Palette.text,
         modifier = Modifier.padding(horizontal = 8.dp).padding(bottom = 8.dp),
-        shape = RoundedCornerShape(40.dp), dragHandle = null, scrimColor = Color.Black.copy(alpha = .55f),
-        sheetGesturesEnabled = deleteRequest == null,
-        properties = ModalBottomSheetProperties(shouldDismissOnBackPress = deleteRequest == null, shouldDismissOnClickOutside = deleteRequest == null)) {
+        shape = RoundedCornerShape(40.dp), dragHandle = null, scrimColor = scrimColor,
+        sheetGesturesEnabled = canDismiss,
+        properties = ModalBottomSheetProperties(shouldDismissOnBackPress = canDismiss, shouldDismissOnClickOutside = canDismiss)) {
         BoxWithConstraints(Modifier.fillMaxWidth()) {
             val listMaximum = (maxHeight * .78f - 172.dp).coerceAtLeast(52.dp)
             Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -865,7 +912,15 @@ internal fun ChannelDialog(channel: Channel, ui: SessionUiState, onDismiss: () -
                         Text(description, modifier = Modifier.fillMaxWidth(), fontSize = 15.sp, lineHeight = 20.sp, color = Palette.muted)
                     }
                     if (members.isEmpty()) Text(stringResource(R.string.channel_no_members), Modifier.padding(vertical = 16.dp), color = Palette.muted)
-                    members.forEach { MemberRow(it) }
+                    members.forEach { member ->
+                        key(target, member.id, member.uid) {
+                            val openChat: (() -> Unit)? =
+                                if (target != null && member.id != ui.snapshot.ownClient && member.conversation != null && deleteRequest == null) {
+                                    { if (deleteRequest == null) onPrivateChat(member, target) }
+                                } else null
+                            MemberRow(member, onChat = openChat)
+                        }
+                    }
                 }
                 Button(onClick = {
                     if (current.password) passwordPrompt = true
@@ -927,21 +982,23 @@ internal fun MemberScreen(ui: SessionUiState, onChat: (Member) -> Unit) {
         item { PageTitle(stringResource(R.string.tab_members), Modifier.padding(horizontal = pageTitleInset)) }
         items(ui.snapshot.clients, key = { it.id }) { member ->
             val isSelf = member.id == ui.snapshot.ownClient
-            val row = Modifier.padding(horizontal = 16.dp)
             MemberRow(member,
-                if (isSelf) row else row.clickable(enabled = member.uid != null, interactionSource = null, indication = RowPressFeedback) { onChat(member) },
+                Modifier.padding(horizontal = 16.dp),
                 unread = if (isSelf) 0 else ui.unread.privateCounts[member.uid] ?: 0,
-                isSelf = isSelf)
+                isSelf = isSelf,
+                onChat = if (isSelf) null else ({ onChat(member) }))
         }
     }
 }
 
 @Composable
-private fun MemberRow(member: Member, modifier: Modifier = Modifier, unread: Int = 0, isSelf: Boolean = false) {
+private fun MemberRow(member: Member, modifier: Modifier = Modifier, unread: Int = 0, isSelf: Boolean = false, onChat: (() -> Unit)? = null) {
     val badges = member.badges.filter { it.iconPath != null }.take(4)
     val group = member.channelGroupIcon?.takeIf { it.iconPath != null || it.iconId in listOf(100L, 300L) }
     val groups = member.serverGroupIcons.filter { it.iconPath != null || it.iconId in listOf(100L, 300L) }.take((5 - badges.size - if (group == null) 0 else 1).coerceAtLeast(0))
-    Row(modifier.fillMaxWidth().heightIn(min = 44.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+    val interaction = if (onChat == null) Modifier else Modifier.clickable(
+        enabled = member.conversation != null, interactionSource = null, indication = RowPressFeedback, role = Role.Button, onClick = onChat)
+    Row(modifier.then(interaction).fillMaxWidth().heightIn(min = 44.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         Box {
             Avatar(member.name, member.avatarPath, member.speaking, 34, member, accessible = false)
             UnreadBadge(unread, Modifier.align(Alignment.TopEnd).offset(x = 5.dp, y = (-5).dp))

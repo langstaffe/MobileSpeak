@@ -83,7 +83,10 @@ struct Member: Decodable, Identifiable, Equatable {
             .compactMap { $0.0 ? L10n.string($0.1) : nil }).joined(separator: ", ")
     }
     var volumeRowId: String { volumeToken ?? "client:\(id)" }
-    var conversation: String? { uid.map { "client:\($0)" } }
+    var conversation: String? {
+        guard let uid, !uid.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, uid.utf8.count <= 256 else { return nil }
+        return "client:\(uid)"
+    }
 }
 struct ServerChatTarget: Hashable {
     let serverId: String
@@ -120,6 +123,10 @@ struct Snapshot: Decodable, Equatable {
     func onlineMember(uid: String?) -> Member? {
         guard status == "connected", let uid, !uid.isEmpty else { return nil }
         return clients.first { $0.uid == uid }
+    }
+    func privateChatPeer(matching member: Member) -> Member? {
+        guard status == "connected", member.id != ownClient, member.conversation != nil else { return nil }
+        return clients.first { $0.id == member.id && $0.uid == member.uid }
     }
 }
 

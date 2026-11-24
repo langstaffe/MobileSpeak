@@ -48,7 +48,7 @@ data class Member(
     val volumeToken: String? = null,
     val away: Boolean = false,
 ) {
-    val conversation get() = uid?.let { "client:$it" }
+    val conversation get() = uid?.takeIf { it.isNotBlank() && it.toByteArray().size <= 256 }?.let { "client:$it" }
     val statusIcon get() = if (away) "afk" else if (deafened) "speaker-off" else if (muted) "mic-off" else null
 }
 
@@ -72,6 +72,10 @@ data class Snapshot(
 
     fun onlineMember(uid: String?): Member? =
         if (status == "connected" && !uid.isNullOrEmpty()) clients.firstOrNull { it.uid == uid } else null
+
+    fun privateChatPeer(member: Member): Member? =
+        if (status == "connected" && member.id != ownClient && member.conversation != null)
+            clients.firstOrNull { it.id == member.id && it.uid == member.uid } else null
 }
 
 enum class NetworkGrade { GOOD, FAIR, POOR }

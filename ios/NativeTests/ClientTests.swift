@@ -3010,14 +3010,58 @@ final class ClientTests: XCTestCase {
         sheet.selected = nil // SwiftUI begins the interactive dismissal.
         sheet.select(channel(3))
         XCTAssertNil(sheet.selected)
-        XCTAssertEqual(sheet.queued?.id, 3)
-        let next = sheet.didDismiss()
+        guard case .channel(let next) = sheet.didDismiss(snapshot: Snapshot()) else { return XCTFail("Expected a queued channel") }
         XCTAssertFalse(sheet.active)
-        XCTAssertNil(sheet.queued)
-        XCTAssertEqual(next?.id, 3)
-        if let next { sheet.select(next) }
+        XCTAssertEqual(next.id, 3)
+        sheet.select(next)
         XCTAssertEqual(sheet.selected?.id, 3)
-        XCTAssertNil(sheet.didDismiss())
+        XCTAssertNil(sheet.didDismiss(snapshot: Snapshot()))
+    }
+    func testChannelSheetPrivateChatTakesPriorityAndRevalidatesPeerAfterDismissal() {
+        func channel(_ id: UInt64) -> Channel {
+            Channel(id: id, parent: 0, order: 0, name: "Channel \(id)", password: false, permanent: true, key: "\(id)", icon: nil, iconPath: nil)
+        }
+        func member(_ id: UInt64, uid: String?, channel: UInt64 = 1) -> Member {
+            Member(id: id, channel: channel, uid: uid, name: "Member \(id)", avatarHash: "", avatarPath: nil,
+                   badges: [], serverGroupIcons: [], channelGroupIcon: nil, muted: false, deafened: false, speaking: false)
+        }
+        let own = member(1, uid: "own", channel: 2)
+        let peer = member(2, uid: "peer"), another = member(3, uid: "another")
+        let missingUID = member(4, uid: nil), blankUID = member(5, uid: " ")
+        let connected = Snapshot(connectionId: "first", status: "connected", serverId: "server", ownClient: own.id,
+                                 clients: [own, peer, another, missingUID, blankUID])
+        var sheet = ChannelSheetState()
+        sheet.select(channel(1))
+        for invalid in [own, missingUID, blankUID] {
+            XCTAssertFalse(sheet.dismissForPrivateChat(invalid, channelID: 1, snapshot: connected))
+            XCTAssertEqual(sheet.selected?.id, 1)
+        }
+        sheet.select(channel(2))
+        XCTAssertTrue(sheet.dismissForPrivateChat(peer, channelID: 1, snapshot: connected))
+        XCTAssertFalse(sheet.dismissForPrivateChat(another, channelID: 1, snapshot: connected))
+        sheet.select(channel(3))
+        XCTAssertNil(sheet.selected)
+        let moved = member(2, uid: "peer", channel: 3)
+        var latest = connected
+        latest.clients = [own, moved, another]
+        guard case .privateChat(let resolved, _) = sheet.didDismiss(snapshot: latest) else { return XCTFail("Expected private chat") }
+        XCTAssertEqual(resolved, moved)
+        XCTAssertEqual(resolved.conversation, "client:peer")
+        XCTAssertNil(sheet.didDismiss(snapshot: latest))
+
+        var switched = connected
+        switched.connectionId = "second"
+        var offline = connected
+        offline.clients = [own, member(8, uid: "peer"), another]
+        for invalidSnapshot in [Snapshot(), switched, offline] {
+            sheet.select(channel(1))
+            sheet.dismissForPrivateChat(peer, channelID: 1, snapshot: connected)
+            XCTAssertNil(sheet.didDismiss(snapshot: invalidSnapshot))
+        }
+        sheet.select(channel(1))
+        sheet.dismissForPrivateChat(peer, channelID: 1, snapshot: connected)
+        sheet.cancelAfterDismissal()
+        XCTAssertNil(sheet.didDismiss(snapshot: connected))
     }
 }
 

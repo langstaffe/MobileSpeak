@@ -434,6 +434,118 @@ private struct ChannelMemberListHeightKey: PreferenceKey {
     static let defaultValue: CGFloat = 52
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
 }
+private struct ChannelMemberListPanObserver: UIViewRepresentable {
+    @Binding var isPanning: Bool
+
+    func makeUIView(context: Context) -> Observer { Observer() }
+    func updateUIView(_ view: Observer, context: Context) {
+        view.onPanning = { isPanning = $0 }
+    }
+
+    final class Observer: UIView {
+        var onPanning: (Bool) -> Void = { _ in }
+        private weak var pan: UIPanGestureRecognizer?
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            pan?.removeTarget(self, action: #selector(panChanged))
+            pan = nil
+            guard window != nil else { return }
+            var ancestor = superview
+            while let view = ancestor {
+                if let scroll = view as? UIScrollView {
+                    pan = scroll.panGestureRecognizer
+                    pan?.addTarget(self, action: #selector(panChanged))
+                    return
+                }
+                ancestor = view.superview
+            }
+        }
+
+        @objc private func panChanged(_ gesture: UIPanGestureRecognizer) {
+            switch gesture.state {
+            case .began, .changed:
+                onPanning(true)
+            case .ended, .cancelled, .failed:
+                // SwiftUI can invoke the row button during the same release that ends the scroll.
+                DispatchQueue.main.async { [weak self] in
+                    guard let self, let pan = self.pan, pan.state != .began, pan.state != .changed else { return }
+                    self.onPanning(false)
+                }
+            default:
+                break
+            }
+        }
+    }
+}
+
+@MainActor private final class ChannelPrivateChatTransition {
+    weak var source: UIView?
+    private var snapshot: UIView?
+
+    func capture() {
+        guard snapshot == nil, let window = source?.window,
+              let snapshot = window.snapshotView(afterScreenUpdates: false) else { return }
+        snapshot.frame = window.bounds
+        snapshot.isUserInteractionEnabled = false
+        snapshot.accessibilityElementsHidden = true
+        window.addSubview(snapshot)
+        self.snapshot = snapshot
+    }
+
+    func moveToSource() {
+        guard let snapshot, let source, let window = source.window else { clear(); return }
+        // The native push now carries the frozen sheet and channel list away with Home.
+        snapshot.frame = source.convert(window.bounds, from: window)
+        source.addSubview(snapshot)
+    }
+
+    func clear() {
+        snapshot?.removeFromSuperview()
+        snapshot = nil
+    }
+}
+
+private struct ChannelPrivateChatSource: UIViewRepresentable {
+    let transition: ChannelPrivateChatTransition
+
+    func makeCoordinator() -> ChannelPrivateChatTransition { transition }
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView()
+        view.isUserInteractionEnabled = false
+        transition.source = view
+        return view
+    }
+    func updateUIView(_ view: UIView, context: Context) {}
+    static func dismantleUIView(_ view: UIView, coordinator: ChannelPrivateChatTransition) {
+        if coordinator.source === view {
+            coordinator.clear()
+            coordinator.source = nil
+        }
+    }
+}
+
+private struct ChannelPrivateChatArrival: UIViewControllerRepresentable {
+    let transition: ChannelPrivateChatTransition
+
+    func makeUIViewController(context: Context) -> Controller { Controller(transition: transition) }
+    func updateUIViewController(_ controller: Controller, context: Context) {}
+
+    final class Controller: UIViewController {
+        let transition: ChannelPrivateChatTransition
+
+        init(transition: ChannelPrivateChatTransition) {
+            self.transition = transition
+            super.init(nibName: nil, bundle: nil)
+        }
+        required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+        override func viewDidAppear(_ animated: Bool) {
+            super.viewDidAppear(animated)
+            transition.clear()
+        }
+    }
+}
+
 private struct PageTitle: View {
     static let inset: CGFloat = 14
     static let bottomSpacing: CGFloat = 8
@@ -453,6 +565,14 @@ private extension View {
         else { self }
     }
 
+    @ViewBuilder func channelSheetBackground() -> some View {
+        if #available(iOS 16.4, *) {
+            // Keep the native glass appearance while filling the entire sheet.
+            presentationBackground { Palette.background }
+        } else {
+            background(Palette.background.ignoresSafeArea())
+        }
+    }
 }
 @main struct MobileSpeakApp: App {
     @StateObject private var client = Client.shared
@@ -679,21 +799,42 @@ struct ChannelIcon: View {
     }
 }
 struct ChannelSheetState {
+    enum AfterDismissal {
+        case channel(Channel)
+        case privateChat(Member, ServerChatTarget)
+    }
+
     var selected: Channel?
-    private(set) var queued: Channel?
+    private var afterDismissal: AfterDismissal?
     // The binding can become nil before the dismissal animation finishes.
     private(set) var active = false
 
     mutating func select(_ channel: Channel) {
-        if active { queued = channel }
+        if case .privateChat = afterDismissal { return }
+        if active { afterDismissal = .channel(channel) }
         else { active = true; selected = channel }
     }
 
-    mutating func didDismiss() -> Channel? {
+    @discardableResult
+    mutating func dismissForPrivateChat(_ member: Member, channelID: UInt64, snapshot: Snapshot) -> Bool {
+        guard selected?.id == channelID, let connection = snapshot.serverChatTarget,
+              let peer = snapshot.privateChatPeer(matching: member) else { return false }
+        afterDismissal = .privateChat(peer, connection)
+        selected = nil
+        return true
+    }
+
+    mutating func cancelAfterDismissal() { afterDismissal = nil }
+
+    mutating func didDismiss(snapshot: Snapshot) -> AfterDismissal? {
         active = false
         selected = nil
-        defer { queued = nil }
-        return queued
+        defer { afterDismissal = nil }
+        if case .privateChat(let member, let connection) = afterDismissal {
+            guard snapshot.serverChatTarget == connection, let peer = snapshot.privateChatPeer(matching: member) else { return nil }
+            return .privateChat(peer, connection)
+        }
+        return afterDismissal
     }
 }
 extension View {
@@ -1299,6 +1440,8 @@ struct HomeView: View {
     @State private var avatarClearPresented = false
     @State private var avatarSelection: AvatarSelectionRequest?
     @State private var channelSheet = ChannelSheetState()
+    @State private var privateChatMember: Member?
+    @State private var channelPrivateChatTransition = ChannelPrivateChatTransition()
     @State private var editingChannel: ChannelEditSelection?
     @State private var rootChannelCreation: ChannelCreation?
     @State private var childChannelCreation: ChannelCreation?
@@ -1309,6 +1452,7 @@ struct HomeView: View {
     @State private var channelToReveal: UInt64?
     @State private var lockedChannel: Channel?
     @State private var channelPassword = ""
+    @State private var channelMemberListPanning = false
     @State private var channelMemberListHeight: CGFloat = 52
     @State private var viewportHeight = UIScreen.main.bounds.height
     var body: some View {
@@ -1395,6 +1539,13 @@ struct HomeView: View {
         }
         .foregroundStyle(Color(hex: 0xF2F3F5))
         .background(Palette.background.ignoresSafeArea())
+        .background(privateChatLink)
+        .overlay {
+            ChannelPrivateChatSource(transition: channelPrivateChatTransition)
+                .ignoresSafeArea()
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+        }
         .background(GeometryReader { proxy in
             Color.clear
                 .onAppear { viewportHeight = proxy.size.height }
@@ -1404,6 +1555,7 @@ struct HomeView: View {
             if !connected {
                 drawerExpanded = false; drawerBlocksClick = false; userVolumesOpen = false
                 editingChannel = nil; channelSheet.selected = nil
+                channelSheet.cancelAfterDismissal()
                 rootChannelCreation = nil; childChannelCreation = nil; movingChannel = nil
                 deletingChannel = nil; channelDeleteRequest = nil; channelDeleteError = nil; channelToReveal = nil
             }
@@ -1424,10 +1576,22 @@ struct HomeView: View {
             Button(L10n.string("bookmark_delete_title"), role: .destructive) { if let bookmark = deletingBookmark { client.deleteBookmark(bookmark) }; deletingBookmark = nil }
         }
         .sheet(item: $channelSheet.selected, onDismiss: {
-            if let next = channelSheet.didDismiss(), client.connected, tab == 0 { showChannel(next) }
+            let next = channelSheet.didDismiss(snapshot: client.state)
+            guard client.connected, tab == 0 else { channelPrivateChatTransition.clear(); return }
+            switch next {
+            case .channel(let channel):
+                channelPrivateChatTransition.clear()
+                showChannel(channel)
+            case .privateChat(let member, _):
+                channelPrivateChatTransition.moveToSource()
+                privateChatMember = member
+            case nil:
+                channelPrivateChatTransition.clear()
+            }
         }) { channel in
             let current = client.state.channels.first { $0.id == channel.id } ?? channel
             let members = client.state.clients.filter { $0.channel == channel.id }
+            let connection = client.state.serverChatTarget
             let layout = Self.channelSheetLayout(memberHeight: channelMemberListHeight, viewportHeight: viewportHeight)
             VStack(spacing: 16) {
                 HStack {
@@ -1456,9 +1620,31 @@ struct HomeView: View {
                         if members.isEmpty {
                             Text(L10n.string("channel_no_members")).foregroundStyle(Palette.muted).frame(maxWidth: .infinity, minHeight: 52)
                         } else {
-                            ForEach(members) { memberRow($0) }
+                            ForEach(members) { member in
+                                if let connection, member.id != client.state.ownClient,
+                                   member.conversation != nil, channelDeleteRequest == nil {
+                                    Button {
+                                        guard !channelMemberListPanning else { return }
+                                        let snapshot = client.state
+                                        guard snapshot.serverChatTarget == connection else { return }
+                                        var next = channelSheet
+                                        guard next.dismissForPrivateChat(member, channelID: channel.id, snapshot: snapshot) else { return }
+                                        channelPrivateChatTransition.capture()
+                                        var transaction = Transaction(animation: nil)
+                                        transaction.disablesAnimations = true
+                                        withTransaction(transaction) { channelSheet = next }
+                                    } label: {
+                                        memberRow(member)
+                                    }
+                                    .buttonStyle(.plain)
+                                } else {
+                                    memberRow(member)
+                                }
+                            }
                         }
                     }
+                    .background(ChannelMemberListPanObserver(isPanning: $channelMemberListPanning)
+                        .allowsHitTesting(false).accessibilityHidden(true))
                     .background(GeometryReader { proxy in
                         Color.clear.preference(key: ChannelMemberListHeightKey.self, value: proxy.size.height)
                     })
@@ -1473,7 +1659,7 @@ struct HomeView: View {
                     .disabled(!client.connected || client.currentChannel == channel.id || channelDeleteRequest != nil)
             }
             .padding(20)
-            .background(Palette.background.ignoresSafeArea())
+            .channelSheetBackground()
             .onPreferenceChange(ChannelMemberListHeightKey.self) { height in
                 guard channelSheet.selected?.id == channel.id, abs(height - channelMemberListHeight) > 0.5 else { return }
                 withAnimation(.easeInOut(duration: 0.2)) { channelMemberListHeight = height }
@@ -1648,13 +1834,36 @@ struct HomeView: View {
         }
         }
     }
+    private var privateChatLink: some View {
+        NavigationLink(isActive: Binding(
+            get: { privateChatMember != nil },
+            set: {
+                if !$0 {
+                    privateChatMember = nil
+                    channelPrivateChatTransition.clear()
+                }
+            }
+        )) {
+            if let privateChatMember {
+                PrivateChatView(client: client, member: privateChatMember)
+                    .background {
+                        ChannelPrivateChatArrival(transition: channelPrivateChatTransition)
+                            .allowsHitTesting(false)
+                            .accessibilityHidden(true)
+                    }
+            }
+        } label: {
+            EmptyView()
+        }
+        .accessibilityHidden(true)
+    }
     private var members: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 16) {
                 PageTitle(key: "tab_members").padding(.horizontal, PageTitle.inset)
                 ForEach(client.state.clients) { member in
                     let isSelf = member.id == client.state.ownClient
-                    if !isSelf && member.uid != nil {
+                    if !isSelf && member.conversation != nil {
                         NavigationLink(destination: PrivateChatView(client: client, member: member)) { memberRow(member, showUnread: true) }.buttonStyle(.plain).padding(.horizontal, 16)
                     } else { memberRow(member, isSelf: isSelf).padding(.horizontal, 16) }
                 }
@@ -2030,7 +2239,10 @@ struct HomeView: View {
         }
     }
     private func showChannel(_ channel: Channel) {
-        if !channelSheet.active { channelMemberListHeight = 52 }
+        if !channelSheet.active {
+            channelMemberListHeight = 52
+            channelMemberListPanning = false
+        }
         channelSheet.select(channel)
     }
     static func channelSheetLayout(memberHeight: CGFloat, viewportHeight: CGFloat) -> (sheet: CGFloat, list: CGFloat) {

@@ -1,10 +1,14 @@
 package dev.mobilespeak.mobilespeak
 
 import android.app.KeyguardManager
+import android.graphics.Rect
+import android.os.Build
 import android.os.SystemClock
 import android.provider.Settings
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
+import android.view.accessibility.AccessibilityNodeInfo
 import androidx.activity.compose.setContent
 import androidx.compose.ui.platform.ViewRootForTest
 import androidx.compose.ui.unit.sp
@@ -33,6 +37,144 @@ class HomeScrollStateTest {
     private val instrumentation get() = InstrumentationRegistry.getInstrumentation()
     private val context get() = instrumentation.targetContext
     private lateinit var activity: MainActivity
+
+    @Test fun channelDetailsOpensTheSamePrivateChatAfterClosing() {
+        ClientSession.initialize(context)
+        assumeTrue(!context.getSystemService(KeyguardManager::class.java).isKeyguardLocked &&
+            !ClientSession.shouldRunService() && ClientSession.state.value.snapshot.status == "disconnected")
+        val handle = (field("handle\$delegate").get(ClientSession) as Lazy<*>).value as Long
+        val poll = ClientSession.javaClass.getDeclaredMethod("scheduleCorePoll").apply { isAccessible = true }
+        val saved = state.value
+        val channels = (1L..36L).map { Channel(it, 0, it - 1, "Channel %03d".format(it), false, true, "fixture-$it", null, description = "") }
+        val bot = Member(1, 20, "fixture-bot", "MusicBot", null, emptyList(), emptyList(), null, false, false, false)
+        val own = bot.copy(id = 2, channel = 21, uid = "fixture-own", name = "Own member")
+        val missing = bot.copy(id = 3, uid = null, name = "Missing UID")
+        val blank = bot.copy(id = 4, uid = " ", name = "Blank UID")
+        val crowd = (1..28).map { bot.copy(id = 10L + it, uid = "fixture-peer-$it", name = "Peer %02d".format(it)) }
+        val history = "Existing private chat history"
+        val snapshot = Snapshot(status = "connected", server = "Chat fixture", serverId = "chat-fixture", connectionId = "first",
+            ownClient = own.id, channels = channels, clients = listOf(bot, own, missing, blank) + crowd)
+        val fixture = saved.copy(snapshot = snapshot, error = null, messages = listOf(
+            ChatMessage("history", requireNotNull(bot.conversation), bot.name, null, false, history, 1, "received", null, bot.uid.orEmpty())))
+        val close = context.localized(R.string.action_close)
+        val join = context.localized(R.string.channel_join)
+        val automation = instrumentation.uiAutomation
+        fun find(label: String): AccessibilityNodeInfo? {
+            fun visit(node: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
+                if (node == null) return null
+                if (node.isVisibleToUser && (node.text?.toString() == label || node.contentDescription?.toString() == label)) return node
+                return (0 until node.childCount).firstNotNullOfOrNull { visit(node.getChild(it)) }
+            }
+            if (Build.VERSION.SDK_INT >= 34) automation.clearCache()
+            return visit(automation.rootInActiveWindow)
+        }
+        fun actionable(node: AccessibilityNodeInfo) = generateSequence(node) { it.parent }.firstOrNull { it.isClickable }
+        fun bounds(label: String) = Rect().also { requireNotNull(find(label)) { label }.getBoundsInScreen(it) }
+        fun touch(action: Int, x: Int, y: Int, down: Long) {
+            val event = MotionEvent.obtain(down, SystemClock.uptimeMillis(), action, x.toFloat(), y.toFloat(), 0)
+            try { instrumentation.sendPointerSync(event) } finally { event.recycle() }
+        }
+        fun gesture(from: Rect, x: Int = from.centerX(), finishY: Int = from.centerY(), cancel: Boolean = false) {
+            val down = SystemClock.uptimeMillis()
+            touch(MotionEvent.ACTION_DOWN, x, from.centerY(), down)
+            if (finishY != from.centerY()) {
+                for (step in 1..12) {
+                    SystemClock.sleep(20)
+                    touch(MotionEvent.ACTION_MOVE, x, from.centerY() + (finishY - from.centerY()) * step / 12, down)
+                }
+            } else if (cancel) SystemClock.sleep(180)
+            touch(if (cancel) MotionEvent.ACTION_CANCEL else MotionEvent.ACTION_UP, x, finishY, down)
+        }
+        fun shot(name: String) {
+            val bitmap = requireNotNull(automation.takeScreenshot())
+            java.io.File(context.getExternalFilesDir(null), "channel-private-$name.png").outputStream().use {
+                bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
+            }
+            bitmap.recycle()
+        }
+        try {
+            NativeCore.setNotifier(handle, Runnable {})
+            (field("coreExecutor").get(ClientSession) as ExecutorService).submit {}.get(10, TimeUnit.SECONDS)
+            ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+                scenario.onActivity { activity = it }
+                publish(fixture)
+                click(context.localized(R.string.tab_members))
+                click(bot.name, nativeTouch = true)
+                assertNotNull(find(history))
+                shot("from-members")
+                click(context.localized(R.string.action_back))
+                click(context.localized(R.string.tab_channels))
+                scroll(index = 17, pixels = 32f)
+                val originalPosition = position()
+                assertTrue(originalPosition.axis > 0)
+
+                fun openRemoteChannel() { click("Channel 020", nativeTouch = true); assertNotNull(find(join)) }
+                openRemoteChannel()
+                for (label in listOf(missing.name, blank.name)) {
+                    assertNull(actionable(requireNotNull(find(label))))
+                    gesture(bounds(label)); settle()
+                    assertNotNull(find(join))
+                }
+                val botRow = Rect().also { requireNotNull(actionable(requireNotNull(find(bot.name)))).getBoundsInScreen(it) }
+                shot("sheet")
+                gesture(botRow, x = botRow.left + botRow.width() / 6, cancel = true)
+                assertNotNull(find(join))
+                gesture(botRow, x = botRow.right - botRow.width() / 5)
+                gesture(botRow, x = botRow.right - botRow.width() / 5)
+                settle(750)
+                assertNull(find(join))
+                assertNotNull(find(history))
+                shot("from-sheet")
+                click(context.localized(R.string.action_back))
+                assertEquals(originalPosition, position())
+
+                click("Channel 021", nativeTouch = true)
+                assertNull(actionable(requireNotNull(find(own.name))))
+                gesture(bounds(own.name)); settle()
+                assertNotNull(find(join))
+                val closeBounds = bounds(close)
+                gesture(closeBounds, x = botRow.centerX(), finishY = bounds(join).centerY())
+                settle()
+                assertNull(find(join))
+
+                openRemoteChannel()
+                val botY = bounds(bot.name).centerY()
+                gesture(bounds("Peer 05"), x = botRow.centerX(), finishY = bounds(bot.name).centerY())
+                settle()
+                shot("scrolled")
+                assertNotNull(find(join))
+                assertTrue("The list moves while the channel sheet stays open",
+                    find(bot.name) == null || bounds(bot.name).centerY() < botY - 20)
+                assertTrue((7..28).any { find("Peer %02d".format(it)) != null })
+                gesture(bounds(close)); settle()
+
+                openRemoteChannel()
+                gesture(Rect(0, 0, botRow.right, bounds(close).top))
+                settle()
+                assertNull(find(join))
+                assertEquals(originalPosition, position())
+
+                for (invalid in listOf(snapshot.copy(clients = snapshot.clients - bot),
+                    snapshot.copy(connectionId = "second"), Snapshot())) {
+                    openRemoteChannel()
+                    val botBounds = bounds(bot.name)
+                    val down = SystemClock.uptimeMillis()
+                    touch(MotionEvent.ACTION_DOWN, botBounds.centerX(), botBounds.centerY(), down)
+                    publish(fixture.copy(snapshot = invalid))
+                    touch(MotionEvent.ACTION_UP, botBounds.centerX(), botBounds.centerY(), down)
+                    settle()
+                    assertNull(find(history))
+                    assertFalse(onMain { nodes().any { it.config.contains(SemanticsProperties.EditableText) } })
+                    if (find(join) != null) { gesture(bounds(close)); settle() }
+                    publish(fixture)
+                }
+            }
+        } finally {
+            instrumentation.runOnMainSync { state.value = saved }
+            NativeCore.setNotifier(handle, Runnable { poll.invoke(ClientSession) })
+            poll.invoke(ClientSession)
+        }
+    }
 
     @Test fun tabsKeepIndependentOffsetsAcrossNavigationDisconnectAndShorterLists() {
         assumeTrue("Unlock the device for UI acceptance", !context.getSystemService(KeyguardManager::class.java).isKeyguardLocked)
@@ -142,8 +284,8 @@ class HomeScrollStateTest {
                 click(context.localized(R.string.tab_members)); scroll(index = 100, pixels = 23f)
                 click(context.localized(R.string.tab_settings))
                 publish(fixture.copy(snapshot = fixture.snapshot.copy(channels = channels.take(4), clients = members.take(4) + own.copy(channel = 1))))
-                click(context.localized(R.string.tab_channels)); assertLegalShortList()
-                click(context.localized(R.string.tab_members)); assertLegalShortList()
+                click(context.localized(R.string.tab_channels)); assertLegalShortList(expectedRows = 5)
+                click(context.localized(R.string.tab_members)); assertLegalShortList(expectedRows = 6)
                 click(context.localized(R.string.tab_settings)); assertEquals(settingsBottom, position())
             }
         } finally {
@@ -497,22 +639,25 @@ class HomeScrollStateTest {
 
     private fun position(): Position = onMain {
         val scroll = scrollNode()
+        val rowPattern = Regex("(Channel|Member) [0-9]{3}")
+        fun rowLabel(node: SemanticsNode) =
+            (texts(node) + node.config.getOrNull(SemanticsProperties.ContentDescription).orEmpty()).firstOrNull(rowPattern::matches)
         val first = descendants(scroll).filter { node ->
             node.boundsInRoot.height > 0 && node.boundsInRoot.bottom > scroll.boundsInRoot.top &&
-                texts(node).any { it.matches(Regex("(Channel|Member) [0-9]{3}")) }
+                rowLabel(node) != null
         }.minByOrNull { it.positionInRoot.y }
         Position(scroll.config[SemanticsProperties.VerticalScrollAxisRange].value(),
-            first?.let { texts(it).first { text -> text.matches(Regex("(Channel|Member) [0-9]{3}")) } },
+            first?.let(::rowLabel),
             first?.let { it.positionInRoot.y - scroll.positionInRoot.y })
     }
 
-    private fun assertLegalShortList() {
+    private fun assertLegalShortList(expectedRows: Int) {
         val position = position()
         onMain {
             val scroll = scrollNode()
             val range = scroll.config[SemanticsProperties.VerticalScrollAxisRange]
             assertTrue(range.value().isFinite() && range.value() >= 0 && range.value() <= range.maxValue())
-            assertEquals(5, scroll.config[SemanticsProperties.CollectionInfo].rowCount)
+            assertEquals(expectedRows, scroll.config[SemanticsProperties.CollectionInfo].rowCount)
         }
         assertTrue("The first visible item belongs to the shortened list: $position", requireNotNull(position.first).substringAfterLast(' ').toInt() in 1..4)
         assertTrue("The native lazy position has a legal first index", position.axis < 5 * 500)

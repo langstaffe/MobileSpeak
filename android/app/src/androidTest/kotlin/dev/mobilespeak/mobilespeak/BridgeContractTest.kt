@@ -10,6 +10,7 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.CompositionLocalProvider
@@ -32,6 +33,7 @@ import java.io.File
 import java.util.Locale
 
 class BridgeContractTest {
+    @OptIn(ExperimentalMaterial3Api::class)
     @Test fun channelDescriptionLayoutAndEditorMenu() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext
@@ -60,7 +62,7 @@ class BridgeContractTest {
                             onSurface = Palette.text, primary = Palette.accent)) {
                             Box(Modifier.fillMaxSize().statusBarsPadding()) { ChannelScreen(ui, {}, {}) }
                             val showDetail = remember { mutableStateOf(true) }
-                            if (showDetail.value) ChannelDialog(channel, ui) { showDetail.value = false }
+                            if (showDetail.value) ChannelDialog(channel, ui, onDismiss = { showDetail.value = false }, onPrivateChat = { _, _ -> })
                         }
                     }
                 }
