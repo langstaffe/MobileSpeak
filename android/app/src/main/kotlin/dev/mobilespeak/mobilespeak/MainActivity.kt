@@ -604,11 +604,11 @@ internal fun BookmarkScreen(
         }
         return
     }
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        item { Text(stringResource(R.string.bookmarks_title), fontSize = 20.sp, lineHeight = 24.sp, fontWeight = FontWeight.Bold) }
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = pageTitleInset, bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        item { PageTitle(stringResource(R.string.bookmarks_title), Modifier.padding(horizontal = pageTitleInset)) }
         items(ui.bookmarks, key = { it.id }) { bookmark ->
             var menu by remember { mutableStateOf(false) }
-            Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Palette.card).padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp).clip(RoundedCornerShape(14.dp)).background(Palette.card).padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                 Row(Modifier.weight(1f).heightIn(min = 64.dp).clickable(interactionSource = null, indication = RowPressFeedback) { onConnect(bookmark) }, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     Avatar(bookmark.title, null, false, 34, accessible = false)
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
@@ -630,7 +630,7 @@ internal fun BookmarkScreen(
             }
         }
         item {
-            Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(interactionSource = null, indication = ToolbarPressFeedback, onClick = onAdd).padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp).heightIn(min = 48.dp).clickable(interactionSource = null, indication = ToolbarPressFeedback, onClick = onAdd).padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Icon(UiIcons.Plus, null, Modifier.size(18.dp))
                 Text(stringResource(R.string.bookmark_add_server), fontSize = 17.sp, lineHeight = 20.sp)
             }
@@ -761,14 +761,20 @@ internal fun ChannelScreen(ui: SessionUiState, onSelect: (Channel) -> Unit, onCh
             }
         }
     }
-    LazyColumn(Modifier.fillMaxSize(), state = listState, contentPadding = PaddingValues(pageTitleInset), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+    val titlePaddingDifference = with(LocalDensity.current) { pageTitleInset.roundToPx() - pageTitleBottomSpacing.roundToPx() }
+    LazyColumn(Modifier.fillMaxSize(), state = listState,
+        contentPadding = PaddingValues(start = pageTitleInset, end = pageTitleInset, bottom = pageTitleInset),
+        verticalArrangement = Arrangement.spacedBy(9.dp)) {
         item {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                PageTitle(stringResource(R.string.tab_channels), Modifier.weight(1f))
+            Row {
+                // Align the button with the text inside the title's asymmetric padding.
+                PageTitle(stringResource(R.string.tab_channels), Modifier.weight(1f).padding(top = pageTitleInset)
+                    .alignBy { (it.measuredHeight + titlePaddingDifference) / 2 })
                 if (target != null) {
-                    Row(Modifier.heightIn(min = 44.dp).clickable(interactionSource = null, indication = ToolbarPressFeedback, role = Role.Button) {
+                    Row(Modifier.heightIn(min = 44.dp).alignBy { it.measuredHeight / 2 }
+                        .clickable(interactionSource = null, indication = ToolbarPressFeedback, role = Role.Button) {
                         ClientSession.cancelPushToTalk(); creating = true
-                    }.padding(bottom = pageTitleBottomSpacing), verticalAlignment = Alignment.CenterVertically,
+                    }, verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         Icon(UiIcons.Plus, null, Modifier.size(18.dp), tint = Palette.accent)
                         Text(stringResource(R.string.channel_create_title), color = Palette.accent)

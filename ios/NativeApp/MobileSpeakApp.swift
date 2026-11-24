@@ -1722,7 +1722,7 @@ struct HomeView: View {
     private var bookmarkList: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 12) {
-                Text(L10n.string("bookmarks_title")).font(.title3.bold())
+                PageTitle(key: "bookmarks_title").padding(.horizontal, PageTitle.inset)
                 ForEach(client.bookmarks) { bookmark in
                     HStack {
                         Button {
@@ -1746,10 +1746,15 @@ struct HomeView: View {
                             }
                         } label: { AppIcon(name: "more", scaledSize: 24).frame(width: 44, height: 44) }.accessibilityLabel(L10n.format("bookmark_manage", bookmark.title))
                     }.padding(12).background(Palette.card).clipShape(RoundedRectangle(cornerRadius: 14))
+                        .padding(.horizontal, 16)
                 }
-                Button { showConnect = true } label: { Label { Text(L10n.string("bookmark_add_server")) } icon: { AppIcon(name: "plus", scaledSize: 18) } }.padding(.vertical, 12)
-                if client.connected { Text(L10n.string("bookmark_disconnect_first")).font(.footnote).foregroundStyle(Palette.muted) }
-            }.padding(16)
+                Button { showConnect = true } label: { Label { Text(L10n.string("bookmark_add_server")) } icon: { AppIcon(name: "plus", scaledSize: 18) } }
+                    .padding(.vertical, 12).padding(.horizontal, 16)
+                if client.connected {
+                    Text(L10n.string("bookmark_disconnect_first")).font(.footnote).foregroundStyle(Palette.muted)
+                        .padding(.horizontal, 16)
+                }
+            }.padding(.top, PageTitle.inset).padding(.bottom, 16)
         }.background(Palette.background)
     }
     private var empty: some View {
@@ -1767,12 +1772,17 @@ struct HomeView: View {
             LazyVStack(alignment: .leading, spacing: 9) {
                 HStack {
                     PageTitle(key: "tab_channels")
+                        .padding(.top, PageTitle.inset)
+                        // Align the button with the text inside the title's asymmetric padding.
+                        .alignmentGuide(VerticalAlignment.center) { dimensions in
+                            dimensions[VerticalAlignment.center] + (PageTitle.inset - PageTitle.bottomSpacing) / 2
+                        }
                     Spacer(minLength: 0)
                     if let target = client.state.serverChatTarget {
                         Button { rootChannelCreation = ChannelCreation(target: target, parent: nil) } label: {
                             Label { Text(L10n.string("channel_create_title")) } icon: { AppIcon(name: "plus", scaledSize: 18) }
-                                .padding(.bottom, PageTitle.bottomSpacing)
                                 .frame(minHeight: 44)
+                                .contentShape(Rectangle())
                         }.foregroundStyle(Palette.accent)
                     }
                 }
@@ -1823,7 +1833,7 @@ struct HomeView: View {
                             .padding(.leading, CGFloat(min(entry.depth, 4)) * 10)
                     }
                 }
-            }.padding(PageTitle.inset)
+            }.padding(.horizontal, PageTitle.inset).padding(.bottom, PageTitle.inset)
         }
         .task(id: channelToReveal) {
             guard let id = channelToReveal else { return }
